@@ -11,6 +11,8 @@ import { handleTransactionsSubcommand } from "./transactions.js";
 import { handleFaabPaceSubcommand } from "./faabPace.js";
 import { handleBidsSubcommand } from "./bids.js";
 import { handleDeepSubcommand } from "./deep.js";
+import { handleTimelineSubcommand } from "./timeline.js";
+import { handleGraphSubcommand } from "./graph.js";
 import {
   handleLuckSubcommand,
   handleDraftProphecySubcommand,
@@ -146,6 +148,46 @@ export const canonCommand = new SlashCommandBuilder()
           .setName("seasons")
           .setDescription("Comma list or range (e.g., 2022-2025 or 2024,2025)")
           .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("timeline")
+      .setDescription("Show canon timeline events")
+      .addStringOption((opt) =>
+        opt
+          .setName("seasons")
+          .setDescription("Comma list or range (optional, e.g., 2022-2025 or 2024,2025)")
+      )
+      .addIntegerOption((opt) =>
+        opt.setName("limit").setDescription("Rows to show (default 10)").setMinValue(1).setMaxValue(50)
+      )
+      .addIntegerOption((opt) =>
+        opt.setName("offset").setDescription("Offset for pagination (default 0)").setMinValue(0)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("graph")
+      .setDescription("Render a storyline graph")
+      .addStringOption((opt) =>
+        opt
+          .setName("metric")
+          .setDescription("Graph to render")
+          .setRequired(true)
+          .addChoices(
+            { name: "luck", value: "luck" },
+            { name: "draft-prophecy", value: "draft-prophecy" }
+          )
+      )
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
       )
       .addStringOption((opt) =>
         opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
@@ -346,6 +388,8 @@ export async function handleCanonInteraction(
     await handleFaabPaceSubcommand(interaction, context);
   } else if (subcommand === "bids") {
     await handleBidsSubcommand(interaction, context);
+  } else if (subcommand === "graph") {
+    await handleGraphSubcommand(interaction, context);
   } else if (subcommand === "luck") {
     await handleLuckSubcommand(interaction, context);
   } else if (subcommand === "draft-prophecy") {
@@ -362,6 +406,8 @@ export async function handleCanonInteraction(
     await handleChampSubcommand(interaction, context);
   } else if (subcommand === "champs") {
     await handleChampsSubcommand(interaction, context);
+  } else if (subcommand === "timeline") {
+    await handleTimelineSubcommand(interaction, context);
   } else if (subcommand === "deep") {
     await handleDeepSubcommand(interaction);
   } else {

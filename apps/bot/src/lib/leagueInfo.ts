@@ -15,7 +15,11 @@ export async function getLeagueInfo(
 ): Promise<LeagueInfo> {
   const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
   const cached = existing.find((s) => s.view === "mSettings");
-  const payload = cached ? cached.payload : (await fetchSettings(context, leagueId, season));
+  if (cached) {
+    const name = extractName(cached.payload);
+    return { leagueId, name };
+  }
+  const payload = await fetchSettings(context, leagueId, season);
   const name = extractName(payload);
   return { leagueId, name };
 }
@@ -24,16 +28,21 @@ async function fetchSettings(
   context: BotContext,
   leagueId: string,
   season: number
-): Promise<unknown> {
-  const res = await context.espnClient.fetchLeague({ leagueId, season, view: "mSettings" });
-  await context.snapshotsRepo.save({
-    leagueId,
-    season,
-    view: "mSettings",
-    fetchedAt: new Date(),
-    payload: res.payload
-  });
-  return res.payload;
+): Promise<unknown | undefined> {
+  try {
+    const res = await context.espnClient.fetchLeague({ leagueId, season, view: "mSettings" });
+    await context.snapshotsRepo.save({
+      leagueId,
+      season,
+      view: "mSettings",
+      fetchedAt: new Date(),
+      payload: res.payload
+    });
+    return res.payload;
+  } catch {
+    // Swallow fetch errors; callers should fall back to leagueId when name is unavailable.
+    return undefined;
+  }
 }
 
 function extractName(payload: unknown): string | undefined {

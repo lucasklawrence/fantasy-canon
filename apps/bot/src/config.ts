@@ -6,8 +6,10 @@ import { EspnClient, HttpEspnClient } from "@fantasy-canon/espn-client";
 import {
   InMemoryLeagueConfigRepo,
   InMemorySnapshotsRepo,
+  InMemoryCanonEventsRepo,
   LeagueConfigRepo,
-  SnapshotsRepo
+  SnapshotsRepo,
+  CanonEventsRepo
 } from "@fantasy-canon/db";
 import { EnvConfig } from "@fantasy-canon/shared";
 
@@ -31,6 +33,7 @@ export interface BotContext {
   espnClient: EspnClient;
   snapshotsRepo: SnapshotsRepo;
   leagueConfigRepo: LeagueConfigRepo;
+  canonEventsRepo: CanonEventsRepo;
 }
 
 export function loadEnv(): EnvConfig {
@@ -70,6 +73,7 @@ export function createBotContext(): BotContext {
   });
   const snapshotsRepo = new InMemorySnapshotsRepo();
   const leagueConfigRepo = new InMemoryLeagueConfigRepo();
+  const canonEventsRepo = new InMemoryCanonEventsRepo();
 
-  return { env, version, espnClient, snapshotsRepo, leagueConfigRepo };
+  return { env, version, espnClient, snapshotsRepo, leagueConfigRepo, canonEventsRepo };
 }

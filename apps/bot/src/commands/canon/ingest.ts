@@ -1,6 +1,16 @@
 import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
 import { DEFAULT_VIEWS, FetchLeagueParams } from "@fantasy-canon/espn-client";
 import { BotContext } from "../../config.js";
+import { DEFAULT_VIEWS as CORE_DEFAULT_VIEWS } from "@fantasy-canon/espn-client";
+
+const EXTENDED_VIEWS = new Set([
+  "mTeam",
+  "mRoster",
+  "mDraftDetail",
+  "mSettings",
+  "mScoreboard",
+  "mStandings"
+]);
 
 export async function handleIngestSubcommand(
   interaction: ChatInputCommandInteraction,
@@ -93,7 +103,10 @@ function resolveSeasons(
 
 function resolveViews(input: string): string[] {
   if (input === "default" || input === "all") {
-    return [...DEFAULT_VIEWS];
+    // default/all: ingest core + extended so downstream commands don't need piecemeal fetches
+    const base = new Set<string>([...DEFAULT_VIEWS, ...CORE_DEFAULT_VIEWS]);
+    EXTENDED_VIEWS.forEach((v) => base.add(v));
+    return Array.from(base);
   }
   return input
     .split(",")

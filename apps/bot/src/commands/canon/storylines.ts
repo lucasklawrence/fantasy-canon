@@ -421,6 +421,13 @@ export async function handleChampSubcommand(
       `${draft}${faab ? `, ${faab}` : ""}.`
     ];
 
+    await context.canonEventsRepo.add({
+      leagueId,
+      season,
+      type: "champion",
+      message: `${champName} won ${season} (${record})`
+    });
+
     await interaction.editReply({
       content: lines.join("\n"),
       flags: MessageFlags.Ephemeral
