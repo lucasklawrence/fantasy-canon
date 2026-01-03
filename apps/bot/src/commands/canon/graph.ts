@@ -2,7 +2,16 @@ import { AttachmentBuilder, ChatInputCommandInteraction, MessageFlags } from "di
 import { BotContext } from "../../config.js";
 import { buildTeamNameMap } from "../../lib/teamNames.js";
 import { getLeagueInfo } from "../../lib/leagueInfo.js";
-import { renderLuckGraph, renderDraftProphecyGraph } from "@fantasy-canon/renderer";
+import {
+  renderDraftProphecyGraph,
+  renderFaabPaceGraph,
+  renderLuckGraph
+} from "@fantasy-canon/renderer";
+import {
+  ensureTransactionsPayload,
+  getTransactionTeamId,
+  isWaiverSpend
+} from "../../lib/transactions.js";
 
 export async function handleGraphSubcommand(
   interaction: ChatInputCommandInteraction,
@@ -35,8 +44,7 @@ export async function handleGraphSubcommand(
       const avgPoints = average(teams.map((t) => t.pointsFor));
       const avgWins = average(teams.map((t) => t.wins));
       const points = teams.map((t) => {
-        const expectedWins =
-          avgPoints > 0 ? (t.pointsFor / avgPoints) * avgWins : avgWins;
+        const expectedWins = avgPoints > 0 ? (t.pointsFor / avgPoints) * avgWins : avgWins;
         return {
           team: nameMap.get(t.id) ?? `Team ${t.id}`,
           wins: t.wins,
@@ -48,7 +56,14 @@ export async function handleGraphSubcommand(
         subtitle: `Season ${season}`,
         points
       });
-      await sendBuffer(interaction, buffer, `${leagueId}-luck-${season}.txt`, leagueInfo.name, season, "Luck graph");
+      await sendBuffer(
+        interaction,
+        buffer,
+        `${leagueId}-luck-${season}.png`,
+        leagueInfo.name,
+        season,
+        "Luck graph"
+      );
     } else if (metric === "draft-prophecy") {
       const points = teams
         .filter((t) => t.projectedRank !== undefined || t.finishRank !== undefined)
@@ -72,10 +87,43 @@ export async function handleGraphSubcommand(
       await sendBuffer(
         interaction,
         buffer,
-        `${leagueId}-draft-${season}.txt`,
+        `${leagueId}-draft-${season}.png`,
         leagueInfo.name,
         season,
         "Draft Prophecy"
+      );
+    } else if (metric === "faab-pace") {
+      const mSettingsPayload = await ensureSnapshot(context, leagueId, season, "mSettings");
+      const mTxPayload = await ensureTransactionsPayload(context, leagueId, season);
+      if (!mTxPayload) {
+        await interaction.editReply({
+          content: "Transactions payload not available for this league/season.",
+          flags: MessageFlags.Ephemeral
+        });
+        return;
+      }
+      const budget = extractBudget(mSettingsPayload) ?? 100;
+      const lines = buildFaabLines(mTxPayload, nameMap);
+      if (lines.length === 0) {
+        await interaction.editReply({
+          content: "No FAAB spend data found.",
+          flags: MessageFlags.Ephemeral
+        });
+        return;
+      }
+      const buffer = await renderFaabPaceGraph({
+        title: `${leagueInfo.name ?? leagueId} • FAAB pace`,
+        subtitle: `Season ${season}`,
+        budget,
+        lines
+      });
+      await sendBuffer(
+        interaction,
+        buffer,
+        `${leagueId}-faabpace-${season}.png`,
+        leagueInfo.name,
+        season,
+        "FAAB pace"
       );
     } else {
       await interaction.editReply({
@@ -179,4 +227,72 @@ function average(values: number[]): number {
   if (!values.length) return 0;
   const sum = values.reduce((acc, v) => acc + v, 0);
   return sum / values.length;
+}
+
+function buildFaabLines(
+  mTransactionsPayload: { transactions?: unknown[] },
+  nameMap: Map<number, string>
+): Array<{ team: string; weekly: number[] }> {
+  const spendByTeamWeek = new Map<number, Map<number, number>>();
+  if (mTransactionsPayload && Array.isArray(mTransactionsPayload.transactions)) {
+    for (const tx of mTransactionsPayload.transactions) {
+      if (!tx || typeof tx !== "object") continue;
+      if (!isWaiverSpend(tx)) continue;
+      const t = tx as { bidAmount?: unknown; scoringPeriodId?: unknown };
+      const bid = typeof t.bidAmount === "number" ? t.bidAmount : undefined;
+      if (bid === undefined) continue;
+      const week = typeof t.scoringPeriodId === "number" ? t.scoringPeriodId : undefined;
+      const teamId = getTransactionTeamId(tx);
+      if (teamId === undefined || week === undefined) continue;
+      const weekMap = spendByTeamWeek.get(teamId) ?? new Map<number, number>();
+      weekMap.set(week, (weekMap.get(week) ?? 0) + bid);
+      spendByTeamWeek.set(teamId, weekMap);
+    }
+  }
+
+  let maxWeek = 0;
+  spendByTeamWeek.forEach((weekMap) => {
+    weekMap.forEach((_, w) => {
+      if (w > maxWeek) maxWeek = w;
+    });
+  });
+
+  const totals: Array<{ teamId: number; total: number }> = [];
+  spendByTeamWeek.forEach((weekMap, teamId) => {
+    let total = 0;
+    for (const v of weekMap.values()) total += v;
+    totals.push({ teamId, total });
+  });
+
+  const lines: Array<{ team: string; weekly: number[] }> = [];
+  const topTotals = totals.sort((a, b) => b.total - a.total).slice(0, 8);
+  for (const { teamId } of topTotals) {
+    const weekMap = spendByTeamWeek.get(teamId);
+    if (!weekMap) continue;
+    const cumulative: number[] = [];
+    let running = 0;
+    for (let w = 1; w <= maxWeek; w += 1) {
+      running += weekMap.get(w) ?? 0;
+      cumulative.push(running);
+    }
+    lines.push({
+      team: nameMap.get(teamId) ?? `Team ${teamId}`,
+      weekly: cumulative
+    });
+  }
+  return lines;
+}
+
+function extractBudget(settingsPayload: unknown): number | undefined {
+  if (!settingsPayload || typeof settingsPayload !== "object") return undefined;
+  const settings = (settingsPayload as { settings?: unknown }).settings;
+  const acquisition =
+    settings && typeof settings === "object"
+      ? (settings as { acquisitionSettings?: unknown }).acquisitionSettings
+      : undefined;
+  const budget =
+    acquisition && typeof acquisition === "object"
+      ? (acquisition as { acquisitionBudget?: unknown }).acquisitionBudget
+      : undefined;
+  return typeof budget === "number" && Number.isFinite(budget) ? budget : undefined;
 }

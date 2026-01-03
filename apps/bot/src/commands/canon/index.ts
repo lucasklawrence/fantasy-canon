@@ -183,7 +183,8 @@ export const canonCommand = new SlashCommandBuilder()
           .setRequired(true)
           .addChoices(
             { name: "luck", value: "luck" },
-            { name: "draft-prophecy", value: "draft-prophecy" }
+            { name: "draft-prophecy", value: "draft-prophecy" },
+            { name: "faab-pace", value: "faab-pace" }
           )
       )
       .addIntegerOption((opt) =>
