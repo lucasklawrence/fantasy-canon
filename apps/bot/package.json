@@ -1,0 +1,22 @@
+{
+  "name": "@fantasy-canon/bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "node --loader ts-node/esm src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --ext .ts",
+    "deploy": "node --loader ts-node/esm deploy-commands.ts"
+  },
+  "dependencies": {
+    "@fantasy-canon/core": "workspace:*",
+    "@fantasy-canon/db": "workspace:*",
+    "@fantasy-canon/espn-client": "workspace:*",
+    "@fantasy-canon/shared": "workspace:*",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.0"
+  }
+}

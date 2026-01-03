@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2020"],
+    "types": ["node", "vitest/globals"],
+    "baseUrl": ".",
+    "paths": {
+      "@fantasy-canon/shared": ["packages/shared/src/index.ts"],
+      "@fantasy-canon/shared/*": ["packages/shared/src/*"],
+      "@fantasy-canon/espn-client": ["packages/espn-client/src/index.ts"],
+      "@fantasy-canon/espn-client/*": ["packages/espn-client/src/*"],
+      "@fantasy-canon/core": ["packages/core/src/index.ts"],
+      "@fantasy-canon/core/*": ["packages/core/src/*"],
+      "@fantasy-canon/db": ["packages/db/src/index.ts"],
+      "@fantasy-canon/db/*": ["packages/db/src/*"],
+      "@fantasy-canon/renderer": ["packages/renderer/src/index.ts"],
+      "@fantasy-canon/renderer/*": ["packages/renderer/src/*"]
+    },
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "noEmit": true
+  }
+}
