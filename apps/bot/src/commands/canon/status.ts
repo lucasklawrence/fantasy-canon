@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction } from "discord.js";
+import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
 import { BotContext } from "../../config.js";
 
 export async function handleStatusSubcommand(
@@ -9,14 +9,16 @@ export async function handleStatusSubcommand(
 
   const leagueSummary = env.defaultLeagueId ?? "not set";
   const databaseSummary = env.databaseUrl ? "configured" : "not configured";
+  const authMode = env.espnS2 || env.espnSwid ? "cookies provided" : "public";
 
   await interaction.reply({
-    ephemeral: true,
     content: [
       "Canon online.",
       `Version: v${version}`,
       `League: ${leagueSummary}`,
-      `Database: ${databaseSummary}`
-    ].join("\n")
+      `Database: ${databaseSummary}`,
+      `ESPN auth: ${authMode}`
+    ].join("\n"),
+    flags: MessageFlags.Ephemeral
   });
 }

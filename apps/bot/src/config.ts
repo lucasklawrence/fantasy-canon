@@ -38,6 +38,8 @@ export function loadEnv(): EnvConfig {
   const discordAppId = process.env.DISCORD_APP_ID;
   const databaseUrl = process.env.DATABASE_URL;
   const defaultLeagueId = process.env.ESPN_LEAGUE_ID;
+  const espnS2 = process.env.ESPN_S2;
+  const espnSwid = process.env.ESPN_SWID;
 
   if (!discordToken) {
     throw new Error("DISCORD_TOKEN is required");
@@ -51,14 +53,21 @@ export function loadEnv(): EnvConfig {
     discordToken,
     discordAppId,
     databaseUrl,
-    defaultLeagueId
+    defaultLeagueId,
+    espnS2,
+    espnSwid
   };
 }
 
 export function createBotContext(): BotContext {
   const env = loadEnv();
   const version = pkg.version ?? "0.0.0";
-  const espnClient: EspnClient = new HttpEspnClient();
+  const espnClient: EspnClient = new HttpEspnClient(undefined, {
+    cookies: {
+      espnS2: env.espnS2,
+      swid: env.espnSwid
+    }
+  });
   const snapshotsRepo = new InMemorySnapshotsRepo();
   const leagueConfigRepo = new InMemoryLeagueConfigRepo();
 

@@ -8,7 +8,7 @@ async function start(): Promise<void> {
   const context = createBotContext();
   const client = createDiscordClient();
 
-  client.once("ready", () => {
+  client.once("clientReady", () => {
     console.log(`Fantasy Canon bot ready as ${client.user?.tag ?? "unknown user"}`);
   });
 

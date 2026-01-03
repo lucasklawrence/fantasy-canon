@@ -10,6 +10,8 @@ export interface EnvConfig {
   discordAppId: string;
   databaseUrl?: string;
   defaultLeagueId?: string;
+  espnS2?: string;
+  espnSwid?: string;
 }
 
 export interface LeagueConfig {
