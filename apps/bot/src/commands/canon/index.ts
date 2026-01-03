@@ -10,6 +10,17 @@ import { handleLeaderboardSubcommand } from "./leaderboard.js";
 import { handleTransactionsSubcommand } from "./transactions.js";
 import { handleFaabPaceSubcommand } from "./faabPace.js";
 import { handleBidsSubcommand } from "./bids.js";
+import { handleDeepSubcommand } from "./deep.js";
+import {
+  handleLuckSubcommand,
+  handleDraftProphecySubcommand,
+  handleStreaksSubcommand,
+  handleManagerArchetypesSubcommand,
+  handleTradeBlockSubcommand,
+  handleHomeAwaySubcommand,
+  handleChampSubcommand,
+  handleChampsSubcommand
+} from "./storylines.js";
 
 export const canonCommand = new SlashCommandBuilder()
   .setName("canon")
@@ -44,6 +55,97 @@ export const canonCommand = new SlashCommandBuilder()
       )
       .addIntegerOption((opt) =>
         opt.setName("limit").setDescription("Number of teams to show (default 12)").setMinValue(1)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("luck")
+      .setDescription("Luck vs win outcomes")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("draft-prophecy")
+      .setDescription("Draft expectations vs results")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("streaks")
+      .setDescription("Longest and current streaks")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("manager-archetypes")
+      .setDescription("Classify managers by behavior")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("tradeblock")
+      .setDescription("Teams with the busiest trade block")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("homeaway")
+      .setDescription("Home vs away performance")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("champ")
+      .setDescription("Announce the season champion")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("champs")
+      .setDescription("List champions for seasons")
+      .addStringOption((opt) =>
+        opt
+          .setName("seasons")
+          .setDescription("Comma list or range (e.g., 2022-2025 or 2024,2025)")
+          .setRequired(true)
       )
       .addStringOption((opt) =>
         opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
@@ -120,6 +222,9 @@ export const canonCommand = new SlashCommandBuilder()
   )
   .addSubcommand((sub) =>
     sub.setName("ping").setDescription("Simple health check (pong)")
+  )
+  .addSubcommand((sub) =>
+    sub.setName("deep").setDescription("Deep")
   )
   .addSubcommand((sub) =>
     sub
@@ -241,6 +346,24 @@ export async function handleCanonInteraction(
     await handleFaabPaceSubcommand(interaction, context);
   } else if (subcommand === "bids") {
     await handleBidsSubcommand(interaction, context);
+  } else if (subcommand === "luck") {
+    await handleLuckSubcommand(interaction, context);
+  } else if (subcommand === "draft-prophecy") {
+    await handleDraftProphecySubcommand(interaction, context);
+  } else if (subcommand === "streaks") {
+    await handleStreaksSubcommand(interaction, context);
+  } else if (subcommand === "manager-archetypes") {
+    await handleManagerArchetypesSubcommand(interaction, context);
+  } else if (subcommand === "tradeblock") {
+    await handleTradeBlockSubcommand(interaction, context);
+  } else if (subcommand === "homeaway") {
+    await handleHomeAwaySubcommand(interaction, context);
+  } else if (subcommand === "champ") {
+    await handleChampSubcommand(interaction, context);
+  } else if (subcommand === "champs") {
+    await handleChampsSubcommand(interaction, context);
+  } else if (subcommand === "deep") {
+    await handleDeepSubcommand(interaction);
   } else {
     await interaction.reply({
       content: `Subcommand "${subcommand}" is not implemented yet.`,

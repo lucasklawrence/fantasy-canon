@@ -6,6 +6,7 @@ import {
   getTransactionTeamId,
   isWaiverSpend
 } from "../../lib/transactions.js";
+import { getLeagueInfo } from "../../lib/leagueInfo.js";
 
 interface FaabPaceRow {
   teamId: number;
@@ -71,8 +72,10 @@ export async function handleFaabPaceSubcommand(
       return `${headline} — pace: ${paceLabel}, weeks tracked: ${row.weeks}`;
     });
 
+    const leagueInfo = await getLeagueInfo(context, leagueId, season);
+    const leagueLabel = leagueInfo.name ?? leagueId;
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • FAAB pace (${mode})`, ...lines].join(
+      content: [`League ${leagueLabel} • Season ${season} • FAAB pace (${mode})`, ...lines].join(
         "\n"
       ),
       flags: MessageFlags.Ephemeral
@@ -128,7 +131,8 @@ function computeFaabPace(
   nameMap: Map<number, string>
 ): FaabPaceRow[] {
   const totalsByTeam = new Map<number, number>();
-  const weeksByTeam = new Map<number, number>();
+  const weeksByTeam = new Map<number, Set<number>>();
+  const spendByTeamWeek = new Map<number, Map<number, number>>();
 
   if (mTransactionsPayload && Array.isArray(mTransactionsPayload.transactions)) {
     for (const tx of mTransactionsPayload.transactions) {
@@ -142,25 +146,36 @@ function computeFaabPace(
       if (teamId === undefined) continue;
       totalsByTeam.set(teamId, (totalsByTeam.get(teamId) ?? 0) + bid);
       if (week !== undefined) {
-        weeksByTeam.set(teamId, Math.max(weeksByTeam.get(teamId) ?? 0, week));
+          const set = weeksByTeam.get(teamId) ?? new Set<number>();
+          set.add(week);
+          weeksByTeam.set(teamId, set);
+          const perWeek = spendByTeamWeek.get(teamId) ?? new Map<number, number>();
+          perWeek.set(week, (perWeek.get(week) ?? 0) + bid);
+          spendByTeamWeek.set(teamId, perWeek);
       }
     }
   }
 
   const rows: FaabPaceRow[] = [];
   for (const [teamId, total] of totalsByTeam.entries()) {
-    const weeks = weeksByTeam.get(teamId) ?? 0;
-    const frontWeeks = Math.max(1, Math.ceil(weeks / 2));
-    const perWeek = weeks > 0 ? total / weeks : total;
-    const frontSpend = perWeek * frontWeeks;
-    const frontShare = total > 0 ? frontSpend / total : 0;
+    const weekSet = weeksByTeam.get(teamId) ?? new Set<number>();
+    const maxWeek = Math.max(0, ...weekSet.values());
+    const frontBoundary = maxWeek > 0 ? Math.ceil(maxWeek / 2) : 0;
+    const perWeekSpend = spendByTeamWeek.get(teamId) ?? new Map<number, number>();
+    let frontSpend = 0;
+    for (const [week, amount] of perWeekSpend.entries()) {
+      if (week <= frontBoundary) {
+        frontSpend += amount;
+      }
+    }
+    const frontShare = total > 0 && maxWeek > 0 ? frontSpend / total : 0.5;
     rows.push({
       teamId,
       name: nameMap.get(teamId) ?? `Team ${teamId}`,
       total,
       left: Math.max(budget - total, 0),
       frontShare,
-      weeks
+      weeks: maxWeek
     });
   }
 

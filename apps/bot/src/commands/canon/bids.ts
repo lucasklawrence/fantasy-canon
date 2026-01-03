@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
 import { BotContext } from "../../config.js";
 import { buildTeamNameMap } from "../../lib/teamNames.js";
 import { ensureTransactionsPayload, getTransactionTeamId, isWaiverSpend } from "../../lib/transactions.js";
+import { getLeagueInfo } from "../../lib/leagueInfo.js";
 
 interface PlayerBid {
   playerId: number;
@@ -33,8 +34,11 @@ export async function handleBidsSubcommand(
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
+    const leagueInfo = await getLeagueInfo(context, leagueId, season);
     const mTeamPayload: unknown = await ensureSnapshot(context, leagueId, season, "mTeam");
+    const mRosterPayload: unknown = await ensureSnapshot(context, leagueId, season, "mRoster");
     const teamNames = buildTeamNameMap(mTeamPayload);
+    const playerNames = buildPlayerNameMap(mRosterPayload);
     const mTxPayload =
       (await ensureTransactionsPayload(context, leagueId, season)) as
         | { transactions?: unknown[] }
@@ -46,7 +50,7 @@ export async function handleBidsSubcommand(
       });
       return;
     }
-    const playerBids = groupBidsByPlayer(mTxPayload, teamNames);
+    const playerBids = groupBidsByPlayer(mTxPayload, teamNames, playerNames);
 
     const filtered =
       mode === "lopsided"
@@ -77,8 +81,9 @@ export async function handleBidsSubcommand(
       return `${pb.playerLabel} — ${descriptor} — ${bidStrings}`;
     });
 
+    const leagueLabel = leagueInfo.name ?? leagueId;
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • ${mode} bids`, ...lines].join("\n"),
+      content: [`League ${leagueLabel} • Season ${season} • ${mode} bids`, ...lines].join("\n"),
       flags: MessageFlags.Ephemeral
     });
   } catch (error) {
@@ -111,7 +116,11 @@ async function ensureSnapshot(
   return res.payload;
 }
 
-function groupBidsByPlayer(payload: unknown, nameMap: Map<number, string>): PlayerBid[] {
+function groupBidsByPlayer(
+  payload: unknown,
+  nameMap: Map<number, string>,
+  playerMap: Map<number, string>
+): PlayerBid[] {
   if (!payload || typeof payload !== "object") return [];
   const maybeTxs = (payload as { transactions?: unknown }).transactions;
   if (!Array.isArray(maybeTxs)) return [];
@@ -144,7 +153,7 @@ function groupBidsByPlayer(payload: unknown, nameMap: Map<number, string>): Play
     const existing = map.get(playerId);
     const entry: PlayerBid = existing ?? {
       playerId,
-      playerLabel: buildPlayerLabel(t.items, playerId),
+      playerLabel: buildPlayerLabel(t.items, playerId, playerMap),
       bids: []
     };
     entry.bids.push({ teamId, teamName, bid, date });
@@ -166,28 +175,70 @@ function extractPlayerId(items: unknown): number | undefined {
   return undefined;
 }
 
-function buildPlayerLabel(items: unknown, fallbackId: number): string {
+function buildPlayerLabel(items: unknown, fallbackId: number, playerMap: Map<number, string>): string {
+  const fromMap = playerMap.get(fallbackId);
+  if (fromMap) return fromMap;
   if (!Array.isArray(items)) return `Player ${fallbackId}`;
   for (const item of items) {
     if (!item || typeof item !== "object") continue;
-    const i = item as { playerId?: unknown; targetId?: unknown; player?: unknown };
-    const player =
+    const i = item as {
+      playerId?: unknown;
+      targetId?: unknown;
+      player?: unknown;
+      playerPoolEntry?: unknown;
+      fullName?: unknown;
+    };
+    const directPlayer =
       i.player && typeof i.player === "object"
         ? (i.player as { fullName?: unknown; defaultPositionId?: unknown })
         : undefined;
+    const poolPlayer =
+      i.playerPoolEntry && typeof i.playerPoolEntry === "object"
+        ? ((i.playerPoolEntry as { player?: unknown }).player as
+            | { fullName?: unknown; defaultPositionId?: unknown }
+            | undefined)
+        : undefined;
     const nameField =
-      player && typeof player.fullName === "string"
-        ? player.fullName
-        : typeof (i as { fullName?: unknown }).fullName === "string"
-          ? (i as { fullName?: unknown }).fullName
-          : undefined;
-    const position =
-      player && typeof player.defaultPositionId === "number"
-        ? ` (pos ${player.defaultPositionId})`
-        : "";
+      (directPlayer && typeof directPlayer.fullName === "string" ? directPlayer.fullName : undefined) ??
+      (poolPlayer && typeof poolPlayer.fullName === "string" ? poolPlayer.fullName : undefined) ??
+      (typeof i.fullName === "string" ? i.fullName : undefined);
+    const pos =
+      (directPlayer && typeof directPlayer.defaultPositionId === "number"
+        ? directPlayer.defaultPositionId
+        : poolPlayer && typeof poolPlayer.defaultPositionId === "number"
+          ? poolPlayer.defaultPositionId
+          : undefined) ?? undefined;
+    const position = pos !== undefined ? ` (pos ${pos})` : "";
     if (typeof nameField === "string") return `${nameField}${position}`;
   }
   return `Player ${fallbackId}`;
+}
+
+function buildPlayerNameMap(rosterPayload: unknown): Map<number, string> {
+  const map = new Map<number, string>();
+  if (!rosterPayload || typeof rosterPayload !== "object") return map;
+  const teams = (rosterPayload as { teams?: unknown }).teams;
+  if (!Array.isArray(teams)) return map;
+  for (const team of teams) {
+    if (!team || typeof team !== "object") continue;
+    const entries = (team as { roster?: unknown }).roster;
+    const entriesArr = entries && typeof entries === "object" ? (entries as { entries?: unknown }).entries : undefined;
+    if (!Array.isArray(entriesArr)) continue;
+    for (const entry of entriesArr) {
+      if (!entry || typeof entry !== "object") continue;
+      const pe = (entry as { playerPoolEntry?: unknown }).playerPoolEntry;
+      const player =
+        pe && typeof pe === "object" && (pe as { player?: unknown }).player && typeof (pe as { player?: unknown }).player === "object"
+          ? ((pe as { player: { id?: unknown; fullName?: unknown } }).player as { id?: unknown; fullName?: unknown })
+          : undefined;
+      const id = Number(player?.id);
+      const name = typeof player?.fullName === "string" ? player.fullName : undefined;
+      if (Number.isFinite(id) && name) {
+        map.set(id, name);
+      }
+    }
+  }
+  return map;
 }
 
 function findClose(playerBids: PlayerBid[], spreadThreshold: number, limit: number): PlayerBid[] {
