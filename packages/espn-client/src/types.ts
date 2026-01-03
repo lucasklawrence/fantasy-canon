@@ -4,6 +4,8 @@ export interface FetchLeagueParams {
   leagueId: string;
   season: SeasonYear;
   view: string;
+  filter?: unknown;
+  scoringPeriodId?: number;
 }
 
 export interface FetchLeagueResult {

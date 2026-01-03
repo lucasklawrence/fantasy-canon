@@ -22,8 +22,15 @@ export class HttpEspnClient implements EspnClient {
   ) {}
 
   buildUrl(params: FetchLeagueParams): string {
-    const { leagueId, season, view } = params;
-    return `${this.baseUrl}/apis/v3/games/ffl/seasons/${season}/segments/0/leagues/${leagueId}?view=${view}`;
+    const { leagueId, season, view, scoringPeriodId } = params;
+    const url = new URL(
+      `${this.baseUrl}/apis/v3/games/ffl/seasons/${season}/segments/0/leagues/${leagueId}`
+    );
+    url.searchParams.set("view", view);
+    if (typeof scoringPeriodId === "number") {
+      url.searchParams.set("scoringPeriodId", String(scoringPeriodId));
+    }
+    return url.toString();
   }
 
   async fetchLeague(params: FetchLeagueParams): Promise<FetchLeagueResult> {
@@ -45,6 +52,61 @@ export class HttpEspnClient implements EspnClient {
         const cookieHeader = this.buildCookieHeader();
         if (cookieHeader) {
           headers.Cookie = cookieHeader;
+        }
+
+        if (params.filter) {
+          // Normalize/augment filter to ensure ESPN accepts limit-based requests.
+          // Some callers provide `sortMap`; ESPN requires a recognized `sort` when
+          // a `limit` is present. Copy `sortMap` to `sort` or add a default
+          // sort on `executionDate` desc when missing.
+          const filter = JSON.parse(JSON.stringify(params.filter)) as any;
+          try {
+            if (filter && filter.transactions) {
+              const tx = filter.transactions as Record<string, unknown>;
+              const hasLimit = tx.limit !== undefined && tx.limit !== null;
+              const hasSort = tx.sort !== undefined && tx.sort !== null;
+              const hasSortMap = tx.sortMap !== undefined && tx.sortMap !== null;
+              if (hasSortMap && !hasSort) {
+                try {
+                  const sm = tx.sortMap as Record<string, any>;
+                  const arr: unknown[] = Object.keys(sm).map((k) => {
+                    const v = sm[k] as any;
+                    return {
+                      sortId: k,
+                      sortPriority: v && v.sortPriority !== undefined ? v.sortPriority : 1,
+                      sortAsc: v && v.sortAsc !== undefined ? v.sortAsc : false
+                    };
+                  });
+                  tx.sort = arr;
+                } catch {
+                  tx.sort = tx.sortMap;
+                }
+                // remove original sortMap to avoid confusing the API
+                delete tx.sortMap;
+              }
+              if (hasLimit && !hasSort && !hasSortMap) {
+                tx.sort = [
+                  {
+                    sortId: "executionDate",
+                    sortPriority: 1,
+                    sortAsc: false
+                  }
+                ];
+              }
+            }
+          } catch {
+            // If normalization fails for any reason, fall back to original filter
+          }
+          headers["x-fantasy-filter"] = JSON.stringify(filter);
+        }
+
+        if (process.env.DEBUG_ESPN === "1") {
+          const maskedHeaders = {
+            ...headers,
+            Cookie: headers.Cookie ? "[set]" : "[missing]",
+            "x-fantasy-filter": headers["x-fantasy-filter"] ?? "[missing]"
+          };
+          console.log("ESPN request", { url, headers: maskedHeaders });
         }
 
         const response = await fetch(url, {
