@@ -75,7 +75,7 @@ export async function handleLuckSubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} ƒ?› Season ${season} ƒ?› Luck`, ...lines].join("\n"),
+      content: [`League ${leagueLabel} • Season ${season} • Luck`, ...lines].join("\n"),
       flags: MessageFlags.Ephemeral
     });
   } catch (error) {
@@ -149,9 +149,7 @@ export async function handleDraftProphecySubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} ƒ?› Season ${season} ƒ?› Draft Prophecy`, ...lines].join(
-        "\n"
-      ),
+      content: [`League ${leagueLabel} • Season ${season} • Draft Prophecy`, ...lines].join("\n"),
       flags: MessageFlags.Ephemeral
     });
   } catch (error) {
@@ -210,7 +208,7 @@ export async function handleStreaksSubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} ƒ?› Season ${season} ƒ?› Streaks`, ...lines].join("\n"),
+      content: [`League ${leagueLabel} • Season ${season} • Streaks`, ...lines].join("\n"),
       flags: MessageFlags.Ephemeral
     });
   } catch (error) {
@@ -271,7 +269,7 @@ export async function handleManagerArchetypesSubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} ƒ?› Season ${season} ƒ?› Manager archetypes`, ...lines].join(
+      content: [`League ${leagueLabel} • Season ${season} • Manager archetypes`, ...lines].join(
         "\n"
       ),
       flags: MessageFlags.Ephemeral
@@ -325,7 +323,7 @@ export async function handleTradeBlockSubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} ƒ?› Season ${season} ƒ?› Trade block`, ...lines].join("\n"),
+      content: [`League ${leagueLabel} • Season ${season} • Trade block`, ...lines].join("\n"),
       flags: MessageFlags.Ephemeral
     });
   } catch (error) {
@@ -378,7 +376,7 @@ export async function handleHomeAwaySubcommand(
     }
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} ƒ?› Season ${season} ƒ?› Home/Away`, ...lines].join("\n"),
+      content: [`League ${leagueLabel} • Season ${season} • Home/Away`, ...lines].join("\n"),
       flags: MessageFlags.Ephemeral
     });
   } catch (error) {
