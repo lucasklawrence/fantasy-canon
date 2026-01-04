@@ -13,6 +13,7 @@ import { handleBidsSubcommand } from "./bids.js";
 import { handleDeepSubcommand } from "./deep.js";
 import { handleTimelineSubcommand } from "./timeline.js";
 import { handleGraphSubcommand } from "./graph.js";
+import { handleRivalrySubcommand, handleRivalriesSubcommand } from "./rivalries.js";
 import {
   handleLuckSubcommand,
   handleDraftProphecySubcommand,
@@ -189,6 +190,37 @@ export const canonCommand = new SlashCommandBuilder()
       )
       .addIntegerOption((opt) =>
         opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("rivalry")
+      .setDescription("Head-to-head rivalry between two teams")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("teama").setDescription("Team A name or ID").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("teamb").setDescription("Team B name or ID").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("rivalries")
+      .setDescription("Top head-to-head rivalries by win differential")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addIntegerOption((opt) =>
+        opt.setName("limit").setDescription("Number of rows (default 5)").setMinValue(1)
       )
       .addStringOption((opt) =>
         opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
@@ -407,6 +439,10 @@ export async function handleCanonInteraction(
     await handleChampSubcommand(interaction, context);
   } else if (subcommand === "champs") {
     await handleChampsSubcommand(interaction, context);
+  } else if (subcommand === "rivalry") {
+    await handleRivalrySubcommand(interaction, context);
+  } else if (subcommand === "rivalries") {
+    await handleRivalriesSubcommand(interaction, context);
   } else if (subcommand === "timeline") {
     await handleTimelineSubcommand(interaction, context);
   } else if (subcommand === "deep") {
