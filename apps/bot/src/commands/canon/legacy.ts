@@ -22,6 +22,9 @@ interface TeamInfo {
   totalMoves: number;
 }
 
+/**
+ * Handles `/canon legacy` for a single season, computing luck and dominant archetypes for that year.
+ */
 export async function handleLegacySubcommand(
   interaction: ChatInputCommandInteraction,
   context: BotContext
@@ -100,6 +103,10 @@ export async function handleLegacySubcommand(
   }
 }
 
+/**
+ * Handles `/canon legacy history`, aggregating team performance across multiple seasons and
+ * computing franchise-level awards.
+ */
 export async function handleLegacyHistorySubcommand(
   interaction: ChatInputCommandInteraction,
   context: BotContext
@@ -209,6 +216,9 @@ export async function handleLegacyHistorySubcommand(
   }
 }
 
+/**
+ * Normalizes the ESPN mTeam payload into a TeamInfo list with move and scoring totals.
+ */
 function extractTeams(payload: unknown, nameMap: Map<number, string>): TeamInfo[] {
   if (!payload || typeof payload !== "object") return [];
   const maybeTeams = (payload as { teams?: unknown }).teams;
@@ -261,6 +271,9 @@ function extractTeams(payload: unknown, nameMap: Map<number, string>): TeamInfo[
   return teams;
 }
 
+/**
+ * Ranks teams by a derived value, returning a map of team entry to 1-based rank.
+ */
 function rankBy(
   teams: TeamInfo[],
   getter: (t: TeamInfo) => number,
@@ -273,12 +286,18 @@ function rankBy(
   return ranks;
 }
 
+/**
+ * Computes win percentage, guarding against divide-by-zero for winless teams.
+ */
 function winPct(t: TeamInfo): number {
   const total = t.wins + t.losses;
   if (total === 0) return 0;
   return t.wins / total;
 }
 
+/**
+ * Parses a comma/range season list (e.g., "2022-2024,2026") into sorted unique numbers.
+ */
 function parseSeasonList(text: string): number[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
@@ -301,6 +320,9 @@ function parseSeasonList(text: string): number[] {
   return Array.from(new Set(seasons)).sort((a, b) => a - b);
 }
 
+/**
+ * Returns a cached league snapshot for a view and season, fetching and saving it when absent.
+ */
 async function ensureSnapshot(
   context: BotContext,
   leagueId: string,
