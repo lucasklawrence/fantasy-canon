@@ -26,6 +26,9 @@ interface ManagerAggregate {
   teamNames: { season: number; name: string }[];
 }
 
+/**
+ * Handles `/canon managers`, aggregating manager performance across seasons with sortable rollups.
+ */
 export async function handleManagersSubcommand(
   interaction: ChatInputCommandInteraction,
   context: BotContext
@@ -156,7 +159,7 @@ export async function handleManagersSubcommand(
       }`;
     });
 
-    let lines = [header, ...body];
+    const lines = [header, ...body];
 
     // Respect Discord 2000-char limit by trimming rows if necessary.
     let dropped = 0;
@@ -185,6 +188,9 @@ export async function handleManagersSubcommand(
   }
 }
 
+/**
+ * Extracts team-level stats and manager identities from an ESPN mTeam payload.
+ */
 function extractTeams(
   payload: unknown,
   nameMap: Map<number, string>,
@@ -262,6 +268,9 @@ function extractTeams(
   return results;
 }
 
+/**
+ * Builds a map of owner ID to preferred display name from the league members list.
+ */
 function buildOwnerDisplayMap(payload: unknown): Map<string, string> {
   const map = new Map<string, string>();
   if (!payload || typeof payload !== "object") return map;
@@ -289,6 +298,9 @@ function buildOwnerDisplayMap(payload: unknown): Map<string, string> {
   return map;
 }
 
+/**
+ * Derives the best-available manager identifier, falling back to team slot when missing.
+ */
 function getManagerId(team: TeamLike, fallbackId: number): string {
   const primary = typeof team.primaryOwner === "string" && team.primaryOwner ? team.primaryOwner : undefined;
   if (primary) return primary;
@@ -304,6 +316,9 @@ function getManagerId(team: TeamLike, fallbackId: number): string {
   return `team-${fallbackId}`;
 }
 
+/**
+ * Picks a displayable manager name from owners/owner metadata on the team entry.
+ */
 function getManagerName(team: TeamLike): string | undefined {
   if (Array.isArray(team.owners)) {
     for (const entry of team.owners) {
@@ -320,6 +335,9 @@ function getManagerName(team: TeamLike): string | undefined {
   return undefined;
 }
 
+/**
+ * Produces a concise list of distinct team names with seasons, truncated after three entries.
+ */
 function summarizeTeams(entries: { season: number; name: string }[]): string {
   const unique = new Map<string, number>();
   for (const entry of entries) {
@@ -336,6 +354,9 @@ function summarizeTeams(entries: { season: number; name: string }[]): string {
   return `${firstThree}, ...`;
 }
 
+/**
+ * Parses a comma/range season string into sorted unique season numbers.
+ */
 function parseSeasonList(text: string): number[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
@@ -358,6 +379,9 @@ function parseSeasonList(text: string): number[] {
   return Array.from(new Set(seasons)).sort((a, b) => a - b);
 }
 
+/**
+ * Returns a cached ESPN snapshot for the given league/season/view, fetching and saving if absent.
+ */
 async function ensureSnapshot(
   context: BotContext,
   leagueId: string,
