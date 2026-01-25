@@ -13,6 +13,9 @@ import { handleBidsSubcommand } from "./bids.js";
 import { handleDeepSubcommand } from "./deep.js";
 import { handleTimelineSubcommand } from "./timeline.js";
 import { handleGraphSubcommand } from "./graph.js";
+import { handleRivalrySubcommand, handleRivalriesSubcommand } from "./rivalries.js";
+import { handleLegacySubcommand, handleLegacyHistorySubcommand } from "./legacy.js";
+import { handleManagersSubcommand } from "./managers.js";
 import {
   handleLuckSubcommand,
   handleDraftProphecySubcommand,
@@ -39,6 +42,36 @@ export const canonCommand = new SlashCommandBuilder()
       )
       .addStringOption((opt) =>
         opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommandGroup((group) =>
+    group
+      .setName("legacy")
+      .setDescription("Legacy awards (single season or multi-season)")
+      .addSubcommand((sub) =>
+        sub
+          .setName("season")
+          .setDescription("Legacy awards (luck, dominance, archetypes) for a season")
+          .addIntegerOption((opt) =>
+            opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+          )
+          .addStringOption((opt) =>
+            opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+          )
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName("history")
+          .setDescription("Legacy awards across multiple seasons")
+          .addStringOption((opt) =>
+            opt
+              .setName("seasons")
+              .setDescription("Comma list or range (e.g., 2022-2025 or 2024,2025)")
+              .setRequired(true)
+          )
+          .addStringOption((opt) =>
+            opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+          )
       )
   )
   .addSubcommand((sub) =>
@@ -130,6 +163,34 @@ export const canonCommand = new SlashCommandBuilder()
   )
   .addSubcommand((sub) =>
     sub
+      .setName("managers")
+      .setDescription("Manager records across multiple seasons")
+      .addStringOption((opt) =>
+        opt
+          .setName("seasons")
+          .setDescription("Comma list or range (e.g., 2022-2025 or 2024,2025)")
+          .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("sort")
+          .setDescription("Sort field")
+          .addChoices(
+            { name: "wins", value: "wins" },
+            { name: "win% (games)", value: "winpct" },
+            { name: "points for", value: "points" },
+            { name: "moves", value: "moves" }
+          )
+      )
+      .addIntegerOption((opt) =>
+        opt.setName("limit").setDescription("Number of rows to show (default 10)").setMinValue(1)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
       .setName("champ")
       .setDescription("Announce the season champion")
       .addIntegerOption((opt) =>
@@ -189,6 +250,37 @@ export const canonCommand = new SlashCommandBuilder()
       )
       .addIntegerOption((opt) =>
         opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("rivalry")
+      .setDescription("Head-to-head rivalry between two teams")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("teama").setDescription("Team A name or ID").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("teamb").setDescription("Team B name or ID").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("rivalries")
+      .setDescription("Top head-to-head rivalries by win differential")
+      .addIntegerOption((opt) =>
+        opt.setName("season").setDescription("Season year (e.g., 2025)").setRequired(true)
+      )
+      .addIntegerOption((opt) =>
+        opt.setName("limit").setDescription("Number of rows (default 5)").setMinValue(1)
       )
       .addStringOption((opt) =>
         opt.setName("leagueid").setDescription("Override league ID (defaults to config/env)")
@@ -369,6 +461,18 @@ export async function handleCanonInteraction(
   if (group === "config") {
     await handleConfigSubcommand(interaction, context);
     return;
+  } else if (group === "legacy") {
+    if (subcommand === "season") {
+      await handleLegacySubcommand(interaction, context);
+    } else if (subcommand === "history") {
+      await handleLegacyHistorySubcommand(interaction, context);
+    } else {
+      await interaction.reply({
+        content: `Subcommand "${subcommand}" is not implemented yet.`,
+        ephemeral: true
+      });
+    }
+    return;
   }
 
   if (subcommand === "status") {
@@ -407,6 +511,12 @@ export async function handleCanonInteraction(
     await handleChampSubcommand(interaction, context);
   } else if (subcommand === "champs") {
     await handleChampsSubcommand(interaction, context);
+  } else if (subcommand === "managers") {
+    await handleManagersSubcommand(interaction, context);
+  } else if (subcommand === "rivalry") {
+    await handleRivalrySubcommand(interaction, context);
+  } else if (subcommand === "rivalries") {
+    await handleRivalriesSubcommand(interaction, context);
   } else if (subcommand === "timeline") {
     await handleTimelineSubcommand(interaction, context);
   } else if (subcommand === "deep") {
