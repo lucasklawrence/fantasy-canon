@@ -59,8 +59,8 @@ export async function handleLegacySubcommand(
     const pointsRank = rankBy(teams, (t) => t.pointsFor, "desc");
     const winRank = rankBy(teams, (t) => t.wins, "desc");
     const luckEntries = teams.map((t) => {
-      const pr = pointsRank.get(t.id) ?? teams.length;
-      const wr = winRank.get(t.id) ?? teams.length;
+      const pr = pointsRank.get(t) ?? teams.length;
+      const wr = winRank.get(t) ?? teams.length;
       return { team: t, luck: pr - wr };
     });
     const mostUnlucky = luckEntries.reduce((min, cur) => (cur.luck < min.luck ? cur : min), luckEntries[0]);
@@ -131,14 +131,30 @@ export async function handleLegacyHistorySubcommand(
 
   try {
     const leagueInfo = await getLeagueInfo(context, leagueId, seasons[0]);
-    const aggregate: TeamInfo[] = [];
+    const aggregates = new Map<number, TeamInfo>();
 
     for (const season of seasons) {
       const mTeamPayload = await ensureSnapshot(context, leagueId, season, "mTeam");
       const nameMap = buildTeamNameMap(mTeamPayload);
       const teams = extractTeams(mTeamPayload, nameMap);
-      aggregate.push(...teams);
+      for (const team of teams) {
+        const existing = aggregates.get(team.id);
+        if (existing) {
+          existing.name = team.name; // keep latest name seen
+          existing.wins += team.wins;
+          existing.losses += team.losses;
+          existing.pointsFor += team.pointsFor;
+          existing.acquisitions += team.acquisitions;
+          existing.moveToActive += team.moveToActive;
+          existing.moveToIR += team.moveToIR;
+          existing.totalMoves += team.totalMoves;
+        } else {
+          aggregates.set(team.id, { ...team });
+        }
+      }
     }
+
+    const aggregate = Array.from(aggregates.values());
 
     if (aggregate.length === 0) {
       await interaction.editReply({
@@ -151,8 +167,8 @@ export async function handleLegacyHistorySubcommand(
     const pointsRank = rankBy(aggregate, (t) => t.pointsFor, "desc");
     const winRank = rankBy(aggregate, (t) => t.wins, "desc");
     const luckEntries = aggregate.map((t) => {
-      const pr = pointsRank.get(t.id) ?? aggregate.length;
-      const wr = winRank.get(t.id) ?? aggregate.length;
+      const pr = pointsRank.get(t) ?? aggregate.length;
+      const wr = winRank.get(t) ?? aggregate.length;
       return { team: t, luck: pr - wr };
     });
     const mostUnlucky = luckEntries.reduce((min, cur) => (cur.luck < min.luck ? cur : min), luckEntries[0]);
@@ -165,13 +181,14 @@ export async function handleLegacyHistorySubcommand(
 
     const lines: string[] = [];
     lines.push(`Seasons: ${seasons.join(", ")}`);
-    lines.push(`Most unlucky (across seasons): ${mostUnlucky.team.name} (luck ${mostUnlucky.luck.toFixed(2)})`);
+    lines.push("Mode: aggregated per team across seasons");
+    lines.push(`Most unlucky (aggregated): ${mostUnlucky.team.name} (luck ${mostUnlucky.luck.toFixed(2)})`);
     lines.push(
-      `Most dominant (across seasons): ${mostDominant.name} (${mostDominant.wins}-${mostDominant.losses}, win% ${winPct(mostDominant).toFixed(
+      `Most dominant (aggregated): ${mostDominant.name} (${mostDominant.wins}-${mostDominant.losses}, win% ${winPct(mostDominant).toFixed(
         3
       )})`
     );
-    lines.push("Archetype: Wire/Activity leaders (multi-season)");
+    lines.push("Archetype: Wire/Activity leaders (aggregated)");
     lines.push(
       ...archetype.map(
         (a, idx) =>
@@ -180,7 +197,7 @@ export async function handleLegacyHistorySubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueInfo.name ?? leagueId} • Legacy (multi-season)`, ...lines].join("\n"),
+      content: [`League ${leagueInfo.name ?? leagueId} • Legacy (multi-season, aggregated)`, ...lines].join("\n"),
       flags: MessageFlags.Ephemeral
     });
   } catch (error) {
@@ -248,11 +265,11 @@ function rankBy(
   teams: TeamInfo[],
   getter: (t: TeamInfo) => number,
   direction: "asc" | "desc"
-): Map<number, number> {
-  const scored = teams.map((t) => ({ id: t.id, value: getter(t) }));
+): Map<TeamInfo, number> {
+  const scored = teams.map((t) => ({ team: t, value: getter(t) }));
   scored.sort((a, b) => (direction === "asc" ? a.value - b.value : b.value - a.value));
-  const ranks = new Map<number, number>();
-  scored.forEach((entry, idx) => ranks.set(entry.id, idx + 1));
+  const ranks = new Map<TeamInfo, number>();
+  scored.forEach((entry, idx) => ranks.set(entry.team, idx + 1));
   return ranks;
 }
 
