@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "pnpm -r run build",
     "dev": "pnpm -C apps/bot run dev",
+    "dev:api": "pnpm -C apps/api run dev",
     "debug:espn": "tsx scripts/debug-espn.ts --",
     "test": "vitest run",
     "test:watch": "vitest watch"
