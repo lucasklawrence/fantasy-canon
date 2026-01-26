@@ -1,5 +1,6 @@
 import { REST, Routes } from "discord.js";
 import { canonCommand } from "./src/commands/canon/index.js";
+import { draftOrderCommand } from "./src/commands/draftOrder/index.js";
 import { loadEnv } from "./src/config.js";
 
 process.on("uncaughtException", (err) => {
@@ -12,7 +13,7 @@ async function deploy(): Promise<void> {
   const env = loadEnv();
   console.log("Env loaded for app ID", env.discordAppId);
   const rest = new REST({ version: "10" }).setToken(env.discordToken);
-  const commands = [canonCommand.toJSON()];
+  const commands = [canonCommand.toJSON(), draftOrderCommand.toJSON()];
 
   console.log(`Registering ${commands.length} command(s) for application ${env.discordAppId}`);
 

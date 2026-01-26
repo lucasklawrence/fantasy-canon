@@ -9,7 +9,9 @@ import {
   InMemoryCanonEventsRepo,
   LeagueConfigRepo,
   SnapshotsRepo,
-  CanonEventsRepo
+  CanonEventsRepo,
+  InMemoryDraftOrderStore,
+  DraftOrderStore
 } from "@fantasy-canon/db";
 import { EnvConfig } from "@fantasy-canon/shared";
 
@@ -34,6 +36,7 @@ export interface BotContext {
   snapshotsRepo: SnapshotsRepo;
   leagueConfigRepo: LeagueConfigRepo;
   canonEventsRepo: CanonEventsRepo;
+  draftOrderStore: DraftOrderStore;
 }
 
 export function loadEnv(): EnvConfig {
@@ -74,6 +77,7 @@ export function createBotContext(): BotContext {
   const snapshotsRepo = new InMemorySnapshotsRepo();
   const leagueConfigRepo = new InMemoryLeagueConfigRepo();
   const canonEventsRepo = new InMemoryCanonEventsRepo();
+  const draftOrderStore = new InMemoryDraftOrderStore();
 
-  return { env, version, espnClient, snapshotsRepo, leagueConfigRepo, canonEventsRepo };
+  return { env, version, espnClient, snapshotsRepo, leagueConfigRepo, canonEventsRepo, draftOrderStore };
 }
