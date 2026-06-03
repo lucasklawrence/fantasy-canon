@@ -22,9 +22,9 @@ each gets its own worktree and branch. Don't pick the same issue twice.
 1. `gh issue view <number>` for title, body, labels, milestone, references.
 2. **Read `CLAUDE.md`** if you haven't this session — canonical guide for conventions, architecture
    intent, dev commands, and the repository map (which app/package owns what).
-3. If the issue touches a subsystem with a PRD, read it first — `docs/` holds product/architecture
-   docs (`00`–`13`) and the draft-order spec under `docs/draftOrder/`. Don't change a documented
-   contract (e.g. the draft-order state machine, the ESPN view shapes) without noting the impact.
+3. If the issue touches a subsystem with a PRD, read it first — `docs/` holds the product/architecture
+   docs (`00`–`13`). Don't change a documented contract (e.g. the ESPN view shapes, the storyline
+   templates) without noting the impact.
 4. Read enough of the codebase to know the blast radius — which files you'll touch, what conventions
    apply, whether anything in flight (open PRs, other worktrees) overlaps.
 5. **Upfront question pass — always.** Surface the design/implementation decisions that would
@@ -46,23 +46,23 @@ each gets its own worktree and branch. Don't pick the same issue twice.
    `core`? If so, move it out. The split exists so domain rules stay unit-testable.
 5. **Source hygiene.** TypeScript is the only source of truth — **never commit compiled `.js`/`.d.ts`
    into `src/`** (build output goes to `dist/`, gitignored). Relative imports use `.js` extensions
-   (NodeNext). `packages/db` is a `NoopDbClient` placeholder — don't assume live Postgres.
+   (NodeNext). `packages/db` is a `NoopDbClient` placeholder and `apps/api` is a stub — don't assume a
+   live Postgres connection or a running HTTP server.
 6. **Audit tests the change may have invalidated.** If you touched function signatures, exported
    types, route paths, or env-var names, grep tests (`**/__tests__/*.test.ts`) for assertions on the
    old shape and update them in the same commit.
 7. Verify locally — only the gates that apply, from the repo root:
    - `pnpm install` if `package.json`/deps changed.
-   - `pnpm test` — **must pass cleanly** (currently 20 tests). New behavior lands with a regression
+   - `pnpm test` — **must pass cleanly** (currently 15 tests). New behavior lands with a regression
      test. Mock ESPN/discord/network — no live calls in tests.
-   - `pnpm typecheck` and `pnpm lint` — the repo baseline is **currently red** (tracked in issues #3,
-     #4, #5). Until those land, the bar is: **introduce no new errors** in the files/packages you
-     touched (diff the error count before/after if unsure). Once the baseline is green, treat both as
-     hard gates.
+   - `pnpm typecheck` and `pnpm lint` — the repo baseline is **currently red** (~73 typecheck errors,
+     ~30 lint problems on `main`; tracked in issues #3 and #4). Until those land, the bar is:
+     **introduce no new errors** in the files/packages you touched (diff the error count before/after
+     if unsure). Once the baseline is green, treat both as hard gates.
    - `pnpm build` if you changed package entry points or anything that emits.
-8. **Browser smoke test for visual changes.** If you touched the `apps/activity` UI or `renderer`
-   output, drive it with the Playwright MCP and walk the affected view(s). Start the activity dev
-   server (`pnpm -C apps/activity run dev`, Vite on `http://localhost:5173`) and the API
-   (`pnpm dev:api`) if the page calls it. Lint/build passing ≠ feature working.
+8. **Eyeball rendered output for visual changes.** If you touched `renderer` cards/graphs, render the
+   affected output to a PNG and look at it — lint/build passing ≠ the image is right. (There's no web
+   UI on `main` yet; if a feature branch adds one, drive it with the Playwright MCP instead.)
 9. **If the issue produced a non-obvious architecture decision**, capture it as a short ADR under
    `docs/decisions/000N-title.md` (Context / Decision / Consequences) in the same PR. Create the
    folder if it doesn't exist yet.
@@ -125,17 +125,15 @@ deferred items were trivial taste calls. Each references the originating PR (`Sp
 
 The user's spot-check moment. Everything else is autonomous.
 
-1. **Frontend visual changes → capture screenshots first.** Any new/modified `apps/activity` route,
-   component, or `renderer` card/graph output. Start the local stack (`apps/activity` + `apps/api` if
-   needed) and drive `http://localhost:5173` with the Playwright MCP. Capture each affected view at
-   desktop (`1280×800`) and mobile (`390×844`); capture meaningful states
-   (loading/empty/error/populated). Save under `screenshots/pr-<pr>/…` (gitignored). Embed via
-   `gh api graphql` `createCommitOnBranch` to a throwaway `screenshots-pr-<pr>` orphan branch and
-   reference the `raw.githubusercontent.com` URL; if that fails, list local paths and ask the user to
-   drag them in.
-2. **Backend / data change → capture a verification snippet** instead: a `curl`/`httpie` call against
-   the API with the response body (before/after if relevant), or the relevant test output showing the
-   new behavior. Numbers are the artifact; pictures aren't always honest.
+1. **Rendered-image changes → capture the image first.** Any new/modified `renderer` card or graph.
+   Render the affected output to a PNG, save under `screenshots/pr-<pr>/…` (gitignored), and embed via
+   `gh api graphql` `createCommitOnBranch` to a throwaway `screenshots-pr-<pr>` orphan branch,
+   referencing the `raw.githubusercontent.com` URL; if that fails, list local paths and ask the user
+   to drag them in. (If a feature branch adds a web UI, drive it with the Playwright MCP and capture
+   desktop `1280×800` + mobile `390×844` states instead.)
+2. **Bot / data / logic change → capture a verification snippet** instead: the relevant Vitest output
+   showing the new behavior, or a sample of the command output / rendered text. Numbers are the
+   artifact; pictures aren't always honest.
 3. Post a final PR comment: ✅ `/review` status; **screenshots** (if step 1) or **verification
    snippet** (if step 2); **test plan** (concrete steps before merge); **follow-ups**
    (`Deferred to #N: …`); the merge command `gh pr merge <pr> --squash --delete-branch`.
@@ -152,8 +150,9 @@ The user's spot-check moment. Everything else is autonomous.
   discord/render code lives in its dedicated package or `apps/*`.
 - **TypeScript-only source.** No committed `.js`/`.d.ts` under `src/`; `.js` import extensions on
   relative paths (NodeNext).
-- **`packages/db` is a placeholder.** `NoopDbClient` — repos and SQL migrations exist but aren't wired
-  to live Postgres. Don't write code that assumes a real connection without saying so.
+- **`packages/db` and `apps/api` are placeholders.** `db` is a `NoopDbClient` (repos exist but aren't
+  wired to live Postgres); `apps/api` is a stub that just logs. Don't write code that assumes a real
+  DB connection or a running server without saying so.
 - **ESPN endpoints are unofficial.** Public leagues (2020+) work without auth; private leagues need
   `ESPN_S2`/`ESPN_SWID`. Mock them in tests.
 - **Secrets never committed.** `.env` is gitignored; use `.env.example` (and `apps/bot/.env.example`)
