@@ -1,0 +1,16 @@
+{
+  "worktree": {
+    "bgIsolation": "worktree",
+    "baseRef": "fresh",
+    "symlinkDirectories": [
+      "node_modules",
+      "apps/activity/node_modules",
+      "apps/api/node_modules",
+      "apps/bot/node_modules",
+      "packages/core/node_modules",
+      "packages/db/node_modules",
+      "packages/espn-client/node_modules",
+      "packages/renderer/node_modules"
+    ]
+  }
+}
