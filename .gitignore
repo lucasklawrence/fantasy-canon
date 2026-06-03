@@ -8,6 +8,7 @@ build
 pnpm-lock.yaml
 .turbo
 coverage
+*.stackdump
 
 # ignore everything under .claude (local settings, caches, per-machine state)
 # except the shared, tracked slash commands
