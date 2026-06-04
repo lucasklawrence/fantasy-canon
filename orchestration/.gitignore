@@ -1,0 +1,12 @@
+# Local Airflow runtime state — never commit.
+.env
+logs/
+plugins/
+.venv/
+*.pyc
+__pycache__/
+# Airflow standalone leftovers, if ever used.
+standalone_admin_password.txt
+airflow.cfg
+airflow.db
+webserver_config.py
