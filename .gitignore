@@ -11,6 +11,14 @@ coverage
 *.stackdump
 
 # ignore everything under .claude (local settings, caches, per-machine state)
-# except the shared, tracked slash commands
+# except the shared, tracked slash commands and skills
 .claude/*
 !.claude/commands/
+!.claude/skills/
+
+# compiled output must never live in src/ — TypeScript is the only source of truth;
+# builds emit to dist/ (see CLAUDE.md). Guards against ad-hoc in-place tsc runs.
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+apps/*/src/**/*.js
+apps/*/src/**/*.d.ts
