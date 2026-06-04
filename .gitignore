@@ -11,6 +11,7 @@ coverage
 *.stackdump
 
 # ignore everything under .claude (local settings, caches, per-machine state)
-# except the shared, tracked slash commands
+# except shared slash commands and team settings (settings.local.json stays ignored)
 .claude/*
 !.claude/commands/
+!.claude/settings.json
