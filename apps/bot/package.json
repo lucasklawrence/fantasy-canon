@@ -7,7 +7,7 @@
   "types": "src/index.ts",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -b",
     "lint": "eslint src --ext .ts",
     "deploy": "tsx deploy-commands.ts"
   },
@@ -15,6 +15,7 @@
     "@fantasy-canon/core": "workspace:*",
     "@fantasy-canon/db": "workspace:*",
     "@fantasy-canon/espn-client": "workspace:*",
+    "@fantasy-canon/renderer": "workspace:*",
     "@fantasy-canon/shared": "workspace:*",
     "discord.js": "^14.15.3",
     "dotenv": "^16.4.0"

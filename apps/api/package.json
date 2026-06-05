@@ -7,7 +7,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "dev": "ts-node --esm src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -b",
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
