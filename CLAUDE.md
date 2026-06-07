@@ -32,7 +32,8 @@ waiver legends, draft regrets), and posts shareable visuals + slash-command outp
 | Lint | `pnpm lint` |
 | Test | `pnpm test` (watch: `pnpm test:watch`) |
 | Format | `pnpm format` |
-| Build all packages | `pnpm build` |
+| Build all packages (flat `dist/` each, must stay green) | `pnpm build` |
+| Build apps (red until #3 — bot's type errors block emit) | `pnpm build:apps` |
 | Run the bot | `pnpm dev` |
 | Run the API stub | `pnpm -C apps/api run dev` |
 | Debug ESPN client | `pnpm debug:espn -- <args>` |
@@ -47,10 +48,11 @@ pnpm typecheck && pnpm lint && pnpm test
 ```
 
 > **Known caveat:** as of this writing the baseline is **not green** — on `main`, `pnpm typecheck`
-> reports ~73 errors and `pnpm lint` ~30 problems on a clean checkout (tracked in issues #3 and #4).
-> Until those land, judge your change by *not adding new* errors to the package you touched (diff the
-> count before/after if unsure), and keep `pnpm test` green (currently **15 passing**). Once the
-> baseline is fixed, treat all three as hard gates.
+> reports 68 errors (all in `apps/bot`) and `pnpm lint` ~30 problems on a clean checkout (tracked in
+> issues #3 and #4). Until those land, judge your change by *not adding new* errors to the package
+> you touched (diff the count before/after if unsure), and keep `pnpm test` green (currently
+> **15 passing**) and `pnpm build` green (packages emit via TS project references — see
+> `docs/decisions/0001`). Once the baseline is fixed, treat all gates as hard.
 
 ## Repository map
 
@@ -76,7 +78,7 @@ pnpm typecheck && pnpm lint && pnpm test
 
 ### Other
 - **`docs/`** — product PRDs and architecture (`00`–`13`). Start at `docs/00-product-overview.md` and
-  `docs/05-repository-structure.md`.
+  `docs/05-repository-structure.md`. ADRs live in `docs/decisions/` (numbered `000N-title.md`).
 - **`scripts/`** — `debug-espn.ts` and the VS Code workspace.
 
 ## Conventions
