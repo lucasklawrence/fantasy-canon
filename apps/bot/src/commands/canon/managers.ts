@@ -224,10 +224,10 @@ function extractTeams(
 
     const managerId = getManagerId(t, teamId);
     const teamName = nameMap.get(teamId) ?? formatTeamName(team as unknown as Record<string, unknown>, teamId);
-    const managerName = ownerMap.get(managerId) ?? getManagerName(team) ?? teamName;
+    const managerName = ownerMap.get(managerId) ?? getManagerName(t) ?? teamName;
 
     const record =
-      t.record && typeof t.record === "object" ? ((t.record as { overall?: unknown }).overall as unknown) : undefined;
+      t.record && typeof t.record === "object" ? (t.record as { overall?: unknown }).overall : undefined;
     const wins = Number((record as { wins?: unknown })?.wins) || 0;
     const losses = Number((record as { losses?: unknown })?.losses) || 0;
     const ties = Number((record as { ties?: unknown })?.ties) || 0;

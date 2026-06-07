@@ -56,9 +56,7 @@ each gets its own worktree and branch. Don't pick the same issue twice.
    - `pnpm test` — **must pass cleanly** (currently 15 tests). New behavior lands with a regression
      test. Mock ESPN/discord/network — no live calls in tests.
    - `pnpm typecheck` — **hard gate, must exit 0** (green on `main` since #3).
-   - `pnpm lint` — baseline **still red** (~30 problems on `main`, tracked in issue #4). Until it
-     lands, the bar is: **introduce no new problems** in the files you touched (diff the count
-     before/after if unsure). Once green, treat as a hard gate.
+   - `pnpm lint` — **hard gate, must exit 0** (green on `main` since #4).
    - `pnpm build` if you changed package entry points, tsconfigs, or anything that emits. Covers
      all workspaces (packages + apps) and **must stay green** — each emits a flat `dist/` (project
      references, see `docs/decisions/0001`).
@@ -96,8 +94,8 @@ No user pause. Once any configured CI gate is green (or absent), flow into Phase
    command text in the body. Delete the temp file only after the `gh` call succeeds (an
    unconditional `;`-chained cleanup runs even when the command fails). If pushing the worktree's
    auto-named branch under a different remote name, pass `--head <branch>` explicitly.
-4. **CI:** `.github/workflows/ci.yml` runs on every PR — typecheck/test/build are hard gates, lint is
-   non-blocking until #4 lands. After pushing, give it a moment to register, then watch the run:
+4. **CI:** `.github/workflows/ci.yml` runs on every PR — typecheck/lint/test/build are all hard gates.
+   After pushing, give it a moment to register, then watch the run:
    `gh pr checks <pr> --watch` (or poll `gh pr view <pr> --json statusCheckRollup`). A red **required**
    check is a real failure — fix it on the branch before Phase 4, don't merge around it. (**CodeRabbit**
    also reviews PRs automatically — handle its inline comments in Phase 4; `/review` is still the gate.)
@@ -114,9 +112,8 @@ Loop until convergence, **max 3 iterations**:
    `gh api repos/:owner/:repo/pulls/<pr>/comments`). Address actionable items, and **reply on each
    thread** with what changed — or why you disagree/defer (e.g. a tradeoff that belongs in a
    follow-up). Don't silently skip a bot finding.
-3. **Convergence** — stop when `/review` returns no new actionable findings, CI is green (lint may
-   show a non-blocking ✗ until #4), and no reviewer is repeating an already-addressed finding (a
-   repeat = stop and surface, not ping-pong).
+3. **Convergence** — stop when `/review` returns no new actionable findings, CI is green, and no
+   reviewer is repeating an already-addressed finding (a repeat = stop and surface, not ping-pong).
 4. Otherwise `ScheduleWakeup` ~270s and repeat.
 5. **Hard cap:** if 3 iterations haven't converged, stop and surface — "N rounds; here's what's still
    flagged. Need direction."
@@ -188,6 +185,5 @@ The user's spot-check moment. Everything else is autonomous.
 - **Reproduction runs can litter `src/`.** The old `tsc -p` configs emitted `.js`/`.d.ts` next to
   sources on *failed* builds (tsc emits on error by default). If you ran builds while reproducing a
   bug, check `git status` for stray `src/**/*.js`/`.d.ts` before committing — never commit them.
-- **CI is live** (`.github/workflows/ci.yml`): typecheck/test/build hard, lint non-blocking until #4.
+- **CI is live** (`.github/workflows/ci.yml`): typecheck/lint/test/build all hard gates on every PR.
   **CodeRabbit** auto-reviews PRs (best-effort, not a gate); `/review` is the primary review signal.
-  When #4 lands, drop the lint step's `continue-on-error` so it gates too.
