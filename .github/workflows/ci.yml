@@ -14,8 +14,12 @@ jobs:
   verify:
     name: typecheck · lint · test · build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Read-only job — no pushes — so don't leave the token in .git/config.
+          persist-credentials: false
 
       # Reads the version from package.json's "packageManager" field (pnpm@9.12.0).
       - name: Install pnpm
