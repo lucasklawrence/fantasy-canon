@@ -55,17 +55,20 @@ each gets its own worktree and branch. Don't pick the same issue twice.
    - `pnpm install` if `package.json`/deps changed.
    - `pnpm test` — **must pass cleanly** (currently 15 tests). New behavior lands with a regression
      test. Mock ESPN/discord/network — no live calls in tests.
-   - `pnpm typecheck` and `pnpm lint` — the repo baseline is **currently red** (~73 typecheck errors,
-     ~30 lint problems on `main`; tracked in issues #3 and #4). Until those land, the bar is:
-     **introduce no new errors** in the files/packages you touched (diff the error count before/after
-     if unsure). Once the baseline is green, treat both as hard gates.
-   - `pnpm build` if you changed package entry points or anything that emits.
+   - `pnpm typecheck` and `pnpm lint` — the repo baseline is **currently red** (68 typecheck errors —
+     all in `apps/bot` — and ~30 lint problems on `main`; tracked in issues #3 and #4). Until those
+     land, the bar is: **introduce no new errors** in the files/packages you touched (diff the error
+     count before/after if unsure). Once the baseline is green, treat both as hard gates.
+   - `pnpm build` if you changed package entry points, tsconfigs, or anything that emits. It covers
+     **`packages/*` only** and must stay green — each package emits a flat `dist/` (project
+     references, see `docs/decisions/0001`). `pnpm build:apps` covers `apps/*` but fails on bot's
+     red baseline until #3 lands; when #3 closes, fold apps back into `build` and drop `build:apps`.
 8. **Eyeball rendered output for visual changes.** If you touched `renderer` cards/graphs, render the
    affected output to a PNG and look at it — lint/build passing ≠ the image is right. (There's no web
    UI on `main` yet; if a feature branch adds one, drive it with the Playwright MCP instead.)
 9. **If the issue produced a non-obvious architecture decision**, capture it as a short ADR under
-   `docs/decisions/000N-title.md` (Context / Decision / Consequences) in the same PR. Create the
-   folder if it doesn't exist yet.
+   `docs/decisions/000N-title.md` (Context / Decision / Consequences) in the same PR — next number
+   after the highest existing (0001 = TS project references).
 10. Commit using a Conventional Commits message:
     ```text
     <type>: <one-line summary>
@@ -88,7 +91,12 @@ No user pause. Once any configured CI gate is green (or absent), flow into Phase
 2. Push to `<type>/<number>-<slug>`.
 3. Open the PR: base `main`; title `<type>: <summary>` (lowercase type, no `(#N)` suffix —
    squash-merge appends it); body = summary, `Closes #<issue>`, a `## Test plan` checklist of
-   concrete things to run/click/verify, screenshots placeholder for Phase 5.
+   concrete things to run/click/verify, screenshots placeholder for Phase 5. **Write the body to a
+   temp file and pass `--body-file`** — inline multiline bodies get mangled by PowerShell quoting
+   (backticks/quotes inside here-strings), and safety hooks may pattern-match destructive-looking
+   command text in the body. Delete the temp file only after the `gh` call succeeds (an
+   unconditional `;`-chained cleanup runs even when the command fails). If pushing the worktree's
+   auto-named branch under a different remote name, pass `--head <branch>` explicitly.
 4. **CI status:** this repo has **no CI workflow or review bots yet** (tracked in issue #6). Note that
    in the PR body and continue directly to Phase 4 — `/review` is the gate. When CI lands, update this
    step to poll `gh pr view <pr> --json statusCheckRollup`.
@@ -126,11 +134,21 @@ deferred items were trivial taste calls. Each references the originating PR (`Sp
 The user's spot-check moment. Everything else is autonomous.
 
 1. **Rendered-image changes → capture the image first.** Any new/modified `renderer` card or graph.
-   Render the affected output to a PNG, save under `screenshots/pr-<pr>/…` (gitignored), and embed via
-   `gh api graphql` `createCommitOnBranch` to a throwaway `screenshots-pr-<pr>` orphan branch,
-   referencing the `raw.githubusercontent.com` URL; if that fails, list local paths and ask the user
-   to drag them in. (If a feature branch adds a web UI, drive it with the Playwright MCP and capture
-   desktop `1280×800` + mobile `390×844` states instead.)
+   Render the affected output to a PNG (a throwaway tsx script against the package source works;
+   delete it after), save under `screenshots/pr-<pr>/…`, **look at the image yourself**, then publish
+   to a throwaway `screenshots-pr-<pr>` branch with git plumbing — no checkout needed. Run it in
+   **Bash, not PowerShell** (PowerShell pipes prepend a BOM that breaks `git mktree`):
+   ```bash
+   b=$(git hash-object -w shot.png) \
+     && tree=$(printf '100644 blob %s\tshot.png\n' "$b" | git mktree) \
+     && commit=$(git commit-tree "$tree" -m "screenshots for PR #N") \
+     && [ -n "$commit" ] && git push origin "$commit:refs/heads/screenshots-pr-N"
+   ```
+   **Never compose a push refspec from a variable that might be empty** — `":refs/heads/x"` is a
+   branch *deletion*; guard with `[ -n "$commit" ]` as above. Reference the
+   `raw.githubusercontent.com/<owner>/<repo>/screenshots-pr-<pr>/…` URL in the PR comment; if the
+   push fails, list local paths and ask the user to drag them in. (If a feature branch adds a web
+   UI, drive it with the Playwright MCP and capture desktop `1280×800` + mobile `390×844` instead.)
 2. **Bot / data / logic change → capture a verification snippet** instead: the relevant Vitest output
    showing the new behavior, or a sample of the command output / rendered text. Numbers are the
    artifact; pictures aren't always honest.
@@ -161,6 +179,11 @@ The user's spot-check moment. Everything else is autonomous.
 - **`.claude/commands/` is tracked** — shared slash commands (this file included) are committed so
   they travel with the repo; the rest of `.claude/` (local settings) stays gitignored.
 - **PowerShell on Windows.** `&&` doesn't chain (use `;` + `if ($?)`, or parallel Bash calls). The
-  Bash tool is available for POSIX needs.
+  Bash tool is available for POSIX needs. Multiline text for `gh` (`pr create`, `issue create`,
+  `pr comment`) goes through `--body-file`, never inline. Pipes into git plumbing add a BOM — use
+  Bash for `hash-object`/`mktree`/`commit-tree` work.
+- **Reproduction runs can litter `src/`.** The old `tsc -p` configs emitted `.js`/`.d.ts` next to
+  sources on *failed* builds (tsc emits on error by default). If you ran builds while reproducing a
+  bug, check `git status` for stray `src/**/*.js`/`.d.ts` before committing — never commit them.
 - **No CI / review bots yet** (issue #6). `/review` is the primary gate. Update Phases 3–5 when CI or a
   review bot lands rather than leaving stale guidance.
