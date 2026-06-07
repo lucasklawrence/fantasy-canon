@@ -28,7 +28,7 @@ async function fetchSettings(
   context: BotContext,
   leagueId: string,
   season: number
-): Promise<unknown | undefined> {
+): Promise<unknown> {
   try {
     const res = await context.espnClient.fetchLeague({ leagueId, season, view: "mSettings" });
     await context.snapshotsRepo.save({

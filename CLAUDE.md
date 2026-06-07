@@ -46,15 +46,12 @@ Before considering a change done, run:
 pnpm typecheck && pnpm lint && pnpm test
 ```
 
-> **`pnpm typecheck`, `pnpm test`, and `pnpm build` are hard gates — all green on `main`, keep them
-> green** (typecheck exits 0 since #3; build emits via TS project references, see
-> `docs/decisions/0001`; tests currently **15 passing**). **Known caveat:** `pnpm lint` is still
-> red (~29 problems on a clean checkout, tracked in issue #4) — until that lands, the lint bar is
-> *not adding new* problems to the files you touched (diff the count before/after if unsure).
+> **`pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` are all hard gates — green on `main`,
+> keep them green** (typecheck exits 0 since #3; lint since #4; build emits via TS project references,
+> see `docs/decisions/0001`; tests currently **15 passing**). A change that reds any of them isn't done.
 
-**CI** (`.github/workflows/ci.yml`) runs the same gates on every PR and push to `main` against a
-committed, frozen `pnpm-lock.yaml`: typecheck/test/build block merge; lint runs but is non-blocking
-until #4 (drop its `continue-on-error` to make it a hard gate then).
+**CI** (`.github/workflows/ci.yml`) runs all four gates on every PR and push to `main` against a
+committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
 
 ## Repository map
 

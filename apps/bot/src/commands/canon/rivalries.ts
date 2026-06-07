@@ -171,8 +171,8 @@ function extractMatchups(payload: unknown): Matchup[] {
     }
     const teams = (m as { teams?: unknown }).teams;
     if (Array.isArray(teams) && teams.length >= 2) {
-      const t1 = teams[0];
-      const t2 = teams[1];
+      const t1: unknown = teams[0];
+      const t2: unknown = teams[1];
       if (t1 && typeof t1 === "object" && t2 && typeof t2 === "object") {
         const t1Id = ensureNumber((t1 as { teamId?: unknown }).teamId);
         const t2Id = ensureNumber((t2 as { teamId?: unknown }).teamId);

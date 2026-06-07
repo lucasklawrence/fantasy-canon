@@ -59,7 +59,7 @@ export class HttpEspnClient implements EspnClient {
           // Some callers provide `sortMap`; ESPN requires a recognized `sort` when
           // a `limit` is present. Copy `sortMap` to `sort` or add a default
           // sort on `executionDate` desc when missing.
-          const filter = JSON.parse(JSON.stringify(params.filter)) as any;
+          const filter = JSON.parse(JSON.stringify(params.filter)) as Record<string, unknown>;
           try {
             if (filter && filter.transactions) {
               const tx = filter.transactions as Record<string, unknown>;
@@ -68,9 +68,9 @@ export class HttpEspnClient implements EspnClient {
               const hasSortMap = tx.sortMap !== undefined && tx.sortMap !== null;
               if (hasSortMap && !hasSort) {
                 try {
-                  const sm = tx.sortMap as Record<string, any>;
+                  const sm = tx.sortMap as Record<string, { sortPriority?: unknown; sortAsc?: unknown }>;
                   const arr: unknown[] = Object.keys(sm).map((k) => {
-                    const v = sm[k] as any;
+                    const v = sm[k];
                     return {
                       sortId: k,
                       sortPriority: v && v.sortPriority !== undefined ? v.sortPriority : 1,
