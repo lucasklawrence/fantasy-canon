@@ -32,8 +32,7 @@ waiver legends, draft regrets), and posts shareable visuals + slash-command outp
 | Lint | `pnpm lint` |
 | Test | `pnpm test` (watch: `pnpm test:watch`) |
 | Format | `pnpm format` |
-| Build all packages (flat `dist/` each, must stay green) | `pnpm build` |
-| Build apps (red until #3 — bot's type errors block emit) | `pnpm build:apps` |
+| Build everything (flat `dist/` each, must stay green) | `pnpm build` |
 | Run the bot | `pnpm dev` |
 | Run the API stub | `pnpm -C apps/api run dev` |
 | Debug ESPN client | `pnpm debug:espn -- <args>` |
@@ -47,12 +46,11 @@ Before considering a change done, run:
 pnpm typecheck && pnpm lint && pnpm test
 ```
 
-> **Known caveat:** as of this writing the baseline is **not green** — on `main`, `pnpm typecheck`
-> reports 68 errors (all in `apps/bot`) and `pnpm lint` ~30 problems on a clean checkout (tracked in
-> issues #3 and #4). Until those land, judge your change by *not adding new* errors to the package
-> you touched (diff the count before/after if unsure), and keep `pnpm test` green (currently
-> **15 passing**) and `pnpm build` green (packages emit via TS project references — see
-> `docs/decisions/0001`). Once the baseline is fixed, treat all gates as hard.
+> **`pnpm typecheck`, `pnpm test`, and `pnpm build` are hard gates — all green on `main`, keep them
+> green** (typecheck exits 0 since #3; build emits via TS project references, see
+> `docs/decisions/0001`; tests currently **15 passing**). **Known caveat:** `pnpm lint` is still
+> red (~30 problems on a clean checkout, tracked in issue #4) — until that lands, the lint bar is
+> *not adding new* problems to the files you touched (diff the count before/after if unsure).
 
 ## Repository map
 

@@ -37,7 +37,7 @@ export async function handleLuckSubcommand(
     const nameMap = buildTeamNameMap(mTeamPayload);
     const teams = extractTeams(mTeamPayload);
     if (teams.length === 0) {
-      await interaction.editReply({ content: "No teams found.", flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: "No teams found." });
       return;
     }
 
@@ -75,8 +75,7 @@ export async function handleLuckSubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} • Season ${season} • Luck`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueLabel} • Season ${season} • Luck`, ...lines].join("\n")
     });
   } catch (error) {
     await handleError(interaction, error, "luck");
@@ -101,7 +100,7 @@ export async function handleDraftProphecySubcommand(
     const nameMap = buildTeamNameMap(mTeamPayload);
     const teams = extractTeams(mTeamPayload);
     if (teams.length === 0) {
-      await interaction.editReply({ content: "No teams found.", flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: "No teams found." });
       return;
     }
 
@@ -119,8 +118,7 @@ export async function handleDraftProphecySubcommand(
 
     if (deltas.length === 0) {
       await interaction.editReply({
-        content: "Draft projection data not available.",
-        flags: MessageFlags.Ephemeral
+        content: "Draft projection data not available."
       });
       return;
     }
@@ -149,8 +147,7 @@ export async function handleDraftProphecySubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} • Season ${season} • Draft Prophecy`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueLabel} • Season ${season} • Draft Prophecy`, ...lines].join("\n")
     });
   } catch (error) {
     await handleError(interaction, error, "draft-prophecy");
@@ -208,8 +205,7 @@ export async function handleStreaksSubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} • Season ${season} • Streaks`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueLabel} • Season ${season} • Streaks`, ...lines].join("\n")
     });
   } catch (error) {
     await handleError(interaction, error, "streaks");
@@ -234,7 +230,7 @@ export async function handleManagerArchetypesSubcommand(
     const nameMap = buildTeamNameMap(mTeamPayload);
     const teams = extractTeams(mTeamPayload);
 
-    const avg = (field: keyof TeamInfo): number => {
+    const avg = (field: "acquisitions" | "moves" | "movesToIr" | "totalMoves"): number => {
       const vals = teams.map((t) => t[field] ?? 0);
       const total = vals.reduce((acc, v) => acc + v, 0);
       return teams.length ? total / teams.length : 0;
@@ -271,8 +267,7 @@ export async function handleManagerArchetypesSubcommand(
     await interaction.editReply({
       content: [`League ${leagueLabel} • Season ${season} • Manager archetypes`, ...lines].join(
         "\n"
-      ),
-      flags: MessageFlags.Ephemeral
+      )
     });
   } catch (error) {
     await handleError(interaction, error, "manager-archetypes");
@@ -323,8 +318,7 @@ export async function handleTradeBlockSubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} • Season ${season} • Trade block`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueLabel} • Season ${season} • Trade block`, ...lines].join("\n")
     });
   } catch (error) {
     await handleError(interaction, error, "tradeblock");
@@ -376,8 +370,7 @@ export async function handleHomeAwaySubcommand(
     }
 
     await interaction.editReply({
-      content: [`League ${leagueLabel} • Season ${season} • Home/Away`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueLabel} • Season ${season} • Home/Away`, ...lines].join("\n")
     });
   } catch (error) {
     await handleError(interaction, error, "homeaway");
@@ -400,7 +393,7 @@ export async function handleChampSubcommand(
     const nameMap = buildTeamNameMap(mTeamPayload);
     const teams = extractTeams(mTeamPayload);
     if (teams.length === 0) {
-      await interaction.editReply({ content: "No teams found.", flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: "No teams found." });
       return;
     }
 
@@ -429,8 +422,7 @@ export async function handleChampSubcommand(
     });
 
     await interaction.editReply({
-      content: lines.join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: lines.join("\n")
     });
   } catch (error) {
     await handleError(interaction, error, "champ");
@@ -480,8 +472,7 @@ export async function handleChampsSubcommand(
   }
 
   await interaction.editReply({
-    content: [`League ${leagueId} ’'?ƒ?§ Champs`, ...results].join("\n"),
-    flags: MessageFlags.Ephemeral
+    content: [`League ${leagueId} ’'?ƒ?§ Champs`, ...results].join("\n")
   });
 }
 
@@ -694,7 +685,6 @@ async function handleError(
   console.error(`Failed to compute ${label}`, error);
   const message = error instanceof Error ? error.message : String(error);
   await interaction.editReply({
-    content: `Failed to compute ${label}: ${message}`,
-    flags: MessageFlags.Ephemeral
+    content: `Failed to compute ${label}: ${message}`
   });
 }

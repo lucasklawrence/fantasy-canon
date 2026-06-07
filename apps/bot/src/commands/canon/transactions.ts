@@ -40,8 +40,7 @@ export async function handleTransactionsSubcommand(
       await ensureTransactionsPayload(context, leagueId, season);
     if (!mTxPayload) {
       await interaction.editReply({
-        content: "Transactions payload not available for this league/season.",
-        flags: MessageFlags.Ephemeral
+        content: "Transactions payload not available for this league/season."
       });
       return;
     }
@@ -50,8 +49,7 @@ export async function handleTransactionsSubcommand(
 
     if (parsed.length === 0) {
       await interaction.editReply({
-        content: "No transactions found.",
-        flags: MessageFlags.Ephemeral
+        content: "No transactions found."
       });
       return;
     }
@@ -65,15 +63,13 @@ export async function handleTransactionsSubcommand(
     });
 
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • Latest ${parsed.length}`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueId} • Season ${season} • Latest ${parsed.length}`, ...lines].join("\n")
     });
   } catch (error) {
     console.error("Failed to list transactions", error);
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to list transactions: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to list transactions: ${message}`
     });
   }
 }

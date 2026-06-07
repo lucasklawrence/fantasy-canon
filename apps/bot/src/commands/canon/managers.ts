@@ -111,8 +111,7 @@ export async function handleManagersSubcommand(
 
     if (aggregates.size === 0) {
       await interaction.editReply({
-        content: "No team data found for the requested seasons.",
-        flags: MessageFlags.Ephemeral
+        content: "No team data found for the requested seasons."
       });
       return;
     }
@@ -176,14 +175,12 @@ export async function handleManagersSubcommand(
     }
 
     await interaction.editReply({
-      content,
-      flags: MessageFlags.Ephemeral
+      content
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute manager rollup: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to compute manager rollup: ${message}`
     });
   }
 }

@@ -34,8 +34,7 @@ export async function handleTeamsSubcommand(
     const teams = extractTeams(payload);
     if (teams.length === 0) {
       await interaction.editReply({
-        content: "No teams found in mTeam payload.",
-        flags: MessageFlags.Ephemeral
+        content: "No teams found in mTeam payload."
       });
       return;
     }
@@ -48,15 +47,13 @@ export async function handleTeamsSubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season}`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueId} • Season ${season}`, ...lines].join("\n")
     });
   } catch (error) {
     console.error("Failed to list teams", error);
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to list teams: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to list teams: ${message}`
     });
   }
 }
@@ -107,10 +104,9 @@ function extractTeams(payload: unknown): TeamSummary[] {
     if (!Number.isFinite(teamId)) continue;
     const name = formatTeamName(t, teamId);
     const abbrev = typeof t.abbrev === "string" ? t.abbrev : undefined;
-    const pointsFor =
-      t.points && typeof t.points === "object" && typeof (t.points as { for?: unknown }).for === "number"
-        ? (t.points as { for?: unknown }).for
-        : undefined;
+    const points =
+      t.points && typeof t.points === "object" ? (t.points as { for?: unknown }) : undefined;
+    const pointsFor = typeof points?.for === "number" ? points.for : undefined;
     teams.push({ teamId, name, abbrev, pointsFor });
   }
 

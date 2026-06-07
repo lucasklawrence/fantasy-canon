@@ -37,8 +37,7 @@ export async function handleTimelineSubcommand(
 
     if (events.length === 0) {
       await interaction.editReply({
-        content: "No canon events found. Run champ/luck commands to seed history.",
-        flags: MessageFlags.Ephemeral
+        content: "No canon events found. Run champ/luck commands to seed history."
       });
       return;
     }
@@ -49,14 +48,12 @@ export async function handleTimelineSubcommand(
     });
 
     await interaction.editReply({
-      content: [`League ${leagueInfo.name ?? leagueId} • Timeline`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueInfo.name ?? leagueId} • Timeline`, ...lines].join("\n")
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to load timeline: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to load timeline: ${message}`
     });
   }
 }
