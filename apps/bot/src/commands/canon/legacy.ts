@@ -52,8 +52,7 @@ export async function handleLegacySubcommand(
     const teams = extractTeams(mTeamPayload, nameMap);
     if (teams.length === 0) {
       await interaction.editReply({
-        content: "No teams found.",
-        flags: MessageFlags.Ephemeral
+        content: "No teams found."
       });
       return;
     }
@@ -91,14 +90,12 @@ export async function handleLegacySubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueInfo.name ?? leagueId} • Season ${season} • Legacy awards`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueInfo.name ?? leagueId} • Season ${season} • Legacy awards`, ...lines].join("\n")
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute legacy awards: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to compute legacy awards: ${message}`
     });
   }
 }
@@ -165,8 +162,7 @@ export async function handleLegacyHistorySubcommand(
 
     if (aggregate.length === 0) {
       await interaction.editReply({
-        content: "No team data found for the requested seasons.",
-        flags: MessageFlags.Ephemeral
+        content: "No team data found for the requested seasons."
       });
       return;
     }
@@ -204,14 +200,12 @@ export async function handleLegacyHistorySubcommand(
     );
 
     await interaction.editReply({
-      content: [`League ${leagueInfo.name ?? leagueId} • Legacy (multi-season, aggregated)`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueInfo.name ?? leagueId} • Legacy (multi-season, aggregated)`, ...lines].join("\n")
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute legacy history: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to compute legacy history: ${message}`
     });
   }
 }

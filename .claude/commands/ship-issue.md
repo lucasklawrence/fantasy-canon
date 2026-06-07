@@ -55,14 +55,13 @@ each gets its own worktree and branch. Don't pick the same issue twice.
    - `pnpm install` if `package.json`/deps changed.
    - `pnpm test` — **must pass cleanly** (currently 15 tests). New behavior lands with a regression
      test. Mock ESPN/discord/network — no live calls in tests.
-   - `pnpm typecheck` and `pnpm lint` — the repo baseline is **currently red** (68 typecheck errors —
-     all in `apps/bot` — and ~30 lint problems on `main`; tracked in issues #3 and #4). Until those
-     land, the bar is: **introduce no new errors** in the files/packages you touched (diff the error
-     count before/after if unsure). Once the baseline is green, treat both as hard gates.
-   - `pnpm build` if you changed package entry points, tsconfigs, or anything that emits. It covers
-     **`packages/*` only** and must stay green — each package emits a flat `dist/` (project
-     references, see `docs/decisions/0001`). `pnpm build:apps` covers `apps/*` but fails on bot's
-     red baseline until #3 lands; when #3 closes, fold apps back into `build` and drop `build:apps`.
+   - `pnpm typecheck` — **hard gate, must exit 0** (green on `main` since #3).
+   - `pnpm lint` — baseline **still red** (~30 problems on `main`, tracked in issue #4). Until it
+     lands, the bar is: **introduce no new problems** in the files you touched (diff the count
+     before/after if unsure). Once green, treat as a hard gate.
+   - `pnpm build` if you changed package entry points, tsconfigs, or anything that emits. Covers
+     all workspaces (packages + apps) and **must stay green** — each emits a flat `dist/` (project
+     references, see `docs/decisions/0001`).
 8. **Eyeball rendered output for visual changes.** If you touched `renderer` cards/graphs, render the
    affected output to a PNG and look at it — lint/build passing ≠ the image is right. (There's no web
    UI on `main` yet; if a feature branch adds one, drive it with the Playwright MCP instead.)

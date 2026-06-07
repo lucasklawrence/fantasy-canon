@@ -43,7 +43,7 @@ export async function handleInspectSubcommand(
       `Top-level keys: ${summary.topLevelKeys.join(", ") || "none"}`
     ];
 
-    await interaction.editReply({ content: lines.join("\n"), flags: MessageFlags.Ephemeral });
+    await interaction.editReply({ content: lines.join("\n") });
   } catch (error) {
     console.error("Failed to inspect ESPN view", error);
     let description =
@@ -54,8 +54,7 @@ export async function handleInspectSubcommand(
     await interaction.editReply({
       content:
         `Inspect failed. ${description}\n` +
-        "If this is a private league, set ESPN_S2 and ESPN_SWID cookies in the bot .env.",
-      flags: MessageFlags.Ephemeral
+        "If this is a private league, set ESPN_S2 and ESPN_SWID cookies in the bot .env."
     });
   }
 }

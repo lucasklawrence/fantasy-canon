@@ -74,8 +74,7 @@ export async function handleGraphSubcommand(
         }));
       if (points.length === 0) {
         await interaction.editReply({
-          content: "No draft projection data found.",
-          flags: MessageFlags.Ephemeral
+          content: "No draft projection data found."
         });
         return;
       }
@@ -97,8 +96,7 @@ export async function handleGraphSubcommand(
       const mTxPayload = await ensureTransactionsPayload(context, leagueId, season);
       if (!mTxPayload) {
         await interaction.editReply({
-          content: "Transactions payload not available for this league/season.",
-          flags: MessageFlags.Ephemeral
+          content: "Transactions payload not available for this league/season."
         });
         return;
       }
@@ -106,8 +104,7 @@ export async function handleGraphSubcommand(
       const lines = buildFaabLines(mTxPayload, nameMap);
       if (lines.length === 0) {
         await interaction.editReply({
-          content: "No FAAB spend data found.",
-          flags: MessageFlags.Ephemeral
+          content: "No FAAB spend data found."
         });
         return;
       }
@@ -127,15 +124,13 @@ export async function handleGraphSubcommand(
       );
     } else {
       await interaction.editReply({
-        content: `Metric "${metric}" is not supported.`,
-        flags: MessageFlags.Ephemeral
+        content: `Metric "${metric}" is not supported.`
       });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to render graph: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to render graph: ${message}`
     });
   }
 }
@@ -218,8 +213,7 @@ async function sendBuffer(
   const attachment = new AttachmentBuilder(buffer, { name: filename });
   await interaction.editReply({
     content: `League ${leagueName ?? ""} • Season ${season} • ${label}`,
-    files: [attachment],
-    flags: MessageFlags.Ephemeral
+    files: [attachment]
   });
 }
 

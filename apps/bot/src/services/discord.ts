@@ -2,6 +2,7 @@ import {
   Client,
   GatewayIntentBits,
   Interaction,
+  InteractionReplyOptions,
   MessageFlags,
   Partials
 } from "discord.js";
@@ -31,7 +32,10 @@ export function registerInteractionHandlers(client: Client, context: BotContext)
             const alreadyReplied = interaction.replied || interaction.deferred;
             const content =
               "Sorry, something went wrong handling that command. Please try again.";
-            const payload = { content, flags: MessageFlags.Ephemeral };
+            const payload: InteractionReplyOptions = {
+              content,
+              flags: MessageFlags.Ephemeral
+            };
             if (alreadyReplied) {
               await interaction.followUp(payload);
             } else {

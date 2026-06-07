@@ -74,8 +74,7 @@ export async function handleIngestSubcommand(
       `Seasons: ${seasons.join(", ")}`,
       `Views: ${views.join(", ")}`,
       ...results
-    ].join("\n"),
-    flags: MessageFlags.Ephemeral
+    ].join("\n")
   });
 }
 

@@ -56,8 +56,7 @@ export async function handleLeaderboardSubcommand(
 
     if (entries.length === 0) {
       await interaction.editReply({
-        content: "No FAAB data found.",
-        flags: MessageFlags.Ephemeral
+        content: "No FAAB data found."
       });
       return;
     }
@@ -78,15 +77,13 @@ export async function handleLeaderboardSubcommand(
     });
 
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • Metric: FAAB`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueId} • Season ${season} • Metric: FAAB`, ...lines].join("\n")
     });
   } catch (error) {
     console.error("Failed to build leaderboard", error);
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to build leaderboard: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to build leaderboard: ${message}`
     });
   }
 }

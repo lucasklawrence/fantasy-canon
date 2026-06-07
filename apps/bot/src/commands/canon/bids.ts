@@ -45,8 +45,7 @@ export async function handleBidsSubcommand(
         | undefined;
     if (!mTxPayload) {
       await interaction.editReply({
-        content: "Transactions payload not available for this league/season.",
-        flags: MessageFlags.Ephemeral
+        content: "Transactions payload not available for this league/season."
       });
       return;
     }
@@ -59,8 +58,7 @@ export async function handleBidsSubcommand(
 
     if (filtered.length === 0) {
       await interaction.editReply({
-        content: `No ${mode} bids found.`,
-        flags: MessageFlags.Ephemeral
+        content: `No ${mode} bids found.`
       });
       return;
     }
@@ -83,15 +81,13 @@ export async function handleBidsSubcommand(
 
     const leagueLabel = leagueInfo.name ?? leagueId;
     await interaction.editReply({
-      content: [`League ${leagueLabel} • Season ${season} • ${mode} bids`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueLabel} • Season ${season} • ${mode} bids`, ...lines].join("\n")
     });
   } catch (error) {
     console.error("Failed to compute bids spread", error);
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute bids: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to compute bids: ${message}`
     });
   }
 }

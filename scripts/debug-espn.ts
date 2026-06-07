@@ -180,9 +180,8 @@ async function probeViews(client: HttpEspnClient, leagueId: string, season: numb
       });
       const payload = res.payload as Record<string, unknown>;
       const keys = Object.keys(payload ?? {});
-      const transactions = Array.isArray((payload as { transactions?: unknown }).transactions)
-        ? (payload as { transactions?: unknown }).transactions
-        : undefined;
+      const maybeTransactions = (payload as { transactions?: unknown }).transactions;
+      const transactions = Array.isArray(maybeTransactions) ? maybeTransactions : undefined;
       console.log(`View ${view}: status ${res.status}, keys [${keys.join(", ")}]`);
       if (transactions) {
         console.log(`  transactions: ${transactions.length}`);

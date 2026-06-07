@@ -48,8 +48,7 @@ export async function handleRivalrySubcommand(
     const teamBId = resolver(teamBInput);
     if (teamAId === undefined || teamBId === undefined) {
       await interaction.editReply({
-        content: "Unable to resolve one or both team names. Use exact team names from /canon teams.",
-        flags: MessageFlags.Ephemeral
+        content: "Unable to resolve one or both team names. Use exact team names from /canon teams."
       });
       return;
     }
@@ -60,8 +59,7 @@ export async function handleRivalrySubcommand(
 
     if (!record) {
       await interaction.editReply({
-        content: "No head-to-head matchups found for those teams in this season.",
-        flags: MessageFlags.Ephemeral
+        content: "No head-to-head matchups found for those teams in this season."
       });
       return;
     }
@@ -75,14 +73,12 @@ export async function handleRivalrySubcommand(
       diff > 0 ? `${aName} lead by ${diff}` : diff < 0 ? `${bName} lead by ${Math.abs(diff)}` : "Series tied";
 
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • Rivalry`, summary, recordLine, descriptor].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueId} • Season ${season} • Rivalry`, summary, recordLine, descriptor].join("\n")
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute rivalry: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to compute rivalry: ${message}`
     });
   }
 }
@@ -116,8 +112,7 @@ export async function handleRivalriesSubcommand(
     const rivalries = buildAllRivalries(matchups);
     if (rivalries.length === 0) {
       await interaction.editReply({
-        content: "No head-to-head matchups found.",
-        flags: MessageFlags.Ephemeral
+        content: "No head-to-head matchups found."
       });
       return;
     }
@@ -134,14 +129,12 @@ export async function handleRivalriesSubcommand(
       )}-${r.bPoints.toFixed(1)}), ${leader}`;
     });
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • Rivalries (top ${sorted.length})`, ...lines].join("\n"),
-      flags: MessageFlags.Ephemeral
+      content: [`League ${leagueId} • Season ${season} • Rivalries (top ${sorted.length})`, ...lines].join("\n")
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to list rivalries: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to list rivalries: ${message}`
     });
   }
 }

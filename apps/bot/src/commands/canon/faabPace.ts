@@ -51,8 +51,7 @@ export async function handleFaabPaceSubcommand(
     const perTeam = computeFaabPace(mTeamPayload, mTxPayload, budget, nameMap);
     if (perTeam.length === 0) {
       await interaction.editReply({
-        content: "No FAAB spend data found.",
-        flags: MessageFlags.Ephemeral
+        content: "No FAAB spend data found."
       });
       return;
     }
@@ -77,15 +76,13 @@ export async function handleFaabPaceSubcommand(
     await interaction.editReply({
       content: [`League ${leagueLabel} • Season ${season} • FAAB pace (${mode})`, ...lines].join(
         "\n"
-      ),
-      flags: MessageFlags.Ephemeral
+      )
     });
   } catch (error) {
     console.error("Failed to compute FAAB pace", error);
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute FAAB pace: ${message}`,
-      flags: MessageFlags.Ephemeral
+      content: `Failed to compute FAAB pace: ${message}`
     });
   }
 }

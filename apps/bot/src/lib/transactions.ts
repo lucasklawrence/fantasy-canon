@@ -1,7 +1,7 @@
 import { BotContext } from "../config.js";
 
 interface TransactionsPayload {
-  transactions?: unknown;
+  transactions?: unknown[];
   [key: string]: unknown;
 }
 
