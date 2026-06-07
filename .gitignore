@@ -6,7 +6,6 @@ build
 .env.local
 .DS_Store
 *.log
-pnpm-lock.yaml
 .turbo
 coverage
 *.stackdump

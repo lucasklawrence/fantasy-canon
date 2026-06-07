@@ -96,23 +96,27 @@ No user pause. Once any configured CI gate is green (or absent), flow into Phase
    command text in the body. Delete the temp file only after the `gh` call succeeds (an
    unconditional `;`-chained cleanup runs even when the command fails). If pushing the worktree's
    auto-named branch under a different remote name, pass `--head <branch>` explicitly.
-4. **CI status:** this repo has **no CI workflow or review bots yet** (tracked in issue #6). Note that
-   in the PR body and continue directly to Phase 4 — `/review` is the gate. When CI lands, update this
-   step to poll `gh pr view <pr> --json statusCheckRollup`.
+4. **CI:** `.github/workflows/ci.yml` runs on every PR — typecheck/test/build are hard gates, lint is
+   non-blocking until #4 lands. After pushing, give it a moment to register, then watch the run:
+   `gh pr checks <pr> --watch` (or poll `gh pr view <pr> --json statusCheckRollup`). A red **required**
+   check is a real failure — fix it on the branch before Phase 4, don't merge around it. (**CodeRabbit**
+   also reviews PRs automatically — handle its inline comments in Phase 4; `/review` is still the gate.)
 
 ## Phase 4 — Review loop (`/review`-led)
 
-`/review` is the primary signal. Any review bots added later are best-effort — don't gate on them.
+`/review` is the primary signal. **CodeRabbit** auto-reviews every PR — treat its findings as
+best-effort input, not a gate.
 
 Loop until convergence, **max 3 iterations**:
 
 1. Run `/review` on the PR. Address actionable findings with a new commit on the same branch. Push.
-2. If review bots are installed later, check their inline comments (`gh pr view <pr> --json
-   comments,reviews`; `gh api repos/:owner/:repo/pulls/<pr>/comments`) and address actionable items,
-   replying on each thread with what changed (or why you disagree).
-3. **Convergence** — stop when `/review` returns no new actionable findings, any configured CI is
-   green/absent, and no reviewer is repeating an already-addressed finding (a repeat = stop and
-   surface, not ping-pong).
+2. Check CodeRabbit's inline comments (`gh pr view <pr> --json comments,reviews`; full bodies via
+   `gh api repos/:owner/:repo/pulls/<pr>/comments`). Address actionable items, and **reply on each
+   thread** with what changed — or why you disagree/defer (e.g. a tradeoff that belongs in a
+   follow-up). Don't silently skip a bot finding.
+3. **Convergence** — stop when `/review` returns no new actionable findings, CI is green (lint may
+   show a non-blocking ✗ until #4), and no reviewer is repeating an already-addressed finding (a
+   repeat = stop and surface, not ping-pong).
 4. Otherwise `ScheduleWakeup` ~270s and repeat.
 5. **Hard cap:** if 3 iterations haven't converged, stop and surface — "N rounds; here's what's still
    flagged. Need direction."
@@ -184,5 +188,6 @@ The user's spot-check moment. Everything else is autonomous.
 - **Reproduction runs can litter `src/`.** The old `tsc -p` configs emitted `.js`/`.d.ts` next to
   sources on *failed* builds (tsc emits on error by default). If you ran builds while reproducing a
   bug, check `git status` for stray `src/**/*.js`/`.d.ts` before committing — never commit them.
-- **No CI / review bots yet** (issue #6). `/review` is the primary gate. Update Phases 3–5 when CI or a
-  review bot lands rather than leaving stale guidance.
+- **CI is live** (`.github/workflows/ci.yml`): typecheck/test/build hard, lint non-blocking until #4.
+  **CodeRabbit** auto-reviews PRs (best-effort, not a gate); `/review` is the primary review signal.
+  When #4 lands, drop the lint step's `continue-on-error` so it gates too.
