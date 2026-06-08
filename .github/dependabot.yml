@@ -1,0 +1,29 @@
+version: 2
+
+updates:
+  # Keep the CI workflow's pinned action SHAs current — without this, the SHA
+  # pins in ci.yml silently freeze on stale (possibly vulnerable) versions.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # pnpm workspace deps. One lockfile lives at the root, but external deps are
+  # declared across the workspace manifests, so scan each. Group minor/patch
+  # bumps into one PR to cut noise; majors stay separate for review.
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /apps/*
+      - /packages/*
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
