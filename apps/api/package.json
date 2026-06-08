@@ -15,6 +15,6 @@
     "@fantasy-canon/db": "workspace:*",
     "@fantasy-canon/espn-client": "workspace:*",
     "@fantasy-canon/shared": "workspace:*",
-    "dotenv": "^16.4.0"
+    "dotenv": "^17.4.2"
   }
 }
