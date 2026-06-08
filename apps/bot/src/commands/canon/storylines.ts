@@ -472,7 +472,7 @@ export async function handleChampsSubcommand(
   }
 
   await interaction.editReply({
-    content: [`League ${leagueId} ’'?ƒ?§ Champs`, ...results].join("\n")
+    content: [`League ${leagueId} • Champs`, ...results].join("\n")
   });
 }
 
