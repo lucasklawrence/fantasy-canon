@@ -12,14 +12,14 @@ updates:
         patterns:
           - "*"
 
-  # pnpm workspace deps. One lockfile lives at the root, but external deps are
-  # declared across the workspace manifests, so scan each. Group minor/patch
-  # bumps into one PR to cut noise; majors stay separate for review.
+  # pnpm workspace deps. The single root entry covers the whole workspace —
+  # Dependabot traverses every member manifest and regenerates the one root
+  # lockfile (proven by #38, which bumped dotenv across root + both apps in one
+  # PR). Adding /apps/* and /packages/* on top only duplicated that work into
+  # redundant per-directory PRs that fail `--frozen-lockfile` on their stale
+  # base (#42, #43). Group minor/patch into one PR; majors stay separate.
   - package-ecosystem: npm
-    directories:
-      - /
-      - /apps/*
-      - /packages/*
+    directory: /
     schedule:
       interval: weekly
     groups:
