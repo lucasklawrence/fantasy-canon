@@ -1,6 +1,6 @@
-import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
-import { BotContext } from "../../config.js";
-import { formatTeamName } from "../../lib/teamNames.js";
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { BotContext } from '../../config.js';
+import { formatTeamName } from '../../lib/teamNames.js';
 
 interface TeamSummary {
   teamId: number;
@@ -11,18 +11,18 @@ interface TeamSummary {
 
 export async function handleTeamsSubcommand(
   interaction: ChatInputCommandInteraction,
-  context: BotContext
+  context: BotContext,
 ): Promise<void> {
-  const season = interaction.options.getInteger("season", true);
-  const leagueOverride = interaction.options.getString("leagueid") ?? undefined;
+  const season = interaction.options.getInteger('season', true);
+  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
   const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
 
   if (!leagueId) {
     await interaction.reply({
-      content: "League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.",
-      flags: MessageFlags.Ephemeral
+      content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -34,26 +34,26 @@ export async function handleTeamsSubcommand(
     const teams = extractTeams(payload);
     if (teams.length === 0) {
       await interaction.editReply({
-        content: "No teams found in mTeam payload."
+        content: 'No teams found in mTeam payload.',
       });
       return;
     }
 
     const lines = teams.map(
       (t) =>
-        `${t.teamId}. ${t.name}${t.abbrev ? ` (${t.abbrev})` : ""}${
-          t.pointsFor !== undefined ? ` — PF: ${t.pointsFor.toFixed(2)}` : ""
-        }`
+        `${t.teamId}. ${t.name}${t.abbrev ? ` (${t.abbrev})` : ''}${
+          t.pointsFor !== undefined ? ` — PF: ${t.pointsFor.toFixed(2)}` : ''
+        }`,
     );
 
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season}`, ...lines].join("\n")
+      content: [`League ${leagueId} • Season ${season}`, ...lines].join('\n'),
     });
   } catch (error) {
-    console.error("Failed to list teams", error);
+    console.error('Failed to list teams', error);
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to list teams: ${message}`
+      content: `Failed to list teams: ${message}`,
     });
   }
 }
@@ -61,27 +61,27 @@ export async function handleTeamsSubcommand(
 async function ensureMTeamSnapshot(
   context: BotContext,
   leagueId: string,
-  season: number
+  season: number,
 ): Promise<unknown> {
   const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
-  const mTeam = existing.find((s) => s.view === "mTeam");
+  const mTeam = existing.find((s) => s.view === 'mTeam');
   if (mTeam) {
     return mTeam.payload;
   }
 
-  const res = await context.espnClient.fetchLeague({ leagueId, season, view: "mTeam" });
+  const res = await context.espnClient.fetchLeague({ leagueId, season, view: 'mTeam' });
   await context.snapshotsRepo.save({
     leagueId,
     season,
-    view: "mTeam",
+    view: 'mTeam',
     fetchedAt: new Date(),
-    payload: res.payload
+    payload: res.payload,
   });
   return res.payload;
 }
 
 function extractTeams(payload: unknown): TeamSummary[] {
-  if (!payload || typeof payload !== "object") {
+  if (!payload || typeof payload !== 'object') {
     return [];
   }
   const maybeTeams = (payload as { teams?: unknown }).teams;
@@ -91,7 +91,7 @@ function extractTeams(payload: unknown): TeamSummary[] {
 
   const teams: TeamSummary[] = [];
   for (const team of maybeTeams) {
-    if (!team || typeof team !== "object") continue;
+    if (!team || typeof team !== 'object') continue;
     const t = team as {
       id?: unknown;
       location?: unknown;
@@ -103,10 +103,10 @@ function extractTeams(payload: unknown): TeamSummary[] {
     const teamId = Number(t.id);
     if (!Number.isFinite(teamId)) continue;
     const name = formatTeamName(t, teamId);
-    const abbrev = typeof t.abbrev === "string" ? t.abbrev : undefined;
+    const abbrev = typeof t.abbrev === 'string' ? t.abbrev : undefined;
     const points =
-      t.points && typeof t.points === "object" ? (t.points as { for?: unknown }) : undefined;
-    const pointsFor = typeof points?.for === "number" ? points.for : undefined;
+      t.points && typeof t.points === 'object' ? (t.points as { for?: unknown }) : undefined;
+    const pointsFor = typeof points?.for === 'number' ? points.for : undefined;
     teams.push({ teamId, name, abbrev, pointsFor });
   }
 

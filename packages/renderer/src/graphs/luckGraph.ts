@@ -1,4 +1,4 @@
-import { renderImage, RenderSpec } from "../render.js";
+import { renderImage, RenderSpec } from '../render.js';
 
 export interface LuckGraphPoint {
   team: string;
@@ -15,27 +15,27 @@ export interface LuckGraphOptions {
 export function renderLuckGraph(options: LuckGraphOptions): Promise<Buffer> {
   const enriched = options.points.map((p) => ({
     ...p,
-    luck: p.wins - p.expectedWins
+    luck: p.wins - p.expectedWins,
   }));
   const outliers = findOutliers(enriched, 3);
   const spec: RenderSpec = {
-    kind: "graph",
+    kind: 'graph',
     title: options.title,
     subtitle: options.subtitle,
     payload: {
-      type: "luck-scatter",
-      axes: { x: "Expected wins", y: "Actual wins" },
+      type: 'luck-scatter',
+      axes: { x: 'Expected wins', y: 'Actual wins' },
       expectedLine: { slope: 1, intercept: 0 },
       points: enriched,
-      outliers
-    }
+      outliers,
+    },
   };
   return renderImage(spec);
 }
 
 function findOutliers(
   points: Array<LuckGraphPoint & { luck: number }>,
-  limit: number
+  limit: number,
 ): Array<{ team: string; luck: number }> {
   return [...points]
     .sort((a, b) => Math.abs(b.luck) - Math.abs(a.luck))

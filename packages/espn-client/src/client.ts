@@ -3,32 +3,32 @@ import {
   EspnClientOptions,
   EspnFetchError,
   FetchLeagueParams,
-  FetchLeagueResult
-} from "./types.js";
+  FetchLeagueResult,
+} from './types.js';
 
 const DEFAULT_OPTIONS: Required<EspnClientOptions> = {
   retries: 2,
   retryDelayMs: 500,
   cookies: {
     espnS2: undefined,
-    swid: undefined
-  }
+    swid: undefined,
+  },
 };
 
 export class HttpEspnClient implements EspnClient {
   constructor(
-    private readonly baseUrl = "https://lm-api-reads.fantasy.espn.com",
-    private readonly options: EspnClientOptions = {}
+    private readonly baseUrl = 'https://lm-api-reads.fantasy.espn.com',
+    private readonly options: EspnClientOptions = {},
   ) {}
 
   buildUrl(params: FetchLeagueParams): string {
     const { leagueId, season, view, scoringPeriodId } = params;
     const url = new URL(
-      `${this.baseUrl}/apis/v3/games/ffl/seasons/${season}/segments/0/leagues/${leagueId}`
+      `${this.baseUrl}/apis/v3/games/ffl/seasons/${season}/segments/0/leagues/${leagueId}`,
     );
-    url.searchParams.set("view", view);
-    if (typeof scoringPeriodId === "number") {
-      url.searchParams.set("scoringPeriodId", String(scoringPeriodId));
+    url.searchParams.set('view', view);
+    if (typeof scoringPeriodId === 'number') {
+      url.searchParams.set('scoringPeriodId', String(scoringPeriodId));
     }
     return url.toString();
   }
@@ -42,11 +42,11 @@ export class HttpEspnClient implements EspnClient {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       try {
         const headers: Record<string, string> = {
-          "User-Agent": "fantasy-canon/0.1",
-          Accept: "application/json, text/plain, */*",
-          "Accept-Language": "en-US,en;q=0.9",
-          "X-Fantasy-Platform": "kona-PROD",
-          "X-Fantasy-Source": "kona"
+          'User-Agent': 'fantasy-canon/0.1',
+          Accept: 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'X-Fantasy-Platform': 'kona-PROD',
+          'X-Fantasy-Source': 'kona',
         };
 
         const cookieHeader = this.buildCookieHeader();
@@ -68,13 +68,16 @@ export class HttpEspnClient implements EspnClient {
               const hasSortMap = tx.sortMap !== undefined && tx.sortMap !== null;
               if (hasSortMap && !hasSort) {
                 try {
-                  const sm = tx.sortMap as Record<string, { sortPriority?: unknown; sortAsc?: unknown }>;
+                  const sm = tx.sortMap as Record<
+                    string,
+                    { sortPriority?: unknown; sortAsc?: unknown }
+                  >;
                   const arr: unknown[] = Object.keys(sm).map((k) => {
                     const v = sm[k];
                     return {
                       sortId: k,
                       sortPriority: v && v.sortPriority !== undefined ? v.sortPriority : 1,
-                      sortAsc: v && v.sortAsc !== undefined ? v.sortAsc : false
+                      sortAsc: v && v.sortAsc !== undefined ? v.sortAsc : false,
                     };
                   });
                   tx.sort = arr;
@@ -87,30 +90,30 @@ export class HttpEspnClient implements EspnClient {
               if (hasLimit && !hasSort && !hasSortMap) {
                 tx.sort = [
                   {
-                    sortId: "executionDate",
+                    sortId: 'executionDate',
                     sortPriority: 1,
-                    sortAsc: false
-                  }
+                    sortAsc: false,
+                  },
                 ];
               }
             }
           } catch {
             // If normalization fails for any reason, fall back to original filter
           }
-          headers["x-fantasy-filter"] = JSON.stringify(filter);
+          headers['x-fantasy-filter'] = JSON.stringify(filter);
         }
 
-        if (process.env.DEBUG_ESPN === "1") {
+        if (process.env.DEBUG_ESPN === '1') {
           const maskedHeaders = {
             ...headers,
-            Cookie: headers.Cookie ? "[set]" : "[missing]",
-            "x-fantasy-filter": headers["x-fantasy-filter"] ?? "[missing]"
+            Cookie: headers.Cookie ? '[set]' : '[missing]',
+            'x-fantasy-filter': headers['x-fantasy-filter'] ?? '[missing]',
           };
-          console.log("ESPN request", { url, headers: maskedHeaders });
+          console.log('ESPN request', { url, headers: maskedHeaders });
         }
 
         const response = await fetch(url, {
-          headers
+          headers,
         });
 
         if (!response.ok) {
@@ -119,7 +122,7 @@ export class HttpEspnClient implements EspnClient {
             `ESPN responded with status ${response.status}`,
             response.status,
             url,
-            bodySnippet
+            bodySnippet,
           );
         }
 
@@ -137,7 +140,7 @@ export class HttpEspnClient implements EspnClient {
     if (lastError instanceof Error) {
       throw lastError;
     }
-    throw new Error("Unknown error during fetchLeague", { cause: lastError });
+    throw new Error('Unknown error during fetchLeague', { cause: lastError });
   }
 
   private async sleep(ms: number): Promise<void> {
@@ -156,7 +159,7 @@ export class HttpEspnClient implements EspnClient {
     if (parts.length === 0) {
       return undefined;
     }
-    return parts.join("; ");
+    return parts.join('; ');
   }
 
   private async safeReadBody(response: Response): Promise<string | undefined> {

@@ -1,4 +1,4 @@
-import { GuildLeagueConfig } from "@fantasy-canon/shared";
+import { GuildLeagueConfig } from '@fantasy-canon/shared';
 
 export interface LeagueConfigRepo {
   upsert(config: GuildLeagueConfig): Promise<GuildLeagueConfig>;

@@ -43,14 +43,16 @@ waiver legends, draft regrets), and posts shareable visuals + slash-command outp
 Before considering a change done, run:
 
 ```
-pnpm typecheck && pnpm lint && pnpm test
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm test
 ```
 
-> **`pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` are all hard gates — green on `main`,
-> keep them green** (typecheck exits 0 since #3; lint since #4; build emits via TS project references,
-> see `docs/decisions/0001`; tests currently **15 passing**). A change that reds any of them isn't done.
+> **`pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, and `pnpm build` are all hard
+> gates — green on `main`, keep them green** (typecheck exits 0 since #3; lint since #4; formatting
+> enforced since #49; build emits via TS project references, see `docs/decisions/0001`; tests
+> currently **15 passing**). A change that reds any of them isn't done. `pnpm format` auto-fixes
+> formatting drift.
 
-**CI** (`.github/workflows/ci.yml`) runs all four gates on every PR and push to `main` against a
+**CI** (`.github/workflows/ci.yml`) runs all five gates on every PR and push to `main` against a
 committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
 
 ## Repository map

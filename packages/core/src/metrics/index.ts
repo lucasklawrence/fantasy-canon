@@ -1,1 +1,1 @@
-export * from "./luckIndex.js";
+export * from './luckIndex.js';

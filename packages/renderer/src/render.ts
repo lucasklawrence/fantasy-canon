@@ -78,9 +78,19 @@ function renderSvg(
   if (spec.kind === 'graph' && typeof spec.payload === 'object' && spec.payload) {
     const payload = spec.payload as { type?: unknown };
     if (payload.type === 'luck-scatter') {
-      body += renderLuckScatter(payload as Parameters<typeof renderLuckScatter>[0], theme, width, height);
+      body += renderLuckScatter(
+        payload as Parameters<typeof renderLuckScatter>[0],
+        theme,
+        width,
+        height,
+      );
     } else if (payload.type === 'draft-prophecy') {
-      body += renderDraftProphecy(payload as Parameters<typeof renderDraftProphecy>[0], theme, width, height);
+      body += renderDraftProphecy(
+        payload as Parameters<typeof renderDraftProphecy>[0],
+        theme,
+        width,
+        height,
+      );
     } else if (payload.type === 'faab-pace') {
       body += renderFaabPace(payload as Parameters<typeof renderFaabPace>[0], theme, width, height);
     }

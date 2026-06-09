@@ -1,8 +1,12 @@
-import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
-import { buildFaabLeaderboard } from "@fantasy-canon/core";
-import { BotContext } from "../../config.js";
-import { buildTeamNameMap, formatTeamName } from "../../lib/teamNames.js";
-import { ensureTransactionsPayload, getTransactionTeamId, isWaiverSpend } from "../../lib/transactions.js";
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { buildFaabLeaderboard } from '@fantasy-canon/core';
+import { BotContext } from '../../config.js';
+import { buildTeamNameMap, formatTeamName } from '../../lib/teamNames.js';
+import {
+  ensureTransactionsPayload,
+  getTransactionTeamId,
+  isWaiverSpend,
+} from '../../lib/transactions.js';
 
 interface TeamWithFaab {
   teamId: number;
@@ -13,28 +17,28 @@ interface TeamWithFaab {
 
 export async function handleLeaderboardSubcommand(
   interaction: ChatInputCommandInteraction,
-  context: BotContext
+  context: BotContext,
 ): Promise<void> {
-  const metric = interaction.options.getString("metric", true);
-  const season = interaction.options.getInteger("season", true);
-  const limit = interaction.options.getInteger("limit") ?? 12;
-  const leagueOverride = interaction.options.getString("leagueid") ?? undefined;
+  const metric = interaction.options.getString('metric', true);
+  const season = interaction.options.getInteger('season', true);
+  const limit = interaction.options.getInteger('limit') ?? 12;
+  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
   const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
 
   if (!leagueId) {
     await interaction.reply({
-      content: "League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.",
-      flags: MessageFlags.Ephemeral
+      content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
-  if (metric !== "faab") {
+  if (metric !== 'faab') {
     await interaction.reply({
       content: `Metric "${metric}" is not supported yet.`,
-      flags: MessageFlags.Ephemeral
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -42,7 +46,7 @@ export async function handleLeaderboardSubcommand(
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
-    const mTeamPayload = await ensureSnapshot(context, leagueId, season, "mTeam");
+    const mTeamPayload = await ensureSnapshot(context, leagueId, season, 'mTeam');
     const nameMap = buildTeamNameMap(mTeamPayload);
     const faabEntries = extractFaab(mTeamPayload);
 
@@ -56,7 +60,7 @@ export async function handleLeaderboardSubcommand(
 
     if (entries.length === 0) {
       await interaction.editReply({
-        content: "No FAAB data found."
+        content: 'No FAAB data found.',
       });
       return;
     }
@@ -64,7 +68,7 @@ export async function handleLeaderboardSubcommand(
     const leaderboard = buildFaabLeaderboard({
       season,
       entries: entries.map((e) => ({ teamId: e.teamId, amount: e.amount })),
-      limit
+      limit,
     });
 
     const lookup = new Map(entries.map((e) => [e.teamId, e]));
@@ -72,18 +76,18 @@ export async function handleLeaderboardSubcommand(
       const team = lookup.get(entry.teamId);
       const name = team?.name ?? nameMap.get(entry.teamId) ?? `Team ${entry.teamId}`;
       const remaining = team?.remaining;
-      const leftText = typeof remaining === "number" ? ` (left $${remaining.toFixed(2)})` : "";
+      const leftText = typeof remaining === 'number' ? ` (left $${remaining.toFixed(2)})` : '';
       return `${idx + 1}. ${name} — $${entry.amount.toFixed(2)}${leftText}`;
     });
 
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • Metric: FAAB`, ...lines].join("\n")
+      content: [`League ${leagueId} • Season ${season} • Metric: FAAB`, ...lines].join('\n'),
     });
   } catch (error) {
-    console.error("Failed to build leaderboard", error);
+    console.error('Failed to build leaderboard', error);
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to build leaderboard: ${message}`
+      content: `Failed to build leaderboard: ${message}`,
     });
   }
 }
@@ -92,7 +96,7 @@ async function ensureSnapshot(
   context: BotContext,
   leagueId: string,
   season: number,
-  view: string
+  view: string,
 ): Promise<unknown> {
   const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
   const match = existing.find((s) => s.view === view);
@@ -103,13 +107,13 @@ async function ensureSnapshot(
     season,
     view,
     fetchedAt: new Date(),
-    payload: res.payload
+    payload: res.payload,
   });
   return res.payload;
 }
 
 function extractFaab(payload: unknown): TeamWithFaab[] {
-  if (!payload || typeof payload !== "object") {
+  if (!payload || typeof payload !== 'object') {
     return [];
   }
   const maybeTeams = (payload as { teams?: unknown }).teams;
@@ -119,7 +123,7 @@ function extractFaab(payload: unknown): TeamWithFaab[] {
 
   const teams: TeamWithFaab[] = [];
   for (const team of maybeTeams) {
-    if (!team || typeof team !== "object") continue;
+    if (!team || typeof team !== 'object') continue;
     const t = team as {
       id?: unknown;
       location?: unknown;
@@ -132,11 +136,14 @@ function extractFaab(payload: unknown): TeamWithFaab[] {
     if (!Number.isFinite(teamId)) continue;
     const name = formatTeamName(t, teamId);
     const tc =
-      t.transactionCounter && typeof t.transactionCounter === "object"
-        ? (t.transactionCounter as { acquisitionBudgetSpent?: unknown; matchupAcquisitionTotals?: unknown })
+      t.transactionCounter && typeof t.transactionCounter === 'object'
+        ? (t.transactionCounter as {
+            acquisitionBudgetSpent?: unknown;
+            matchupAcquisitionTotals?: unknown;
+          })
         : undefined;
     const amount =
-      typeof tc?.acquisitionBudgetSpent === "number"
+      typeof tc?.acquisitionBudgetSpent === 'number'
         ? tc.acquisitionBudgetSpent
         : sumTotals(tc?.matchupAcquisitionTotals);
     if (amount === undefined) continue;
@@ -148,26 +155,28 @@ function extractFaab(payload: unknown): TeamWithFaab[] {
 
 function sumTotals(totals: unknown): number | undefined {
   if (!Array.isArray(totals)) return undefined;
-  const numeric = totals.map((v) => (typeof v === "number" ? v : 0)).filter((v) => Number.isFinite(v));
+  const numeric = totals
+    .map((v) => (typeof v === 'number' ? v : 0))
+    .filter((v) => Number.isFinite(v));
   if (numeric.length === 0) return undefined;
   return numeric.reduce((acc, v) => acc + v, 0);
 }
 
 function extractFaabFromTransactions(
   payload: unknown,
-  nameMap: Map<number, string>
+  nameMap: Map<number, string>,
 ): TeamWithFaab[] {
-  if (!payload || typeof payload !== "object") return [];
+  if (!payload || typeof payload !== 'object') return [];
   const maybeTxs = (payload as { transactions?: unknown }).transactions;
   if (!Array.isArray(maybeTxs)) return [];
 
   const totals = new Map<number, number>();
 
   for (const tx of maybeTxs) {
-    if (!tx || typeof tx !== "object") continue;
+    if (!tx || typeof tx !== 'object') continue;
     if (!isWaiverSpend(tx)) continue;
     const t = tx as { bidAmount?: unknown };
-    const bid = typeof t.bidAmount === "number" ? t.bidAmount : undefined;
+    const bid = typeof t.bidAmount === 'number' ? t.bidAmount : undefined;
     if (bid === undefined) continue;
     const teamId = getTransactionTeamId(tx);
     if (teamId === undefined) continue;
@@ -177,6 +186,6 @@ function extractFaabFromTransactions(
   return Array.from(totals.entries()).map(([teamId, amount]) => ({
     teamId,
     name: nameMap.get(teamId) ?? `Team ${teamId}`,
-    amount
+    amount,
   }));
 }

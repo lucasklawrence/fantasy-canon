@@ -1,15 +1,12 @@
-import { createBotContext } from "./config.js";
-import {
-  createDiscordClient,
-  registerInteractionHandlers
-} from "./services/discord.js";
+import { createBotContext } from './config.js';
+import { createDiscordClient, registerInteractionHandlers } from './services/discord.js';
 
 async function start(): Promise<void> {
   const context = createBotContext();
   const client = createDiscordClient();
 
-  client.once("clientReady", () => {
-    console.log(`Fantasy Canon bot ready as ${client.user?.tag ?? "unknown user"}`);
+  client.once('clientReady', () => {
+    console.log(`Fantasy Canon bot ready as ${client.user?.tag ?? 'unknown user'}`);
   });
 
   registerInteractionHandlers(client, context);
@@ -18,6 +15,6 @@ async function start(): Promise<void> {
 }
 
 start().catch((error) => {
-  console.error("Failed to start Fantasy Canon bot", error);
+  console.error('Failed to start Fantasy Canon bot', error);
   process.exit(1);
 });

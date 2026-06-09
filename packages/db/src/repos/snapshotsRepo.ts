@@ -1,4 +1,4 @@
-import { SnapshotMeta } from "@fantasy-canon/shared";
+import { SnapshotMeta } from '@fantasy-canon/shared';
 
 export interface SnapshotRecord extends SnapshotMeta {
   payload: unknown;

@@ -1,10 +1,10 @@
-import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 
 export async function handleDeepSubcommand(
-  interaction: ChatInputCommandInteraction
+  interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   await interaction.reply({
-    content: "Fucking value",
-    flags: MessageFlags.Ephemeral
+    content: 'Fucking value',
+    flags: MessageFlags.Ephemeral,
   });
 }

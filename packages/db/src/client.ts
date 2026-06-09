@@ -1,4 +1,4 @@
-import { EnvConfig } from "@fantasy-canon/shared";
+import { EnvConfig } from '@fantasy-canon/shared';
 
 export interface DbClient {
   connect(): Promise<void>;
