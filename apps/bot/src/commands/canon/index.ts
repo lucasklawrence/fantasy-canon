@@ -10,12 +10,12 @@ import { handleLeaderboardSubcommand } from './leaderboard.js';
 import { handleTransactionsSubcommand } from './transactions.js';
 import { handleFaabPaceSubcommand } from './faabPace.js';
 import { handleBidsSubcommand } from './bids.js';
-import { handleDeepSubcommand } from './deep.js';
 import { handleTimelineSubcommand } from './timeline.js';
 import { handleGraphSubcommand } from './graph.js';
 import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.js';
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
 import { handleManagersSubcommand } from './managers.js';
+import { handleAllPlaySubcommand } from './allPlay.js';
 import {
   handleLuckSubcommand,
   handleDraftProphecySubcommand,
@@ -99,6 +99,20 @@ export const canonCommand = new SlashCommandBuilder()
       .setDescription('Luck vs win outcomes')
       .addIntegerOption((opt) =>
         opt.setName('season').setDescription('Season year (e.g., 2025)').setRequired(true),
+      )
+      .addStringOption((opt) =>
+        opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
+      ),
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('allplay')
+      .setDescription('All-play record (Wins vs. All %) — schedule-independent strength')
+      .addIntegerOption((opt) =>
+        opt.setName('season').setDescription('Season year (e.g., 2025)').setRequired(true),
+      )
+      .addIntegerOption((opt) =>
+        opt.setName('limit').setDescription('Number of teams to show (default all)').setMinValue(1),
       )
       .addStringOption((opt) =>
         opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
@@ -352,7 +366,6 @@ export const canonCommand = new SlashCommandBuilder()
       ),
   )
   .addSubcommand((sub) => sub.setName('ping').setDescription('Simple health check (pong)'))
-  .addSubcommand((sub) => sub.setName('deep').setDescription('Deep'))
   .addSubcommand((sub) =>
     sub
       .setName('inspect')
@@ -481,6 +494,8 @@ export async function handleCanonInteraction(
     await handleGraphSubcommand(interaction, context);
   } else if (subcommand === 'luck') {
     await handleLuckSubcommand(interaction, context);
+  } else if (subcommand === 'allplay') {
+    await handleAllPlaySubcommand(interaction, context);
   } else if (subcommand === 'draft-prophecy') {
     await handleDraftProphecySubcommand(interaction, context);
   } else if (subcommand === 'streaks') {
@@ -503,8 +518,6 @@ export async function handleCanonInteraction(
     await handleRivalriesSubcommand(interaction, context);
   } else if (subcommand === 'timeline') {
     await handleTimelineSubcommand(interaction, context);
-  } else if (subcommand === 'deep') {
-    await handleDeepSubcommand(interaction);
   } else {
     await interaction.reply({
       content: `Subcommand "${subcommand}" is not implemented yet.`,
