@@ -162,7 +162,7 @@ The user's spot-check moment. Everything else is autonomous.
 
 ## Project-specific notes
 
-- **pnpm workspaces monorepo, ESM, Node >= 20.** Run everything from the repo root with `pnpm`
+- **pnpm workspaces monorepo, ESM, Node >= 24.** Run everything from the repo root with `pnpm`
   (`pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm build`). Per-package: `pnpm -C <path> run <script>`.
 - **Pure `core`, side-effectful edges.** New domain logic goes in `packages/core` (no I/O); ESPN/DB/
   discord/render code lives in its dedicated package or `apps/*`.

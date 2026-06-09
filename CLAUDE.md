@@ -17,7 +17,7 @@ waiver legends, draft regrets), and posts shareable visuals + slash-command outp
 
 ## Stack
 
-- **pnpm** workspaces monorepo, **Node >= 20**, **ESM everywhere** (`"type": "module"` — use `.js`
+- **pnpm** workspaces monorepo, **Node >= 24**, **ESM everywhere** (`"type": "module"` — use `.js`
   extensions in relative import specifiers even from `.ts` sources, as the code already does).
 - **TypeScript** (strict, see `tsconfig.base.json`), **Vitest** for tests (`vitest.config.ts`),
   **ESLint** (type-aware) + **Prettier**.
