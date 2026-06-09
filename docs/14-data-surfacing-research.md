@@ -33,7 +33,7 @@ These are platform constraints — get them right once in shared infra.
    **Status: already done** — every `/canon` subcommand defers ephemerally.
 
 2. **Ephemeral is set up-front and can't be toggled after the first response.** `flags:
-   MessageFlags.Ephemeral` hides a reply from everyone but the invoker. The public-vs-private decision
+MessageFlags.Ephemeral` hides a reply from everyone but the invoker. The public-vs-private decision
    must be made before the first response — so bucket (A) vs (B) needs to be a command option or a
    "share to channel" button, not a post-hoc switch. _Source: discordjs.guide/slash-commands/response-methods._
 
@@ -86,7 +86,7 @@ These are platform constraints — get them right once in shared infra.
 - **Expected Wins via Monte Carlo** — FF Wrapped simulates 10,000 randomized weekly matchups, then charts
   actual vs expected; a large gap = (un)lucky schedule. Maps directly onto our existing
   `metrics/luckIndex` and `luckGraph`. _Source: ffwrapped.com._
-- **All-play record** ("Wins vs. All %") — compare each team's weekly score against *every* other team's
+- **All-play record** ("Wins vs. All %") — compare each team's weekly score against _every_ other team's
   that week. Reveals true strength independent of schedule; can even seed a "highest skill" side-pot.
   _Source: fantasyleaguegoat.com._
 - **FF Wrapped's analytics taxonomy** is a ready-made menu of surfaces to build: Standings, Power
@@ -104,20 +104,21 @@ These are platform constraints — get them right once in shared infra.
 Delivered as `MessageFlags.Ephemeral` slash replies; opponent intel stays private. Map to FF Wrapped's
 private surfaces, adapted to ESPN public-league data:
 
-| Surface | Metric | Status today |
-|---|---|---|
-| **Lineup efficiency** | Points left on bench / optimal-lineup % per week | ✗ not built |
-| **Expected wins** | Monte Carlo actual-vs-expected, my team highlighted | partial (luck index ≈ points-rank vs wins-rank only) |
-| **All-play record** | My W-L vs the whole field each week | ✗ not built |
-| **Schedule strength** | Avg opponent strength, remaining SOS | ✗ not built |
-| **Opponent scout** | Opponent record/roster/tendencies (autocomplete picker, cached) | ✗ not built |
-| **FAAB / trade value** | My FAAB pace + spend ROI | partial (`/canon faabpace`, `/canon bids`) |
+| Surface                | Metric                                                          | Status today                                         |
+| ---------------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
+| **Lineup efficiency**  | Points left on bench / optimal-lineup % per week                | ✗ not built                                          |
+| **Expected wins**      | Monte Carlo actual-vs-expected, my team highlighted             | partial (luck index ≈ points-rank vs wins-rank only) |
+| **All-play record**    | My W-L vs the whole field each week                             | ✗ not built                                          |
+| **Schedule strength**  | Avg opponent strength, remaining SOS                            | ✗ not built                                          |
+| **Opponent scout**     | Opponent record/roster/tendencies (autocomplete picker, cached) | ✗ not built                                          |
+| **FAAB / trade value** | My FAAB pace + spend ROI                                        | partial (`/canon faabpace`, `/canon bids`)           |
 
 ## 5. Bucket B — Public league-wide fun (scheduled posts + cards)
 
 Two sub-modes, both public:
 
 **Banter / rivalry callouts (cron-driven, text/embed):**
+
 - Weekly trophies (~10 categories above) auto-posted Tuesday.
 - Power rankings with published formula + gap commentary.
 - Close-scores, players-to-monitor, waiver report on the weekly cadence.
@@ -125,6 +126,7 @@ Two sub-modes, both public:
   banter — they just need a **scheduled public surface**, not only on-demand ephemeral replies.
 
 **Polished shareable recaps (rendered SVG→PNG cards):**
+
 - Power-ranking card (bump chart for season-long movement).
 - Weekly recap / matchup card (projection vs actual).
 - End-of-season **Wrapped-style awards recap** — ~14-15 named categories mixing serious honors (MVP,
@@ -144,7 +146,7 @@ Two sub-modes, both public:
    optimal-lineup) are computable **without** private-league cookies? (ESPN public API doesn't expose ROS
    projections.)
 4. **Offseason retention:** no independent evidence on which mechanic (trophies vs power rankings vs polls
-   vs banter) best drives *offseason* engagement specifically — worth measuring once live.
+   vs banter) best drives _offseason_ engagement specifically — worth measuring once live.
 
 ## 7. Tracked work
 
