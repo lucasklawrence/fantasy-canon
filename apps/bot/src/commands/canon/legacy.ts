@@ -226,7 +226,7 @@ function extractTeams(payload: unknown, nameMap: Map<number, string>): TeamInfo[
     const record =
       t.record && typeof t.record === "object" ? (t.record as { overall?: unknown }) : undefined;
     const overall =
-      record && typeof record === "object" ? (record as { overall?: unknown }).overall : undefined;
+      record && typeof record === "object" ? (record).overall : undefined;
     const wins = Number((overall as { wins?: unknown })?.wins) || 0;
     const losses = Number((overall as { losses?: unknown })?.losses) || 0;
     const pointsFor = Number((overall as { pointsFor?: unknown })?.pointsFor) || 0;

@@ -134,7 +134,10 @@ export class HttpEspnClient implements EspnClient {
       }
     }
 
-    throw lastError ?? new Error("Unknown error during fetchLeague");
+    if (lastError instanceof Error) {
+      throw lastError;
+    }
+    throw new Error("Unknown error during fetchLeague", { cause: lastError });
   }
 
   private async sleep(ms: number): Promise<void> {

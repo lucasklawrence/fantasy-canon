@@ -223,7 +223,7 @@ function extractTeams(
     if (!Number.isFinite(teamId)) continue;
 
     const managerId = getManagerId(t, teamId);
-    const teamName = nameMap.get(teamId) ?? formatTeamName(team as unknown as Record<string, unknown>, teamId);
+    const teamName = nameMap.get(teamId) ?? formatTeamName(team as Parameters<typeof formatTeamName>[0], teamId);
     const managerName = ownerMap.get(managerId) ?? getManagerName(t) ?? teamName;
 
     const record =
