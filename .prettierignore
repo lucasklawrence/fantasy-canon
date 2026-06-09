@@ -1,0 +1,8 @@
+# Build output and generated files — never formatted (the format script globs
+# already scope to source dirs; this is belt-and-suspenders for ad-hoc runs).
+dist
+build
+coverage
+node_modules
+*.tsbuildinfo
+pnpm-lock.yaml
