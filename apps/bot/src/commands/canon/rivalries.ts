@@ -1,6 +1,6 @@
-import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
-import { BotContext } from "../../config.js";
-import { buildTeamNameMap } from "../../lib/teamNames.js";
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { BotContext } from '../../config.js';
+import { buildTeamNameMap } from '../../lib/teamNames.js';
 
 interface Matchup {
   homeId: number;
@@ -20,20 +20,20 @@ interface RivalryRecord {
 
 export async function handleRivalrySubcommand(
   interaction: ChatInputCommandInteraction,
-  context: BotContext
+  context: BotContext,
 ): Promise<void> {
-  const season = interaction.options.getInteger("season", true);
-  const teamAInput = interaction.options.getString("teama", true);
-  const teamBInput = interaction.options.getString("teamb", true);
-  const leagueOverride = interaction.options.getString("leagueid") ?? undefined;
+  const season = interaction.options.getInteger('season', true);
+  const teamAInput = interaction.options.getString('teama', true);
+  const teamBInput = interaction.options.getString('teamb', true);
+  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
   const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
 
   if (!leagueId) {
     await interaction.reply({
-      content: "League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.",
-      flags: MessageFlags.Ephemeral
+      content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -41,25 +41,26 @@ export async function handleRivalrySubcommand(
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
-    const mTeamPayload = await ensureSnapshot(context, leagueId, season, "mTeam");
+    const mTeamPayload = await ensureSnapshot(context, leagueId, season, 'mTeam');
     const nameMap = buildTeamNameMap(mTeamPayload);
     const resolver = buildTeamResolver(nameMap);
     const teamAId = resolver(teamAInput);
     const teamBId = resolver(teamBInput);
     if (teamAId === undefined || teamBId === undefined) {
       await interaction.editReply({
-        content: "Unable to resolve one or both team names. Use exact team names from /canon teams."
+        content:
+          'Unable to resolve one or both team names. Use exact team names from /canon teams.',
       });
       return;
     }
 
-    const mScoreboard = await ensureSnapshot(context, leagueId, season, "mScoreboard");
+    const mScoreboard = await ensureSnapshot(context, leagueId, season, 'mScoreboard');
     const matchups = extractMatchups(mScoreboard);
     const record = buildRivalry(matchups, teamAId, teamBId);
 
     if (!record) {
       await interaction.editReply({
-        content: "No head-to-head matchups found for those teams in this season."
+        content: 'No head-to-head matchups found for those teams in this season.',
       });
       return;
     }
@@ -70,34 +71,43 @@ export async function handleRivalrySubcommand(
     const recordLine = `${record.aWins}-${record.bWins} | Points ${record.aPoints.toFixed(2)} - ${record.bPoints.toFixed(2)}`;
     const diff = record.aWins - record.bWins;
     const descriptor =
-      diff > 0 ? `${aName} lead by ${diff}` : diff < 0 ? `${bName} lead by ${Math.abs(diff)}` : "Series tied";
+      diff > 0
+        ? `${aName} lead by ${diff}`
+        : diff < 0
+          ? `${bName} lead by ${Math.abs(diff)}`
+          : 'Series tied';
 
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • Rivalry`, summary, recordLine, descriptor].join("\n")
+      content: [
+        `League ${leagueId} • Season ${season} • Rivalry`,
+        summary,
+        recordLine,
+        descriptor,
+      ].join('\n'),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute rivalry: ${message}`
+      content: `Failed to compute rivalry: ${message}`,
     });
   }
 }
 
 export async function handleRivalriesSubcommand(
   interaction: ChatInputCommandInteraction,
-  context: BotContext
+  context: BotContext,
 ): Promise<void> {
-  const season = interaction.options.getInteger("season", true);
-  const limit = interaction.options.getInteger("limit") ?? 5;
-  const leagueOverride = interaction.options.getString("leagueid") ?? undefined;
+  const season = interaction.options.getInteger('season', true);
+  const limit = interaction.options.getInteger('limit') ?? 5;
+  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
   const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
 
   if (!leagueId) {
     await interaction.reply({
-      content: "League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.",
-      flags: MessageFlags.Ephemeral
+      content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -105,14 +115,14 @@ export async function handleRivalriesSubcommand(
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
-    const mTeamPayload = await ensureSnapshot(context, leagueId, season, "mTeam");
+    const mTeamPayload = await ensureSnapshot(context, leagueId, season, 'mTeam');
     const nameMap = buildTeamNameMap(mTeamPayload);
-    const mScoreboard = await ensureSnapshot(context, leagueId, season, "mScoreboard");
+    const mScoreboard = await ensureSnapshot(context, leagueId, season, 'mScoreboard');
     const matchups = extractMatchups(mScoreboard);
     const rivalries = buildAllRivalries(matchups);
     if (rivalries.length === 0) {
       await interaction.editReply({
-        content: "No head-to-head matchups found."
+        content: 'No head-to-head matchups found.',
       });
       return;
     }
@@ -123,18 +133,21 @@ export async function handleRivalriesSubcommand(
       const aName = nameMap.get(r.teamA) ?? `Team ${r.teamA}`;
       const bName = nameMap.get(r.teamB) ?? `Team ${r.teamB}`;
       const diff = r.aWins - r.bWins;
-      const leader = diff === 0 ? "tied" : diff > 0 ? `${aName} +${diff}` : `${bName} +${-diff}`;
+      const leader = diff === 0 ? 'tied' : diff > 0 ? `${aName} +${diff}` : `${bName} +${-diff}`;
       return `${aName} vs ${bName} — ${r.aWins}-${r.bWins} (pts ${r.aPoints.toFixed(
-        1
+        1,
       )}-${r.bPoints.toFixed(1)}), ${leader}`;
     });
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • Rivalries (top ${sorted.length})`, ...lines].join("\n")
+      content: [
+        `League ${leagueId} • Season ${season} • Rivalries (top ${sorted.length})`,
+        ...lines,
+      ].join('\n'),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to list rivalries: ${message}`
+      content: `Failed to list rivalries: ${message}`,
     });
   }
 }
@@ -146,7 +159,7 @@ function ensureNumber(val: unknown): number | undefined {
 
 function extractMatchups(payload: unknown): Matchup[] {
   const matchups: Matchup[] = [];
-  if (!payload || typeof payload !== "object") return matchups;
+  if (!payload || typeof payload !== 'object') return matchups;
   const maybeSchedule = (payload as { schedule?: unknown }).schedule;
   const maybeMatchups = (payload as { matchups?: unknown }).matchups;
   const source = Array.isArray(maybeSchedule)
@@ -156,10 +169,10 @@ function extractMatchups(payload: unknown): Matchup[] {
       : [];
 
   for (const m of source) {
-    if (!m || typeof m !== "object") continue;
+    if (!m || typeof m !== 'object') continue;
     const home = (m as { home?: unknown }).home;
     const away = (m as { away?: unknown }).away;
-    if (home && typeof home === "object" && away && typeof away === "object") {
+    if (home && typeof home === 'object' && away && typeof away === 'object') {
       const homeId = ensureNumber((home as { teamId?: unknown }).teamId);
       const awayId = ensureNumber((away as { teamId?: unknown }).teamId);
       const homeScore = ensureNumber((home as { totalPoints?: unknown }).totalPoints) ?? 0;
@@ -173,7 +186,7 @@ function extractMatchups(payload: unknown): Matchup[] {
     if (Array.isArray(teams) && teams.length >= 2) {
       const t1: unknown = teams[0];
       const t2: unknown = teams[1];
-      if (t1 && typeof t1 === "object" && t2 && typeof t2 === "object") {
+      if (t1 && typeof t1 === 'object' && t2 && typeof t2 === 'object') {
         const t1Id = ensureNumber((t1 as { teamId?: unknown }).teamId);
         const t2Id = ensureNumber((t2 as { teamId?: unknown }).teamId);
         const t1Score = ensureNumber((t1 as { totalPoints?: unknown }).totalPoints) ?? 0;
@@ -210,16 +223,14 @@ function buildAllRivalries(matchups: Matchup[]): RivalryRecord[] {
   const map = new Map<string, RivalryRecord>();
   for (const m of matchups) {
     const key = m.homeId < m.awayId ? `${m.homeId}-${m.awayId}` : `${m.awayId}-${m.homeId}`;
-    const rec =
-      map.get(key) ??
-      {
-        teamA: m.homeId < m.awayId ? m.homeId : m.awayId,
-        teamB: m.homeId < m.awayId ? m.awayId : m.homeId,
-        aWins: 0,
-        bWins: 0,
-        aPoints: 0,
-        bPoints: 0
-      };
+    const rec = map.get(key) ?? {
+      teamA: m.homeId < m.awayId ? m.homeId : m.awayId,
+      teamB: m.homeId < m.awayId ? m.awayId : m.homeId,
+      aWins: 0,
+      bWins: 0,
+      aPoints: 0,
+      bPoints: 0,
+    };
     const homeIsA = m.homeId === rec.teamA;
     const aScore = homeIsA ? m.homeScore : m.awayScore;
     const bScore = homeIsA ? m.awayScore : m.homeScore;
@@ -251,7 +262,7 @@ async function ensureSnapshot(
   context: BotContext,
   leagueId: string,
   season: number,
-  view: string
+  view: string,
 ): Promise<unknown> {
   const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
   const match = existing.find((s) => s.view === view);
@@ -262,7 +273,7 @@ async function ensureSnapshot(
     season,
     view,
     fetchedAt: new Date(),
-    payload: res.payload
+    payload: res.payload,
   });
   return res.payload;
 }

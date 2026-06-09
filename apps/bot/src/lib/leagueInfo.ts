@@ -1,4 +1,4 @@
-import { BotContext } from "../config.js";
+import { BotContext } from '../config.js';
 
 export interface LeagueInfo {
   leagueId: string;
@@ -11,10 +11,10 @@ export interface LeagueInfo {
 export async function getLeagueInfo(
   context: BotContext,
   leagueId: string,
-  season: number
+  season: number,
 ): Promise<LeagueInfo> {
   const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
-  const cached = existing.find((s) => s.view === "mSettings");
+  const cached = existing.find((s) => s.view === 'mSettings');
   if (cached) {
     const name = extractName(cached.payload);
     return { leagueId, name };
@@ -27,16 +27,16 @@ export async function getLeagueInfo(
 async function fetchSettings(
   context: BotContext,
   leagueId: string,
-  season: number
+  season: number,
 ): Promise<unknown> {
   try {
-    const res = await context.espnClient.fetchLeague({ leagueId, season, view: "mSettings" });
+    const res = await context.espnClient.fetchLeague({ leagueId, season, view: 'mSettings' });
     await context.snapshotsRepo.save({
       leagueId,
       season,
-      view: "mSettings",
+      view: 'mSettings',
       fetchedAt: new Date(),
-      payload: res.payload
+      payload: res.payload,
     });
     return res.payload;
   } catch {
@@ -46,9 +46,9 @@ async function fetchSettings(
 }
 
 function extractName(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== "object") return undefined;
+  if (!payload || typeof payload !== 'object') return undefined;
   const settings = (payload as { settings?: unknown }).settings;
-  if (!settings || typeof settings !== "object") return undefined;
+  if (!settings || typeof settings !== 'object') return undefined;
   const name = (settings as { name?: unknown }).name;
-  return typeof name === "string" && name.trim() ? name : undefined;
+  return typeof name === 'string' && name.trim() ? name : undefined;
 }

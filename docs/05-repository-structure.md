@@ -3,6 +3,7 @@
 A pragmatic TypeScript monorepo (PNPM workspaces or Turborepo) keeps shared logic clean.
 
 ## Top-level
+
 ```text
 fantasy-canon/
   apps/
@@ -23,6 +24,7 @@ fantasy-canon/
 ```
 
 ## apps/bot (suggested)
+
 ```text
 apps/bot/
   src/
@@ -44,6 +46,7 @@ apps/bot/
 ```
 
 ## packages/espn-client
+
 ```text
 packages/espn-client/
   src/
@@ -54,6 +57,7 @@ packages/espn-client/
 ```
 
 ## packages/core
+
 ```text
 packages/core/
   src/
@@ -69,6 +73,7 @@ packages/core/
 ```
 
 ## packages/db
+
 ```text
 packages/db/
   src/
@@ -81,6 +86,7 @@ packages/db/
 ```
 
 ## packages/renderer
+
 ```text
 packages/renderer/
   src/
@@ -91,6 +97,7 @@ packages/renderer/
 ```
 
 ## Local dev requirements
+
 - Node 20+
 - PNPM
 - Postgres (Supabase) or SQLite for MVP

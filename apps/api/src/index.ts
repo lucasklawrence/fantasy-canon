@@ -1,1 +1,1 @@
-console.log("Fantasy Canon API placeholder");
+console.log('Fantasy Canon API placeholder');

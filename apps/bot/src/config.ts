@@ -1,26 +1,26 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { createRequire } from "module";
-import dotenv from "dotenv";
-import { EspnClient, HttpEspnClient } from "@fantasy-canon/espn-client";
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'module';
+import dotenv from 'dotenv';
+import { EspnClient, HttpEspnClient } from '@fantasy-canon/espn-client';
 import {
   InMemoryLeagueConfigRepo,
   InMemorySnapshotsRepo,
   InMemoryCanonEventsRepo,
   LeagueConfigRepo,
   SnapshotsRepo,
-  CanonEventsRepo
-} from "@fantasy-canon/db";
-import { EnvConfig } from "@fantasy-canon/shared";
+  CanonEventsRepo,
+} from '@fantasy-canon/db';
+import { EnvConfig } from '@fantasy-canon/shared';
 
 const require = createRequire(import.meta.url);
-const pkg = require("../package.json") as { version?: string };
+const pkg = require('../package.json') as { version?: string };
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const ENV_PATHS = [
-  path.resolve(process.cwd(), ".env"),
-  path.resolve(process.cwd(), "apps", "bot", ".env"),
-  path.resolve(__dirname, "..", ".env")
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), 'apps', 'bot', '.env'),
+  path.resolve(__dirname, '..', '.env'),
 ];
 
 ENV_PATHS.forEach((envPath) => {
@@ -45,11 +45,11 @@ export function loadEnv(): EnvConfig {
   const espnSwid = process.env.ESPN_SWID;
 
   if (!discordToken) {
-    throw new Error("DISCORD_TOKEN is required");
+    throw new Error('DISCORD_TOKEN is required');
   }
 
   if (!discordAppId) {
-    throw new Error("DISCORD_APP_ID is required");
+    throw new Error('DISCORD_APP_ID is required');
   }
 
   return {
@@ -58,18 +58,18 @@ export function loadEnv(): EnvConfig {
     databaseUrl,
     defaultLeagueId,
     espnS2,
-    espnSwid
+    espnSwid,
   };
 }
 
 export function createBotContext(): BotContext {
   const env = loadEnv();
-  const version = pkg.version ?? "0.0.0";
+  const version = pkg.version ?? '0.0.0';
   const espnClient: EspnClient = new HttpEspnClient(undefined, {
     cookies: {
       espnS2: env.espnS2,
-      swid: env.espnSwid
-    }
+      swid: env.espnSwid,
+    },
   });
   const snapshotsRepo = new InMemorySnapshotsRepo();
   const leagueConfigRepo = new InMemoryLeagueConfigRepo();

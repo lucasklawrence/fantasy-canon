@@ -1,1 +1,1 @@
-export * from "./faab.js";
+export * from './faab.js';

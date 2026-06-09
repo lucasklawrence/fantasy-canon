@@ -3,6 +3,7 @@
 Near-term slash commands to ship next, with scope, dependencies, and acceptance criteria.
 
 ## 1) /canon config
+
 - **Purpose:** store guild-specific league/channel/timezone defaults.
 - **Subcommands:** `set leagueId:<id> startSeason:<yyyy> endSeason:<yyyy>`, `set channel:<#channel> tz:<IANA>`, `show`.
 - **Data:** writes to `leagueConfigRepo` (in-memory now; later DB).
@@ -13,6 +14,7 @@ Near-term slash commands to ship next, with scope, dependencies, and acceptance 
 - **Acceptance:** running `config set` stores values and `config show` echoes them.
 
 ## 2) /canon ingest
+
 - **Purpose:** fetch and store ESPN snapshots for a season/view set.
 - **Options:** `season:<yyyy|all>`, `views:<default|all|custom>`, `leagueId` override.
 - **Data:** uses `espnClient`; writes snapshot to `snapshotsRepo`.
@@ -23,6 +25,7 @@ Near-term slash commands to ship next, with scope, dependencies, and acceptance 
 - **Acceptance:** ingest returns success summary and snapshots retrievable via repo.
 
 ## 3) /canon teams
+
 - **Purpose:** list team names/abbrevs/pointsFor for a season.
 - **Options:** `season:<yyyy>`, optional `leagueId`.
 - **Data:** uses `mTeam` snapshot; can fetch if missing; parse teams array.
@@ -33,6 +36,7 @@ Near-term slash commands to ship next, with scope, dependencies, and acceptance 
 - **Acceptance:** returns 12 teams with names/pointsFor for given season.
 
 ## 4) /canon leaderboard
+
 - **Purpose:** surface first storyline metric (FAAB spend).
 - **Options:** `metric:<faab>`, `season:<yyyy>`, optional `limit`.
 - **Data:** from `mTeam.transactionCounter.acquisitionBudgetSpent`.
@@ -43,15 +47,18 @@ Near-term slash commands to ship next, with scope, dependencies, and acceptance 
 - **Acceptance:** responds with ordered list of teams and FAAB spent for season.
 
 ## 5) /canon inspect (enhance)
+
 - **Purpose:** debug fetch per view.
 - **Add-ons:** allow `views:default` (fetch all default views) and base-url fallback when view fetch 401s; include body snippet on failure.
 
 ## 6) Scheduled job placeholder
+
 - **Purpose:** weekly throwback skeleton.
 - **Implementation steps:** add job registry + `node-cron` stub that logs; wire `/canon config set channel/tz` as prerequisites.
 - **Acceptance:** job logs scheduled trigger and respects configured channel (even if no post yet).
 
 ## Shared dependencies/tasks
+
 - Add tiny helper to resolve guild config vs env defaults for leagueId/season range.
 - Add snapshot cache read-before-fetch in commands to reduce requests.
 - Add unit tests for each handler’s pure functions (config validation, FAAB parsing).

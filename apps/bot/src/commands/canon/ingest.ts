@@ -1,33 +1,33 @@
-import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
-import { DEFAULT_VIEWS, FetchLeagueParams } from "@fantasy-canon/espn-client";
-import { BotContext } from "../../config.js";
-import { DEFAULT_VIEWS as CORE_DEFAULT_VIEWS } from "@fantasy-canon/espn-client";
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { DEFAULT_VIEWS, FetchLeagueParams } from '@fantasy-canon/espn-client';
+import { BotContext } from '../../config.js';
+import { DEFAULT_VIEWS as CORE_DEFAULT_VIEWS } from '@fantasy-canon/espn-client';
 
 const EXTENDED_VIEWS = new Set([
-  "mTeam",
-  "mRoster",
-  "mDraftDetail",
-  "mSettings",
-  "mScoreboard",
-  "mStandings"
+  'mTeam',
+  'mRoster',
+  'mDraftDetail',
+  'mSettings',
+  'mScoreboard',
+  'mStandings',
 ]);
 
 export async function handleIngestSubcommand(
   interaction: ChatInputCommandInteraction,
-  context: BotContext
+  context: BotContext,
 ): Promise<void> {
   const guildId = interaction.guildId;
-  const seasonInput = interaction.options.getString("season", true);
-  const viewsInput = interaction.options.getString("views") ?? "default";
-  const leagueOverride = interaction.options.getString("leagueid") ?? undefined;
+  const seasonInput = interaction.options.getString('season', true);
+  const viewsInput = interaction.options.getString('views') ?? 'default';
+  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
 
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
   const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
 
   if (!leagueId) {
     await interaction.reply({
-      content: "League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.",
-      flags: MessageFlags.Ephemeral
+      content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -37,7 +37,7 @@ export async function handleIngestSubcommand(
     await interaction.reply({
       content:
         "No seasons resolved. Provide a year (e.g., 2025) or configure start/end seasons for 'all'.",
-      flags: MessageFlags.Ephemeral
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -57,7 +57,7 @@ export async function handleIngestSubcommand(
           season,
           view,
           fetchedAt: new Date(),
-          payload: res.payload
+          payload: res.payload,
         });
         const bytes = JSON.stringify(res.payload)?.length ?? 0;
         results.push(`✅ ${season} ${view} (${bytes} bytes)`);
@@ -71,18 +71,18 @@ export async function handleIngestSubcommand(
   await interaction.editReply({
     content: [
       `Ingest for league ${leagueId}`,
-      `Seasons: ${seasons.join(", ")}`,
-      `Views: ${views.join(", ")}`,
-      ...results
-    ].join("\n")
+      `Seasons: ${seasons.join(', ')}`,
+      `Views: ${views.join(', ')}`,
+      ...results,
+    ].join('\n'),
   });
 }
 
 function resolveSeasons(
   input: string,
-  guildConfig?: { startSeason?: number; endSeason?: number }
+  guildConfig?: { startSeason?: number; endSeason?: number },
 ): number[] {
-  if (input.toLowerCase() === "all") {
+  if (input.toLowerCase() === 'all') {
     if (guildConfig?.startSeason !== undefined && guildConfig?.endSeason !== undefined) {
       const seasons: number[] = [];
       for (let year = guildConfig.startSeason; year <= guildConfig.endSeason; year += 1) {
@@ -101,14 +101,14 @@ function resolveSeasons(
 }
 
 function resolveViews(input: string): string[] {
-  if (input === "default" || input === "all") {
+  if (input === 'default' || input === 'all') {
     // default/all: ingest core + extended so downstream commands don't need piecemeal fetches
     const base = new Set<string>([...DEFAULT_VIEWS, ...CORE_DEFAULT_VIEWS]);
     EXTENDED_VIEWS.forEach((v) => base.add(v));
     return Array.from(base);
   }
   return input
-    .split(",")
+    .split(',')
     .map((v) => v.trim())
     .filter((v) => v.length > 0);
 }

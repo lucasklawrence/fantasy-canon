@@ -1,33 +1,33 @@
-import { AttachmentBuilder, ChatInputCommandInteraction, MessageFlags } from "discord.js";
-import { BotContext } from "../../config.js";
-import { buildTeamNameMap } from "../../lib/teamNames.js";
-import { getLeagueInfo } from "../../lib/leagueInfo.js";
+import { AttachmentBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { BotContext } from '../../config.js';
+import { buildTeamNameMap } from '../../lib/teamNames.js';
+import { getLeagueInfo } from '../../lib/leagueInfo.js';
 import {
   renderDraftProphecyGraph,
   renderFaabPaceGraph,
-  renderLuckGraph
-} from "@fantasy-canon/renderer";
+  renderLuckGraph,
+} from '@fantasy-canon/renderer';
 import {
   ensureTransactionsPayload,
   getTransactionTeamId,
-  isWaiverSpend
-} from "../../lib/transactions.js";
+  isWaiverSpend,
+} from '../../lib/transactions.js';
 
 export async function handleGraphSubcommand(
   interaction: ChatInputCommandInteraction,
-  context: BotContext
+  context: BotContext,
 ): Promise<void> {
-  const metric = interaction.options.getString("metric", true);
-  const season = interaction.options.getInteger("season", true);
-  const leagueOverride = interaction.options.getString("leagueid") ?? undefined;
+  const metric = interaction.options.getString('metric', true);
+  const season = interaction.options.getInteger('season', true);
+  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
   const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
 
   if (!leagueId) {
     await interaction.reply({
-      content: "League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.",
-      flags: MessageFlags.Ephemeral
+      content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -36,11 +36,11 @@ export async function handleGraphSubcommand(
 
   try {
     const leagueInfo = await getLeagueInfo(context, leagueId, season);
-    const mTeamPayload = await ensureSnapshot(context, leagueId, season, "mTeam");
+    const mTeamPayload = await ensureSnapshot(context, leagueId, season, 'mTeam');
     const nameMap = buildTeamNameMap(mTeamPayload);
     const teams = extractTeams(mTeamPayload);
 
-    if (metric === "luck") {
+    if (metric === 'luck') {
       const avgPoints = average(teams.map((t) => t.pointsFor));
       const avgWins = average(teams.map((t) => t.wins));
       const points = teams.map((t) => {
@@ -48,13 +48,13 @@ export async function handleGraphSubcommand(
         return {
           team: nameMap.get(t.id) ?? `Team ${t.id}`,
           wins: t.wins,
-          expectedWins
+          expectedWins,
         };
       });
       const buffer = await renderLuckGraph({
         title: `${leagueInfo.name ?? leagueId} • Luck graph`,
         subtitle: `Season ${season}`,
-        points
+        points,
       });
       await sendBuffer(
         interaction,
@@ -62,26 +62,26 @@ export async function handleGraphSubcommand(
         `${leagueId}-luck-${season}.png`,
         leagueInfo.name,
         season,
-        "Luck graph"
+        'Luck graph',
       );
-    } else if (metric === "draft-prophecy") {
+    } else if (metric === 'draft-prophecy') {
       const points = teams
         .filter((t) => t.projectedRank !== undefined || t.finishRank !== undefined)
         .map((t) => ({
           team: nameMap.get(t.id) ?? `Team ${t.id}`,
           projectedRank: t.projectedRank,
-          finalRank: t.finishRank
+          finalRank: t.finishRank,
         }));
       if (points.length === 0) {
         await interaction.editReply({
-          content: "No draft projection data found."
+          content: 'No draft projection data found.',
         });
         return;
       }
       const buffer = await renderDraftProphecyGraph({
         title: `${leagueInfo.name ?? leagueId} • Draft Prophecy`,
         subtitle: `Season ${season}`,
-        points
+        points,
       });
       await sendBuffer(
         interaction,
@@ -89,14 +89,14 @@ export async function handleGraphSubcommand(
         `${leagueId}-draft-${season}.png`,
         leagueInfo.name,
         season,
-        "Draft Prophecy"
+        'Draft Prophecy',
       );
-    } else if (metric === "faab-pace") {
-      const mSettingsPayload = await ensureSnapshot(context, leagueId, season, "mSettings");
+    } else if (metric === 'faab-pace') {
+      const mSettingsPayload = await ensureSnapshot(context, leagueId, season, 'mSettings');
       const mTxPayload = await ensureTransactionsPayload(context, leagueId, season);
       if (!mTxPayload) {
         await interaction.editReply({
-          content: "Transactions payload not available for this league/season."
+          content: 'Transactions payload not available for this league/season.',
         });
         return;
       }
@@ -104,7 +104,7 @@ export async function handleGraphSubcommand(
       const lines = buildFaabLines(mTxPayload, nameMap);
       if (lines.length === 0) {
         await interaction.editReply({
-          content: "No FAAB spend data found."
+          content: 'No FAAB spend data found.',
         });
         return;
       }
@@ -112,7 +112,7 @@ export async function handleGraphSubcommand(
         title: `${leagueInfo.name ?? leagueId} • FAAB pace`,
         subtitle: `Season ${season}`,
         budget,
-        lines
+        lines,
       });
       await sendBuffer(
         interaction,
@@ -120,17 +120,17 @@ export async function handleGraphSubcommand(
         `${leagueId}-faabpace-${season}.png`,
         leagueInfo.name,
         season,
-        "FAAB pace"
+        'FAAB pace',
       );
     } else {
       await interaction.editReply({
-        content: `Metric "${metric}" is not supported.`
+        content: `Metric "${metric}" is not supported.`,
       });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to render graph: ${message}`
+      content: `Failed to render graph: ${message}`,
     });
   }
 }
@@ -139,7 +139,7 @@ async function ensureSnapshot(
   context: BotContext,
   leagueId: string,
   season: number,
-  view: string
+  view: string,
 ): Promise<unknown> {
   const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
   const match = existing.find((s) => s.view === view);
@@ -150,7 +150,7 @@ async function ensureSnapshot(
     season,
     view,
     fetchedAt: new Date(),
-    payload: res.payload
+    payload: res.payload,
   });
   return res.payload;
 }
@@ -166,12 +166,12 @@ interface TeamSummary {
 }
 
 function extractTeams(payload: unknown): TeamSummary[] {
-  if (!payload || typeof payload !== "object") return [];
+  if (!payload || typeof payload !== 'object') return [];
   const maybeTeams = (payload as { teams?: unknown }).teams;
   if (!Array.isArray(maybeTeams)) return [];
   const teams: TeamSummary[] = [];
   for (const team of maybeTeams) {
-    if (!team || typeof team !== "object") continue;
+    if (!team || typeof team !== 'object') continue;
     const t = team as {
       id?: unknown;
       record?: unknown;
@@ -183,19 +183,15 @@ function extractTeams(payload: unknown): TeamSummary[] {
     const id = Number(t.id);
     if (!Number.isFinite(id)) continue;
     const record =
-      t.record && typeof t.record === "object" ? (t.record as { overall?: unknown }) : undefined;
-    const overall =
-      record && typeof record === "object" ? (record).overall : undefined;
+      t.record && typeof t.record === 'object' ? (t.record as { overall?: unknown }) : undefined;
+    const overall = record && typeof record === 'object' ? record.overall : undefined;
     const wins = Number((overall as { wins?: unknown })?.wins) || 0;
     const losses = Number((overall as { losses?: unknown })?.losses) || 0;
     const ties = Number((overall as { ties?: unknown })?.ties) || 0;
     const pointsFor = Number((overall as { pointsFor?: unknown })?.pointsFor) || 0;
     const projectedRank = Number(t.draftDayProjectedRank);
     const finishRank =
-      Number(t.rankFinal) ||
-      Number(t.rankCalculatedFinal) ||
-      Number(t.playoffSeed) ||
-      undefined;
+      Number(t.rankFinal) || Number(t.rankCalculatedFinal) || Number(t.playoffSeed) || undefined;
 
     teams.push({ id, wins, losses, ties, pointsFor, projectedRank, finishRank });
   }
@@ -208,12 +204,12 @@ async function sendBuffer(
   filename: string,
   leagueName: string | undefined,
   season: number,
-  label: string
+  label: string,
 ): Promise<void> {
   const attachment = new AttachmentBuilder(buffer, { name: filename });
   await interaction.editReply({
-    content: `League ${leagueName ?? ""} • Season ${season} • ${label}`,
-    files: [attachment]
+    content: `League ${leagueName ?? ''} • Season ${season} • ${label}`,
+    files: [attachment],
   });
 }
 
@@ -225,17 +221,17 @@ function average(values: number[]): number {
 
 function buildFaabLines(
   mTransactionsPayload: { transactions?: unknown[] },
-  nameMap: Map<number, string>
+  nameMap: Map<number, string>,
 ): Array<{ team: string; weekly: number[] }> {
   const spendByTeamWeek = new Map<number, Map<number, number>>();
   if (mTransactionsPayload && Array.isArray(mTransactionsPayload.transactions)) {
     for (const tx of mTransactionsPayload.transactions) {
-      if (!tx || typeof tx !== "object") continue;
+      if (!tx || typeof tx !== 'object') continue;
       if (!isWaiverSpend(tx)) continue;
       const t = tx as { bidAmount?: unknown; scoringPeriodId?: unknown };
-      const bid = typeof t.bidAmount === "number" ? t.bidAmount : undefined;
+      const bid = typeof t.bidAmount === 'number' ? t.bidAmount : undefined;
       if (bid === undefined) continue;
-      const week = typeof t.scoringPeriodId === "number" ? t.scoringPeriodId : undefined;
+      const week = typeof t.scoringPeriodId === 'number' ? t.scoringPeriodId : undefined;
       const teamId = getTransactionTeamId(tx);
       if (teamId === undefined || week === undefined) continue;
       const weekMap = spendByTeamWeek.get(teamId) ?? new Map<number, number>();
@@ -271,22 +267,22 @@ function buildFaabLines(
     }
     lines.push({
       team: nameMap.get(teamId) ?? `Team ${teamId}`,
-      weekly: cumulative
+      weekly: cumulative,
     });
   }
   return lines;
 }
 
 function extractBudget(settingsPayload: unknown): number | undefined {
-  if (!settingsPayload || typeof settingsPayload !== "object") return undefined;
+  if (!settingsPayload || typeof settingsPayload !== 'object') return undefined;
   const settings = (settingsPayload as { settings?: unknown }).settings;
   const acquisition =
-    settings && typeof settings === "object"
+    settings && typeof settings === 'object'
       ? (settings as { acquisitionSettings?: unknown }).acquisitionSettings
       : undefined;
   const budget =
-    acquisition && typeof acquisition === "object"
+    acquisition && typeof acquisition === 'object'
       ? (acquisition as { acquisitionBudget?: unknown }).acquisitionBudget
       : undefined;
-  return typeof budget === "number" && Number.isFinite(budget) ? budget : undefined;
+  return typeof budget === 'number' && Number.isFinite(budget) ? budget : undefined;
 }

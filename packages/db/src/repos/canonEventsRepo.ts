@@ -1,4 +1,4 @@
-export type CanonEventType = "champion" | "luck" | "draft" | "custom";
+export type CanonEventType = 'champion' | 'luck' | 'draft' | 'custom';
 
 export interface CanonEventRecord {
   id: string;
@@ -19,10 +19,15 @@ export interface CanonEventCreate {
 
 export interface CanonEventsRepo {
   add(event: CanonEventCreate): Promise<CanonEventRecord>;
-  list(params: { leagueId: string; season?: number; limit?: number; offset?: number }): Promise<CanonEventRecord[]>;
+  list(params: {
+    leagueId: string;
+    season?: number;
+    limit?: number;
+    offset?: number;
+  }): Promise<CanonEventRecord[]>;
 }
 
-import crypto from "node:crypto";
+import crypto from 'node:crypto';
 
 export class InMemoryCanonEventsRepo implements CanonEventsRepo {
   private readonly events: CanonEventRecord[] = [];
@@ -31,13 +36,18 @@ export class InMemoryCanonEventsRepo implements CanonEventsRepo {
     const record: CanonEventRecord = {
       id: crypto.randomUUID(),
       createdAt: event.createdAt ?? new Date(),
-      ...event
+      ...event,
     };
     this.events.push(record);
     return Promise.resolve(record);
   }
 
-  list(params: { leagueId: string; season?: number; limit?: number; offset?: number }): Promise<CanonEventRecord[]> {
+  list(params: {
+    leagueId: string;
+    season?: number;
+    limit?: number;
+    offset?: number;
+  }): Promise<CanonEventRecord[]> {
     const { leagueId, season, limit = 20, offset = 0 } = params;
     const filtered = this.events
       .filter((e) => e.leagueId === leagueId)

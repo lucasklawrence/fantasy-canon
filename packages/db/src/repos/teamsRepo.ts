@@ -1,4 +1,4 @@
-import { SeasonYear } from "@fantasy-canon/shared";
+import { SeasonYear } from '@fantasy-canon/shared';
 
 export interface TeamRecord {
   season: SeasonYear;

@@ -1,7 +1,7 @@
-import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
-import { BotContext } from "../../config.js";
-import { buildTeamNameMap } from "../../lib/teamNames.js";
-import { ensureTransactionsPayload, getTransactionTeamId } from "../../lib/transactions.js";
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { BotContext } from '../../config.js';
+import { buildTeamNameMap } from '../../lib/teamNames.js';
+import { ensureTransactionsPayload, getTransactionTeamId } from '../../lib/transactions.js';
 
 interface ParsedTransaction {
   teamId?: number;
@@ -14,19 +14,19 @@ interface ParsedTransaction {
 
 export async function handleTransactionsSubcommand(
   interaction: ChatInputCommandInteraction,
-  context: BotContext
+  context: BotContext,
 ): Promise<void> {
-  const season = interaction.options.getInteger("season", true);
-  const limit = interaction.options.getInteger("limit") ?? 10;
-  const leagueOverride = interaction.options.getString("leagueid") ?? undefined;
+  const season = interaction.options.getInteger('season', true);
+  const limit = interaction.options.getInteger('limit') ?? 10;
+  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
   const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
 
   if (!leagueId) {
     await interaction.reply({
-      content: "League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.",
-      flags: MessageFlags.Ephemeral
+      content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -34,13 +34,16 @@ export async function handleTransactionsSubcommand(
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
-    const mTeamPayload = await ensureSnapshot(context, leagueId, season, "mTeam");
+    const mTeamPayload = await ensureSnapshot(context, leagueId, season, 'mTeam');
     const nameMap = buildTeamNameMap(mTeamPayload);
-    const mTxPayload: { transactions?: unknown[] } | undefined =
-      await ensureTransactionsPayload(context, leagueId, season);
+    const mTxPayload: { transactions?: unknown[] } | undefined = await ensureTransactionsPayload(
+      context,
+      leagueId,
+      season,
+    );
     if (!mTxPayload) {
       await interaction.editReply({
-        content: "Transactions payload not available for this league/season."
+        content: 'Transactions payload not available for this league/season.',
       });
       return;
     }
@@ -49,27 +52,29 @@ export async function handleTransactionsSubcommand(
 
     if (parsed.length === 0) {
       await interaction.editReply({
-        content: "No transactions found."
+        content: 'No transactions found.',
       });
       return;
     }
 
     const lines = parsed.map((tx) => {
-      const when = tx.executedAt ? tx.executedAt.toISOString().split("T")[0] : "unknown date";
-      const bid = tx.bid !== undefined ? `$${tx.bid}` : "";
-      const week = tx.week ? `Week ${tx.week}` : "";
+      const when = tx.executedAt ? tx.executedAt.toISOString().split('T')[0] : 'unknown date';
+      const bid = tx.bid !== undefined ? `$${tx.bid}` : '';
+      const week = tx.week ? `Week ${tx.week}` : '';
       const parts = [when, tx.teamName, tx.type, week, bid].filter(Boolean);
-      return parts.join(" • ");
+      return parts.join(' • ');
     });
 
     await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • Latest ${parsed.length}`, ...lines].join("\n")
+      content: [`League ${leagueId} • Season ${season} • Latest ${parsed.length}`, ...lines].join(
+        '\n',
+      ),
     });
   } catch (error) {
-    console.error("Failed to list transactions", error);
+    console.error('Failed to list transactions', error);
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to list transactions: ${message}`
+      content: `Failed to list transactions: ${message}`,
     });
   }
 }
@@ -78,7 +83,7 @@ async function ensureSnapshot(
   context: BotContext,
   leagueId: string,
   season: number,
-  view: string
+  view: string,
 ): Promise<unknown> {
   const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
   const match = existing.find((s) => s.view === view);
@@ -89,19 +94,19 @@ async function ensureSnapshot(
     season,
     view,
     fetchedAt: new Date(),
-    payload: res.payload
+    payload: res.payload,
   });
   return res.payload;
 }
 
 function extractTransactions(payload: unknown, nameMap: Map<number, string>): ParsedTransaction[] {
-  if (!payload || typeof payload !== "object") return [];
+  if (!payload || typeof payload !== 'object') return [];
   const maybeTxs = (payload as { transactions?: unknown }).transactions;
   if (!Array.isArray(maybeTxs)) return [];
 
   const parsed: ParsedTransaction[] = [];
   for (const tx of maybeTxs) {
-    if (!tx || typeof tx !== "object") continue;
+    if (!tx || typeof tx !== 'object') continue;
     const t = tx as {
       actions?: unknown;
       executionDate?: unknown;
@@ -113,14 +118,19 @@ function extractTransactions(payload: unknown, nameMap: Map<number, string>): Pa
     };
 
     const teamId = getTransactionTeamId(tx);
-    const teamName = teamId ? nameMap.get(teamId) ?? `Team ${teamId}` : "Unknown team";
+    const teamName = teamId ? (nameMap.get(teamId) ?? `Team ${teamId}`) : 'Unknown team';
     const dateMs =
-      (typeof t.executionDate === "number" ? t.executionDate : undefined) ??
-      (typeof t.proposedDate === "number" ? t.proposedDate : undefined);
+      (typeof t.executionDate === 'number' ? t.executionDate : undefined) ??
+      (typeof t.proposedDate === 'number' ? t.proposedDate : undefined);
     const executedAt = dateMs ? new Date(dateMs) : undefined;
-    const type = typeof t.type === "string" ? t.type : typeof t.transactionType === "string" ? t.transactionType : "transaction";
-    const bid = typeof t.bidAmount === "number" ? t.bidAmount : undefined;
-    const week = typeof t.scoringPeriodId === "number" ? t.scoringPeriodId : undefined;
+    const type =
+      typeof t.type === 'string'
+        ? t.type
+        : typeof t.transactionType === 'string'
+          ? t.transactionType
+          : 'transaction';
+    const bid = typeof t.bidAmount === 'number' ? t.bidAmount : undefined;
+    const week = typeof t.scoringPeriodId === 'number' ? t.scoringPeriodId : undefined;
 
     parsed.push({ teamId, teamName, type, bid, week, executedAt });
   }

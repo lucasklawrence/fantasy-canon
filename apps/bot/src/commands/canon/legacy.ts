@@ -1,7 +1,7 @@
-import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
-import { BotContext } from "../../config.js";
-import { buildTeamNameMap } from "../../lib/teamNames.js";
-import { getLeagueInfo } from "../../lib/leagueInfo.js";
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { BotContext } from '../../config.js';
+import { buildTeamNameMap } from '../../lib/teamNames.js';
+import { getLeagueInfo } from '../../lib/leagueInfo.js';
 
 type TeamLike = {
   id?: unknown;
@@ -27,18 +27,18 @@ interface TeamInfo {
  */
 export async function handleLegacySubcommand(
   interaction: ChatInputCommandInteraction,
-  context: BotContext
+  context: BotContext,
 ): Promise<void> {
-  const season = interaction.options.getInteger("season", true);
-  const leagueOverride = interaction.options.getString("leagueid") ?? undefined;
+  const season = interaction.options.getInteger('season', true);
+  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
   const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
 
   if (!leagueId) {
     await interaction.reply({
-      content: "League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.",
-      flags: MessageFlags.Ephemeral
+      content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -47,26 +47,32 @@ export async function handleLegacySubcommand(
 
   try {
     const leagueInfo = await getLeagueInfo(context, leagueId, season);
-    const mTeamPayload = await ensureSnapshot(context, leagueId, season, "mTeam");
+    const mTeamPayload = await ensureSnapshot(context, leagueId, season, 'mTeam');
     const nameMap = buildTeamNameMap(mTeamPayload);
     const teams = extractTeams(mTeamPayload, nameMap);
     if (teams.length === 0) {
       await interaction.editReply({
-        content: "No teams found."
+        content: 'No teams found.',
       });
       return;
     }
 
     // Luck: points rank vs wins rank
-    const pointsRank = rankBy(teams, (t) => t.pointsFor, "desc");
-    const winRank = rankBy(teams, (t) => t.wins, "desc");
+    const pointsRank = rankBy(teams, (t) => t.pointsFor, 'desc');
+    const winRank = rankBy(teams, (t) => t.wins, 'desc');
     const luckEntries = teams.map((t) => {
       const pr = pointsRank.get(t) ?? teams.length;
       const wr = winRank.get(t) ?? teams.length;
       return { team: t, luck: pr - wr };
     });
-    const mostUnlucky = luckEntries.reduce((min, cur) => (cur.luck < min.luck ? cur : min), luckEntries[0]);
-    const mostDominant = teams.reduce((best, cur) => (winPct(cur) > winPct(best) ? cur : best), teams[0]);
+    const mostUnlucky = luckEntries.reduce(
+      (min, cur) => (cur.luck < min.luck ? cur : min),
+      luckEntries[0],
+    );
+    const mostDominant = teams.reduce(
+      (best, cur) => (winPct(cur) > winPct(best) ? cur : best),
+      teams[0],
+    );
 
     // Archetype leaderboard by total moves
     const archetype = teams
@@ -77,25 +83,28 @@ export async function handleLegacySubcommand(
     const lines: string[] = [];
     lines.push(`Most unlucky: ${mostUnlucky.team.name} (luck ${mostUnlucky.luck.toFixed(2)})`);
     lines.push(
-      `Most dominant: ${mostDominant.name} (${mostDominant.wins}-${mostDominant.losses}, win% ${winPct(mostDominant).toFixed(
-        3
-      )})`
+      `Most dominant: ${mostDominant.name} (${mostDominant.wins}-${mostDominant.losses}, win% ${winPct(
+        mostDominant,
+      ).toFixed(3)})`,
     );
-    lines.push("Archetype: Wire/Activity leaders");
+    lines.push('Archetype: Wire/Activity leaders');
     lines.push(
       ...archetype.map(
         (a, idx) =>
-          `${idx + 1}. ${a.team.name} — adds ${a.team.acquisitions}, total moves ${a.moves}`
-      )
+          `${idx + 1}. ${a.team.name} — adds ${a.team.acquisitions}, total moves ${a.moves}`,
+      ),
     );
 
     await interaction.editReply({
-      content: [`League ${leagueInfo.name ?? leagueId} • Season ${season} • Legacy awards`, ...lines].join("\n")
+      content: [
+        `League ${leagueInfo.name ?? leagueId} • Season ${season} • Legacy awards`,
+        ...lines,
+      ].join('\n'),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute legacy awards: ${message}`
+      content: `Failed to compute legacy awards: ${message}`,
     });
   }
 }
@@ -106,18 +115,18 @@ export async function handleLegacySubcommand(
  */
 export async function handleLegacyHistorySubcommand(
   interaction: ChatInputCommandInteraction,
-  context: BotContext
+  context: BotContext,
 ): Promise<void> {
-  const seasonsText = interaction.options.getString("seasons", true);
-  const leagueOverride = interaction.options.getString("leagueid") ?? undefined;
+  const seasonsText = interaction.options.getString('seasons', true);
+  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
   const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
 
   if (!leagueId) {
     await interaction.reply({
-      content: "League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.",
-      flags: MessageFlags.Ephemeral
+      content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -125,8 +134,8 @@ export async function handleLegacyHistorySubcommand(
   const seasons = parseSeasonList(seasonsText);
   if (seasons.length === 0) {
     await interaction.reply({
-      content: "Provide seasons as comma list or range (e.g., 2022-2025 or 2024,2025).",
-      flags: MessageFlags.Ephemeral
+      content: 'Provide seasons as comma list or range (e.g., 2022-2025 or 2024,2025).',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -138,7 +147,7 @@ export async function handleLegacyHistorySubcommand(
     const aggregates = new Map<number, TeamInfo>();
 
     for (const season of seasons) {
-      const mTeamPayload = await ensureSnapshot(context, leagueId, season, "mTeam");
+      const mTeamPayload = await ensureSnapshot(context, leagueId, season, 'mTeam');
       const nameMap = buildTeamNameMap(mTeamPayload);
       const teams = extractTeams(mTeamPayload, nameMap);
       for (const team of teams) {
@@ -162,20 +171,26 @@ export async function handleLegacyHistorySubcommand(
 
     if (aggregate.length === 0) {
       await interaction.editReply({
-        content: "No team data found for the requested seasons."
+        content: 'No team data found for the requested seasons.',
       });
       return;
     }
 
-    const pointsRank = rankBy(aggregate, (t) => t.pointsFor, "desc");
-    const winRank = rankBy(aggregate, (t) => t.wins, "desc");
+    const pointsRank = rankBy(aggregate, (t) => t.pointsFor, 'desc');
+    const winRank = rankBy(aggregate, (t) => t.wins, 'desc');
     const luckEntries = aggregate.map((t) => {
       const pr = pointsRank.get(t) ?? aggregate.length;
       const wr = winRank.get(t) ?? aggregate.length;
       return { team: t, luck: pr - wr };
     });
-    const mostUnlucky = luckEntries.reduce((min, cur) => (cur.luck < min.luck ? cur : min), luckEntries[0]);
-    const mostDominant = aggregate.reduce((best, cur) => (winPct(cur) > winPct(best) ? cur : best), aggregate[0]);
+    const mostUnlucky = luckEntries.reduce(
+      (min, cur) => (cur.luck < min.luck ? cur : min),
+      luckEntries[0],
+    );
+    const mostDominant = aggregate.reduce(
+      (best, cur) => (winPct(cur) > winPct(best) ? cur : best),
+      aggregate[0],
+    );
 
     const archetype = aggregate
       .map((t) => ({ team: t, moves: t.totalMoves }))
@@ -183,29 +198,34 @@ export async function handleLegacyHistorySubcommand(
       .slice(0, 3);
 
     const lines: string[] = [];
-    lines.push(`Seasons: ${seasons.join(", ")}`);
-    lines.push("Mode: aggregated per team across seasons");
-    lines.push(`Most unlucky (aggregated): ${mostUnlucky.team.name} (luck ${mostUnlucky.luck.toFixed(2)})`);
+    lines.push(`Seasons: ${seasons.join(', ')}`);
+    lines.push('Mode: aggregated per team across seasons');
     lines.push(
-      `Most dominant (aggregated): ${mostDominant.name} (${mostDominant.wins}-${mostDominant.losses}, win% ${winPct(mostDominant).toFixed(
-        3
-      )})`
+      `Most unlucky (aggregated): ${mostUnlucky.team.name} (luck ${mostUnlucky.luck.toFixed(2)})`,
     );
-    lines.push("Archetype: Wire/Activity leaders (aggregated)");
+    lines.push(
+      `Most dominant (aggregated): ${mostDominant.name} (${mostDominant.wins}-${mostDominant.losses}, win% ${winPct(
+        mostDominant,
+      ).toFixed(3)})`,
+    );
+    lines.push('Archetype: Wire/Activity leaders (aggregated)');
     lines.push(
       ...archetype.map(
         (a, idx) =>
-          `${idx + 1}. ${a.team.name} — adds ${a.team.acquisitions}, total moves ${a.moves}`
-      )
+          `${idx + 1}. ${a.team.name} — adds ${a.team.acquisitions}, total moves ${a.moves}`,
+      ),
     );
 
     await interaction.editReply({
-      content: [`League ${leagueInfo.name ?? leagueId} • Legacy (multi-season, aggregated)`, ...lines].join("\n")
+      content: [
+        `League ${leagueInfo.name ?? leagueId} • Legacy (multi-season, aggregated)`,
+        ...lines,
+      ].join('\n'),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute legacy history: ${message}`
+      content: `Failed to compute legacy history: ${message}`,
     });
   }
 }
@@ -214,24 +234,23 @@ export async function handleLegacyHistorySubcommand(
  * Normalizes the ESPN mTeam payload into a TeamInfo list with move and scoring totals.
  */
 function extractTeams(payload: unknown, nameMap: Map<number, string>): TeamInfo[] {
-  if (!payload || typeof payload !== "object") return [];
+  if (!payload || typeof payload !== 'object') return [];
   const maybeTeams = (payload as { teams?: unknown }).teams;
   if (!Array.isArray(maybeTeams)) return [];
   const teams: TeamInfo[] = [];
   for (const team of maybeTeams) {
-    if (!team || typeof team !== "object") continue;
+    if (!team || typeof team !== 'object') continue;
     const t = team as TeamLike;
     const id = Number(t.id);
     if (!Number.isFinite(id)) continue;
     const record =
-      t.record && typeof t.record === "object" ? (t.record as { overall?: unknown }) : undefined;
-    const overall =
-      record && typeof record === "object" ? (record).overall : undefined;
+      t.record && typeof t.record === 'object' ? (t.record as { overall?: unknown }) : undefined;
+    const overall = record && typeof record === 'object' ? record.overall : undefined;
     const wins = Number((overall as { wins?: unknown })?.wins) || 0;
     const losses = Number((overall as { losses?: unknown })?.losses) || 0;
     const pointsFor = Number((overall as { pointsFor?: unknown })?.pointsFor) || 0;
     const tc =
-      t.transactionCounter && typeof t.transactionCounter === "object"
+      t.transactionCounter && typeof t.transactionCounter === 'object'
         ? (t.transactionCounter as {
             acquisitions?: unknown;
             moveToActive?: unknown;
@@ -244,11 +263,7 @@ function extractTeams(payload: unknown, nameMap: Map<number, string>): TeamInfo[
     const moveToActive = Number(tc?.moveToActive) || 0;
     const moveToIR = Number(tc?.moveToIR) || 0;
     const totalMoves =
-      acquisitions +
-      moveToActive +
-      moveToIR +
-      (Number(tc?.drops) || 0) +
-      (Number(tc?.trades) || 0);
+      acquisitions + moveToActive + moveToIR + (Number(tc?.drops) || 0) + (Number(tc?.trades) || 0);
 
     teams.push({
       id,
@@ -259,7 +274,7 @@ function extractTeams(payload: unknown, nameMap: Map<number, string>): TeamInfo[
       acquisitions,
       moveToActive,
       moveToIR,
-      totalMoves
+      totalMoves,
     });
   }
   return teams;
@@ -271,10 +286,10 @@ function extractTeams(payload: unknown, nameMap: Map<number, string>): TeamInfo[
 function rankBy(
   teams: TeamInfo[],
   getter: (t: TeamInfo) => number,
-  direction: "asc" | "desc"
+  direction: 'asc' | 'desc',
 ): Map<TeamInfo, number> {
   const scored = teams.map((t) => ({ team: t, value: getter(t) }));
-  scored.sort((a, b) => (direction === "asc" ? a.value - b.value : b.value - a.value));
+  scored.sort((a, b) => (direction === 'asc' ? a.value - b.value : b.value - a.value));
   const ranks = new Map<TeamInfo, number>();
   scored.forEach((entry, idx) => ranks.set(entry.team, idx + 1));
   return ranks;
@@ -295,11 +310,11 @@ function winPct(t: TeamInfo): number {
 function parseSeasonList(text: string): number[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
-  const parts = trimmed.split(",").map((p) => p.trim());
+  const parts = trimmed.split(',').map((p) => p.trim());
   const seasons: number[] = [];
   for (const part of parts) {
-    if (part.includes("-")) {
-      const [start, end] = part.split("-").map((p) => Number.parseInt(p.trim(), 10));
+    if (part.includes('-')) {
+      const [start, end] = part.split('-').map((p) => Number.parseInt(p.trim(), 10));
       if (Number.isFinite(start) && Number.isFinite(end)) {
         const [lo, hi] = start <= end ? [start, end] : [end, start];
         for (let y = lo; y <= hi; y += 1) {
@@ -321,7 +336,7 @@ async function ensureSnapshot(
   context: BotContext,
   leagueId: string,
   season: number,
-  view: string
+  view: string,
 ): Promise<unknown> {
   const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
   const match = existing.find((s) => s.view === view);
@@ -332,7 +347,7 @@ async function ensureSnapshot(
     season,
     view,
     fetchedAt: new Date(),
-    payload: res.payload
+    payload: res.payload,
   });
   return res.payload;
 }

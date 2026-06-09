@@ -1,10 +1,10 @@
-import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 
 export async function handlePingSubcommand(
-  interaction: ChatInputCommandInteraction
+  interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   await interaction.reply({
-    content: "Pong 🏈",
-    flags: MessageFlags.Ephemeral
+    content: 'Pong 🏈',
+    flags: MessageFlags.Ephemeral,
   });
 }

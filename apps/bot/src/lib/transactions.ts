@@ -1,4 +1,4 @@
-import { BotContext } from "../config.js";
+import { BotContext } from '../config.js';
 
 interface TransactionsPayload {
   transactions?: unknown[];
@@ -12,15 +12,17 @@ interface TransactionsPayload {
 export async function ensureTransactionsPayload(
   context: BotContext,
   leagueId: string,
-  season: number
+  season: number,
 ): Promise<TransactionsPayload | undefined> {
   const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
   const cached =
-    existing.find((s) => s.view === "mTransactions2" && hasTransactions(s.payload)) ??
-    existing.find((s) => s.view === "mTransactions" && hasTransactions(s.payload));
+    existing.find((s) => s.view === 'mTransactions2' && hasTransactions(s.payload)) ??
+    existing.find((s) => s.view === 'mTransactions' && hasTransactions(s.payload));
   if (cached) {
     const txs = (cached.payload as TransactionsPayload).transactions;
-    return txs ? { transactions: normalizeTransactions(txs) } : (cached.payload as TransactionsPayload);
+    return txs
+      ? { transactions: normalizeTransactions(txs) }
+      : (cached.payload as TransactionsPayload);
   }
 
   const aggregated: unknown[] = [];
@@ -31,9 +33,9 @@ export async function ensureTransactionsPayload(
       const res = await context.espnClient.fetchLeague({
         leagueId,
         season,
-        view: "mTransactions2",
+        view: 'mTransactions2',
         scoringPeriodId: week,
-        filter: buildTransactionFilter()
+        filter: buildTransactionFilter(),
       });
       const payload = res.payload as TransactionsPayload;
       if (Array.isArray(payload.transactions) && payload.transactions.length > 0) {
@@ -51,9 +53,9 @@ export async function ensureTransactionsPayload(
     await context.snapshotsRepo.save({
       leagueId,
       season,
-      view: "mTransactions2",
+      view: 'mTransactions2',
       fetchedAt: new Date(),
-      payload
+      payload,
     });
     return payload;
   }
@@ -63,15 +65,15 @@ export async function ensureTransactionsPayload(
     const single = await context.espnClient.fetchLeague({
       leagueId,
       season,
-      view: "mTransactions2",
-      filter: buildTransactionFilter()
+      view: 'mTransactions2',
+      filter: buildTransactionFilter(),
     });
     await context.snapshotsRepo.save({
       leagueId,
       season,
-      view: "mTransactions2",
+      view: 'mTransactions2',
       fetchedAt: new Date(),
-      payload: single.payload
+      payload: single.payload,
     });
     if (hasTransactions(single.payload)) {
       const txs = (single.payload as { transactions?: unknown[] }).transactions ?? [];
@@ -91,8 +93,8 @@ export async function ensureTransactionsPayload(
 function hasTransactions(payload: unknown): payload is TransactionsPayload {
   return Boolean(
     payload &&
-    typeof payload === "object" &&
-    Array.isArray((payload as { transactions?: unknown }).transactions)
+    typeof payload === 'object' &&
+    Array.isArray((payload as { transactions?: unknown }).transactions),
   );
 }
 
@@ -100,16 +102,16 @@ function buildTransactionFilter(): unknown {
   return {
     transactions: {
       filterType: {
-        value: ["FREEAGENT", "WAIVER", "WAIVER_ERROR"]
-      }
-    }
+        value: ['FREEAGENT', 'WAIVER', 'WAIVER_ERROR'],
+      },
+    },
   };
 }
 
 function extractTransactionKey(tx: unknown): string | undefined {
-  if (!tx || typeof tx !== "object") return undefined;
+  if (!tx || typeof tx !== 'object') return undefined;
   const id = (tx as { id?: unknown }).id;
-  if (typeof id === "number" || typeof id === "string") {
+  if (typeof id === 'number' || typeof id === 'string') {
     return String(id);
   }
   return undefined;
@@ -125,7 +127,7 @@ function addTransaction(target: unknown[], seen: Set<string>, tx: unknown): void
 }
 
 export function getTransactionTeamId(tx: unknown): number | undefined {
-  if (!tx || typeof tx !== "object") return undefined;
+  if (!tx || typeof tx !== 'object') return undefined;
 
   const direct = (tx as { teamId?: unknown }).teamId;
   if (Number.isFinite(Number(direct))) {
@@ -137,14 +139,14 @@ export function getTransactionTeamId(tx: unknown): number | undefined {
 
   for (const action of actions) {
     if (!action) continue;
-    if (typeof action === "object") {
+    if (typeof action === 'object') {
       const maybeTeamId = (action as { teamId?: unknown }).teamId;
       if (Number.isFinite(Number(maybeTeamId))) {
         return Number(maybeTeamId);
       }
       if (Array.isArray(action)) {
         for (const part of action) {
-          if (part && typeof part === "object") {
+          if (part && typeof part === 'object') {
             const nestedId = (part as { teamId?: unknown }).teamId;
             if (Number.isFinite(Number(nestedId))) {
               return Number(nestedId);
@@ -159,18 +161,18 @@ export function getTransactionTeamId(tx: unknown): number | undefined {
 }
 
 export function isWaiverSpend(tx: unknown): boolean {
-  if (!tx || typeof tx !== "object") return false;
+  if (!tx || typeof tx !== 'object') return false;
   const bid = (tx as { bidAmount?: unknown }).bidAmount;
-  const bidNum = typeof bid === "number" ? bid : Number(bid);
+  const bidNum = typeof bid === 'number' ? bid : Number(bid);
   if (!Number.isFinite(bidNum) || bidNum <= 0) return false;
 
   const type = (tx as { type?: unknown }).type;
-  const typeStr = typeof type === "string" ? type.toUpperCase() : "";
-  if (!["WAIVER", "WAIVER_ERROR", "WAIVER_ADJUSTMENT"].includes(typeStr)) return false;
+  const typeStr = typeof type === 'string' ? type.toUpperCase() : '';
+  if (!['WAIVER', 'WAIVER_ERROR', 'WAIVER_ADJUSTMENT'].includes(typeStr)) return false;
 
   const status = (tx as { status?: unknown }).status;
-  const statusStr = typeof status === "string" ? status.toUpperCase() : "";
-  if (statusStr && statusStr !== "EXECUTED") return false;
+  const statusStr = typeof status === 'string' ? status.toUpperCase() : '';
+  if (statusStr && statusStr !== 'EXECUTED') return false;
 
   return true;
 }

@@ -1,4 +1,4 @@
-import { renderImage, RenderSpec } from "../render.js";
+import { renderImage, RenderSpec } from '../render.js';
 
 export interface FaabPaceLine {
   team: string;
@@ -14,15 +14,15 @@ export interface FaabPaceGraphOptions {
 
 export function renderFaabPaceGraph(options: FaabPaceGraphOptions): Promise<Buffer> {
   const spec: RenderSpec = {
-    kind: "graph",
+    kind: 'graph',
     title: options.title,
     subtitle: options.subtitle,
     payload: {
-      type: "faab-pace",
+      type: 'faab-pace',
       budget: options.budget,
       lines: options.lines,
-      axes: { x: "Week", y: "Cumulative FAAB" }
-    }
+      axes: { x: 'Week', y: 'Cumulative FAAB' },
+    },
   };
   return renderImage(spec);
 }

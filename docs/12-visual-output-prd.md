@@ -1,11 +1,13 @@
 # Fantasy Canon – Visual Output PRD
 
 ## Scope
+
 Server-side visual rendering for Discord: graphs and Canon Cards.
 
 ---
 
 ## Feature Set
+
 - Graphs (Luck, Draft Prophecy)
 - Canon Cards (Team, Champ, Season)
 - Shared rendering infrastructure
@@ -15,6 +17,7 @@ Server-side visual rendering for Discord: graphs and Canon Cards.
 ## Implementation Tasks
 
 ### 1. Renderer Infrastructure
+
 **Packages:** `packages/renderer`, `packages/shared`
 
 - [ ] Decide renderer backend (node-canvas vs vega-lite)
@@ -26,6 +29,7 @@ Server-side visual rendering for Discord: graphs and Canon Cards.
 ---
 
 ### 2. Graph: Luck
+
 **Core:** `packages/core/metrics/luckIndex.ts`  
 **Renderer:** `packages/renderer/graphs/luckGraph.ts`
 
@@ -38,6 +42,7 @@ Server-side visual rendering for Discord: graphs and Canon Cards.
 ---
 
 ### 3. Graph: Draft Prophecy
+
 **Core:** `packages/core/storylines/draft.ts`
 
 - [ ] Calculate delta: projected vs final rank
@@ -48,6 +53,7 @@ Server-side visual rendering for Discord: graphs and Canon Cards.
 ---
 
 ### 4. Canon Cards
+
 **Renderer:** `packages/renderer/cards/*`
 
 - [ ] Define CardSpec interface
@@ -60,6 +66,7 @@ Server-side visual rendering for Discord: graphs and Canon Cards.
 ---
 
 ## Definition of Done
+
 - All visuals render deterministically
 - Discord embeds attach images
 - Commands degrade gracefully

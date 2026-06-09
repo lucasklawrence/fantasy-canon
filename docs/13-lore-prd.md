@@ -1,11 +1,13 @@
 # Fantasy Canon – League Lore & Memory PRD
 
 ## Scope
+
 Persistent league history, rivalries, and legacy narratives.
 
 ---
 
 ## Feature Set
+
 - Canon Timeline
 - Rivalries
 - Legacy Awards
@@ -16,6 +18,7 @@ Persistent league history, rivalries, and legacy narratives.
 ## Implementation Tasks
 
 ### 1. Canon Event Model
+
 **DB:** `packages/db`
 
 - [ ] Create `canon_events` table
@@ -26,6 +29,7 @@ Persistent league history, rivalries, and legacy narratives.
 ---
 
 ### 2. Timeline Command
+
 **Bot:** `/canon timeline`
 
 - [ ] Query events chronologically
@@ -36,6 +40,7 @@ Persistent league history, rivalries, and legacy narratives.
 ---
 
 ### 3. Rivalries
+
 **Core:** `packages/core/storylines/rivalries.ts`
 
 - [ ] Compute H2H dominance
@@ -47,6 +52,7 @@ Persistent league history, rivalries, and legacy narratives.
 ---
 
 ### 4. Legacy Awards
+
 **Core:** `packages/core/storylines/legacy.ts`
 
 - [ ] Most unlucky seasons
@@ -57,6 +63,7 @@ Persistent league history, rivalries, and legacy narratives.
 ---
 
 ### 5. Champion Archive
+
 - [ ] Persist champs per season
 - [ ] `/canon champ history`
 - [ ] Auto-insert on ingest
@@ -64,6 +71,7 @@ Persistent league history, rivalries, and legacy narratives.
 ---
 
 ## Definition of Done
+
 - Lore persists across restarts
 - Commands work retroactively
 - No ESPN live dependency

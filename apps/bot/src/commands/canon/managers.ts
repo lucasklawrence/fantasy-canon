@@ -1,7 +1,7 @@
-import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
-import { BotContext } from "../../config.js";
-import { buildTeamNameMap, formatTeamName } from "../../lib/teamNames.js";
-import { getLeagueInfo } from "../../lib/leagueInfo.js";
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { BotContext } from '../../config.js';
+import { buildTeamNameMap, formatTeamName } from '../../lib/teamNames.js';
+import { getLeagueInfo } from '../../lib/leagueInfo.js';
 
 type TeamLike = {
   id?: unknown;
@@ -31,12 +31,12 @@ interface ManagerAggregate {
  */
 export async function handleManagersSubcommand(
   interaction: ChatInputCommandInteraction,
-  context: BotContext
+  context: BotContext,
 ): Promise<void> {
-  const seasonsText = interaction.options.getString("seasons", true);
-  const sort = interaction.options.getString("sort") ?? "wins";
-  const limit = interaction.options.getInteger("limit") ?? 10;
-  const leagueOverride = interaction.options.getString("leagueid") ?? undefined;
+  const seasonsText = interaction.options.getString('seasons', true);
+  const sort = interaction.options.getString('sort') ?? 'wins';
+  const limit = interaction.options.getInteger('limit') ?? 10;
+  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
 
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
@@ -44,8 +44,8 @@ export async function handleManagersSubcommand(
 
   if (!leagueId) {
     await interaction.reply({
-      content: "League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.",
-      flags: MessageFlags.Ephemeral
+      content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -53,8 +53,8 @@ export async function handleManagersSubcommand(
   const seasons = parseSeasonList(seasonsText);
   if (seasons.length === 0) {
     await interaction.reply({
-      content: "Provide seasons as comma list or range (e.g., 2022-2025 or 2024,2025).",
-      flags: MessageFlags.Ephemeral
+      content: 'Provide seasons as comma list or range (e.g., 2022-2025 or 2024,2025).',
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -66,28 +66,26 @@ export async function handleManagersSubcommand(
     const aggregates = new Map<string, ManagerAggregate>();
 
     for (const season of seasons) {
-      const payload = await ensureSnapshot(context, leagueId, season, "mTeam");
+      const payload = await ensureSnapshot(context, leagueId, season, 'mTeam');
       const nameMap = buildTeamNameMap(payload);
       const ownerMap = buildOwnerDisplayMap(payload);
       const teams = extractTeams(payload, nameMap, ownerMap);
       for (const team of teams) {
         const managerId = team.managerId;
         const existing = aggregates.get(managerId);
-        const agg: ManagerAggregate =
-          existing ??
-          {
-            managerId,
-            displayName: team.managerName,
-            latestTeamName: team.teamName,
-            latestSeason: season,
-            wins: 0,
-            losses: 0,
-            ties: 0,
-            pointsFor: 0,
-            moves: 0,
-            seasons: new Set<number>(),
-            teamNames: []
-          };
+        const agg: ManagerAggregate = existing ?? {
+          managerId,
+          displayName: team.managerName,
+          latestTeamName: team.teamName,
+          latestSeason: season,
+          wins: 0,
+          losses: 0,
+          ties: 0,
+          pointsFor: 0,
+          moves: 0,
+          seasons: new Set<number>(),
+          teamNames: [],
+        };
 
         if (!agg.displayName && team.managerName) {
           agg.displayName = team.managerName;
@@ -111,7 +109,7 @@ export async function handleManagersSubcommand(
 
     if (aggregates.size === 0) {
       await interaction.editReply({
-        content: "No team data found for the requested seasons."
+        content: 'No team data found for the requested seasons.',
       });
       return;
     }
@@ -123,12 +121,12 @@ export async function handleManagersSubcommand(
     });
 
     rows.sort((a, b) => {
-      if (sort === "winpct") {
+      if (sort === 'winpct') {
         if (b.winPct !== a.winPct) return b.winPct - a.winPct;
         if (b.wins !== a.wins) return b.wins - a.wins;
-      } else if (sort === "points") {
+      } else if (sort === 'points') {
         if (b.pointsFor !== a.pointsFor) return b.pointsFor - a.pointsFor;
-      } else if (sort === "moves") {
+      } else if (sort === 'moves') {
         if (b.moves !== a.moves) return b.moves - a.moves;
       } else {
         if (b.wins !== a.wins) return b.wins - a.wins;
@@ -137,24 +135,23 @@ export async function handleManagersSubcommand(
       return a.displayName.localeCompare(b.displayName);
     });
 
-    const header = `League ${leagueInfo.name ?? leagueId} | Seasons ${seasons.join(", ")} | Manager rollup (${sort})`;
+    const header = `League ${leagueInfo.name ?? leagueId} | Seasons ${seasons.join(', ')} | Manager rollup (${sort})`;
     const body = rows.slice(0, limit).map((row, idx) => {
-      const idShort = row.managerId.length > 10 ? `${row.managerId.slice(0, 10)}...` : row.managerId;
+      const idShort =
+        row.managerId.length > 10 ? `${row.managerId.slice(0, 10)}...` : row.managerId;
       const nameLabel =
         row.displayName && row.displayName !== row.latestTeamName
           ? `${row.displayName} (${row.latestTeamName})`
-          : row.displayName || row.latestTeamName || "Manager";
+          : row.displayName || row.latestTeamName || 'Manager';
       const record =
-        row.ties > 0
-          ? `${row.wins}-${row.losses}-${row.ties}`
-          : `${row.wins}-${row.losses}`;
+        row.ties > 0 ? `${row.wins}-${row.losses}-${row.ties}` : `${row.wins}-${row.losses}`;
       const teams = summarizeTeams(row.teamNames);
-      const seasonsPlayed = row.seasonsList.join(", ");
-      const movesLabel = row.moves > 0 ? `, moves ${row.moves}` : "";
+      const seasonsPlayed = row.seasonsList.join(', ');
+      const movesLabel = row.moves > 0 ? `, moves ${row.moves}` : '';
       return `${idx + 1}. ${nameLabel} [${idShort}] - ${record} (win% ${row.winPct.toFixed(
-        3
+        3,
       )}), PF ${Math.round(row.pointsFor)} | seasons: ${seasonsPlayed}${movesLabel}${
-        teams ? ` | teams: ${teams}` : ""
+        teams ? ` | teams: ${teams}` : ''
       }`;
     });
 
@@ -162,25 +159,25 @@ export async function handleManagersSubcommand(
 
     // Respect Discord 2000-char limit by trimming rows if necessary.
     let dropped = 0;
-    while (lines.join("\n").length > 1900 && lines.length > 1) {
+    while (lines.join('\n').length > 1900 && lines.length > 1) {
       lines.pop();
       dropped += 1;
     }
     if (dropped > 0) {
       lines.push(`... ${dropped} more manager(s) truncated to fit Discord's 2000 character limit.`);
     }
-    let content = lines.join("\n");
+    let content = lines.join('\n');
     if (content.length > 2000) {
       content = `${content.slice(0, 1990)}...`;
     }
 
     await interaction.editReply({
-      content
+      content,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute manager rollup: ${message}`
+      content: `Failed to compute manager rollup: ${message}`,
     });
   }
 }
@@ -191,7 +188,7 @@ export async function handleManagersSubcommand(
 function extractTeams(
   payload: unknown,
   nameMap: Map<number, string>,
-  ownerMap: Map<string, string>
+  ownerMap: Map<string, string>,
 ): Array<{
   teamName: string;
   managerId: string;
@@ -202,7 +199,7 @@ function extractTeams(
   pointsFor: number;
   moves: number;
 }> {
-  if (!payload || typeof payload !== "object") return [];
+  if (!payload || typeof payload !== 'object') return [];
   const maybeTeams = (payload as { teams?: unknown }).teams;
   if (!Array.isArray(maybeTeams)) return [];
   const results: Array<{
@@ -217,24 +214,27 @@ function extractTeams(
   }> = [];
 
   for (const team of maybeTeams) {
-    if (!team || typeof team !== "object") continue;
+    if (!team || typeof team !== 'object') continue;
     const t = team as TeamLike;
     const teamId = Number(t.id);
     if (!Number.isFinite(teamId)) continue;
 
     const managerId = getManagerId(t, teamId);
-    const teamName = nameMap.get(teamId) ?? formatTeamName(team as Parameters<typeof formatTeamName>[0], teamId);
+    const teamName =
+      nameMap.get(teamId) ?? formatTeamName(team as Parameters<typeof formatTeamName>[0], teamId);
     const managerName = ownerMap.get(managerId) ?? getManagerName(t) ?? teamName;
 
     const record =
-      t.record && typeof t.record === "object" ? (t.record as { overall?: unknown }).overall : undefined;
+      t.record && typeof t.record === 'object'
+        ? (t.record as { overall?: unknown }).overall
+        : undefined;
     const wins = Number((record as { wins?: unknown })?.wins) || 0;
     const losses = Number((record as { losses?: unknown })?.losses) || 0;
     const ties = Number((record as { ties?: unknown })?.ties) || 0;
     const pointsFor = Number((record as { pointsFor?: unknown })?.pointsFor) || 0;
 
     const tc =
-      t.transactionCounter && typeof t.transactionCounter === "object"
+      t.transactionCounter && typeof t.transactionCounter === 'object'
         ? (t.transactionCounter as {
             acquisitions?: unknown;
             moveToActive?: unknown;
@@ -258,7 +258,7 @@ function extractTeams(
       losses,
       ties,
       pointsFor,
-      moves
+      moves,
     });
   }
 
@@ -270,11 +270,11 @@ function extractTeams(
  */
 function buildOwnerDisplayMap(payload: unknown): Map<string, string> {
   const map = new Map<string, string>();
-  if (!payload || typeof payload !== "object") return map;
+  if (!payload || typeof payload !== 'object') return map;
   const members = (payload as { members?: unknown }).members;
   if (!Array.isArray(members)) return map;
   for (const member of members) {
-    if (!member || typeof member !== "object") continue;
+    if (!member || typeof member !== 'object') continue;
     const m = member as {
       id?: unknown;
       displayName?: unknown;
@@ -282,12 +282,12 @@ function buildOwnerDisplayMap(payload: unknown): Map<string, string> {
       lastName?: unknown;
       nickname?: unknown;
     };
-    const id = typeof m.id === "string" ? m.id : undefined;
+    const id = typeof m.id === 'string' ? m.id : undefined;
     if (!id) continue;
-    const dn = typeof m.displayName === "string" ? m.displayName : undefined;
-    const nick = typeof m.nickname === "string" ? m.nickname : undefined;
-    const first = typeof m.firstName === "string" ? m.firstName : "";
-    const last = typeof m.lastName === "string" ? m.lastName : "";
+    const dn = typeof m.displayName === 'string' ? m.displayName : undefined;
+    const nick = typeof m.nickname === 'string' ? m.nickname : undefined;
+    const first = typeof m.firstName === 'string' ? m.firstName : '';
+    const last = typeof m.lastName === 'string' ? m.lastName : '';
     const combo = `${first} ${last}`.trim();
     const name = dn || nick || (combo ? combo : undefined);
     if (name) map.set(id, name);
@@ -299,15 +299,16 @@ function buildOwnerDisplayMap(payload: unknown): Map<string, string> {
  * Derives the best-available manager identifier, falling back to team slot when missing.
  */
 function getManagerId(team: TeamLike, fallbackId: number): string {
-  const primary = typeof team.primaryOwner === "string" && team.primaryOwner ? team.primaryOwner : undefined;
+  const primary =
+    typeof team.primaryOwner === 'string' && team.primaryOwner ? team.primaryOwner : undefined;
   if (primary) return primary;
 
   if (Array.isArray(team.owners)) {
-    const ownerId = team.owners.find((o) => typeof o === "string" && o) as string | undefined;
+    const ownerId = team.owners.find((o) => typeof o === 'string' && o) as string | undefined;
     if (ownerId) return ownerId;
   }
 
-  const owner = typeof team.owner === "string" && team.owner ? team.owner : undefined;
+  const owner = typeof team.owner === 'string' && team.owner ? team.owner : undefined;
   if (owner) return owner;
 
   return `team-${fallbackId}`;
@@ -319,12 +320,13 @@ function getManagerId(team: TeamLike, fallbackId: number): string {
 function getManagerName(team: TeamLike): string | undefined {
   if (Array.isArray(team.owners)) {
     for (const entry of team.owners) {
-      if (entry && typeof entry === "object") {
+      if (entry && typeof entry === 'object') {
         const nickname = (entry as { nickname?: unknown }).nickname;
         const first = (entry as { firstName?: unknown }).firstName;
         const last = (entry as { lastName?: unknown }).lastName;
-        const combined = `${typeof first === "string" ? first : ""} ${typeof last === "string" ? last : ""}`.trim();
-        if (typeof nickname === "string" && nickname) return nickname;
+        const combined =
+          `${typeof first === 'string' ? first : ''} ${typeof last === 'string' ? last : ''}`.trim();
+        if (typeof nickname === 'string' && nickname) return nickname;
         if (combined) return combined;
       }
     }
@@ -342,12 +344,15 @@ function summarizeTeams(entries: { season: number; name: string }[]): string {
     if (!unique.has(key)) unique.set(key, entry.season);
   }
   const sorted = Array.from(unique.entries())
-    .map(([key, season]) => ({ season, name: key.split("-").slice(1).join("-") }))
+    .map(([key, season]) => ({ season, name: key.split('-').slice(1).join('-') }))
     .sort((a, b) => a.season - b.season);
   if (sorted.length <= 3) {
-    return sorted.map((e) => `${e.name} (${e.season})`).join(", ");
+    return sorted.map((e) => `${e.name} (${e.season})`).join(', ');
   }
-  const firstThree = sorted.slice(0, 3).map((e) => `${e.name} (${e.season})`).join(", ");
+  const firstThree = sorted
+    .slice(0, 3)
+    .map((e) => `${e.name} (${e.season})`)
+    .join(', ');
   return `${firstThree}, ...`;
 }
 
@@ -357,11 +362,11 @@ function summarizeTeams(entries: { season: number; name: string }[]): string {
 function parseSeasonList(text: string): number[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
-  const parts = trimmed.split(",").map((p) => p.trim());
+  const parts = trimmed.split(',').map((p) => p.trim());
   const seasons: number[] = [];
   for (const part of parts) {
-    if (part.includes("-")) {
-      const [start, end] = part.split("-").map((p) => Number.parseInt(p.trim(), 10));
+    if (part.includes('-')) {
+      const [start, end] = part.split('-').map((p) => Number.parseInt(p.trim(), 10));
       if (Number.isFinite(start) && Number.isFinite(end)) {
         const [lo, hi] = start <= end ? [start, end] : [end, start];
         for (let y = lo; y <= hi; y += 1) {
@@ -383,7 +388,7 @@ async function ensureSnapshot(
   context: BotContext,
   leagueId: string,
   season: number,
-  view: string
+  view: string,
 ): Promise<unknown> {
   const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
   const match = existing.find((s) => s.view === view);
@@ -394,7 +399,7 @@ async function ensureSnapshot(
     season,
     view,
     fetchedAt: new Date(),
-    payload: res.payload
+    payload: res.payload,
   });
   return res.payload;
 }

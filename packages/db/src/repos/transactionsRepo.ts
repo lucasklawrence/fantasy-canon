@@ -1,9 +1,9 @@
-import { SeasonYear } from "@fantasy-canon/shared";
+import { SeasonYear } from '@fantasy-canon/shared';
 
 export interface TransactionRecord {
   season: SeasonYear;
   teamId: number;
-  type: "add" | "drop" | "trade" | "waiver";
+  type: 'add' | 'drop' | 'trade' | 'waiver';
   detail?: Record<string, unknown>;
 }
 

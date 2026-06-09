@@ -1,4 +1,4 @@
-import { SeasonYear } from "@fantasy-canon/shared";
+import { SeasonYear } from '@fantasy-canon/shared';
 
 export interface FetchLeagueParams {
   leagueId: string;
@@ -32,7 +32,7 @@ export class EspnFetchError extends Error {
     message: string,
     public readonly status: number,
     public readonly url: string,
-    public readonly bodySnippet?: string
+    public readonly bodySnippet?: string,
   ) {
     super(message);
   }

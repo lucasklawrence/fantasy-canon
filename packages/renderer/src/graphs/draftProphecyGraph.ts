@@ -1,4 +1,4 @@
-import { renderImage, RenderSpec } from "../render.js";
+import { renderImage, RenderSpec } from '../render.js';
 
 export interface DraftProphecyPoint {
   team: string;
@@ -18,25 +18,25 @@ export function renderDraftProphecyGraph(options: DraftProphecyGraphOptions): Pr
     delta:
       p.projectedRank !== undefined && p.finalRank !== undefined
         ? p.projectedRank - p.finalRank
-        : null
+        : null,
   }));
   const miss = findBiggestMiss(enriched);
   const spec: RenderSpec = {
-    kind: "graph",
+    kind: 'graph',
     title: options.title,
     subtitle: options.subtitle,
     payload: {
-      type: "draft-prophecy",
-      axes: { x: "Projected rank", y: "Final rank" },
+      type: 'draft-prophecy',
+      axes: { x: 'Projected rank', y: 'Final rank' },
       lines: enriched,
-      highlight: miss
-    }
+      highlight: miss,
+    },
   };
   return renderImage(spec);
 }
 
 function findBiggestMiss(
-  points: Array<DraftProphecyPoint & { delta: number | null }>
+  points: Array<DraftProphecyPoint & { delta: number | null }>,
 ): { team: string; delta: number | null } | undefined {
   return [...points]
     .filter((p) => p.delta !== null)
