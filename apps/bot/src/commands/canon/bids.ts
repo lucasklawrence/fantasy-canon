@@ -225,7 +225,7 @@ function buildPlayerNameMap(rosterPayload: unknown): Map<number, string> {
       const pe = (entry as { playerPoolEntry?: unknown }).playerPoolEntry;
       const player =
         pe && typeof pe === "object" && (pe as { player?: unknown }).player && typeof (pe as { player?: unknown }).player === "object"
-          ? ((pe as { player: { id?: unknown; fullName?: unknown } }).player as { id?: unknown; fullName?: unknown })
+          ? ((pe as { player: { id?: unknown; fullName?: unknown } }).player)
           : undefined;
       const id = Number(player?.id);
       const name = typeof player?.fullName === "string" ? player.fullName : undefined;

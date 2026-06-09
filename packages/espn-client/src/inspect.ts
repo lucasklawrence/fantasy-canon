@@ -6,7 +6,7 @@ export interface PayloadSummary {
 export function summarizePayload(payload: unknown): PayloadSummary {
   const topLevelKeys =
     payload && typeof payload === "object"
-      ? Object.keys(payload as Record<string, unknown>)
+      ? Object.keys(payload)
       : [];
 
   const json = safeStringify(payload);

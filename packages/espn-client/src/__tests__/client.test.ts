@@ -21,7 +21,7 @@ describe("HttpEspnClient", () => {
       status: 200,
       json: () => Promise.resolve({ hello: "world" })
     });
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
+    globalThis.fetch = mockFetch;
 
     const client = new HttpEspnClient("https://example.com");
     const result = await client.fetchLeague({
@@ -48,7 +48,7 @@ describe("HttpEspnClient", () => {
         status: 200,
         json: () => Promise.resolve({ ok: true })
       });
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
+    globalThis.fetch = mockFetch;
 
     const client = new HttpEspnClient("https://example.com", { retries: 1, retryDelayMs: 0 });
     const result = await client.fetchLeague({
