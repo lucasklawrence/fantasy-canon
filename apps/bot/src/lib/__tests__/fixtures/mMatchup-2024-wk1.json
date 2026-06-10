@@ -1,0 +1,636 @@
+{
+  "scoringPeriodId": 1,
+  "seasonId": 2024,
+  "schedule": [
+    {
+      "id": 1,
+      "matchupPeriodId": 1,
+      "home": {
+        "teamId": 10,
+        "totalPoints": 95.81,
+        "rosterForCurrentScoringPeriod": {
+          "entries": [
+            {
+              "lineupSlotId": 4,
+              "playerId": 4374302,
+              "playerPoolEntry": {
+                "appliedStatTotal": 4.3,
+                "player": {
+                  "id": 4374302,
+                  "fullName": "Amon-Ra St. Brown",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 2,
+              "playerId": 4361529,
+              "playerPoolEntry": {
+                "appliedStatTotal": 15.8,
+                "player": {
+                  "id": 4361529,
+                  "fullName": "Isiah Pacheco",
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 4,
+              "playerId": 4047650,
+              "playerPoolEntry": {
+                "appliedStatTotal": 5.9,
+                "player": {
+                  "id": 4047650,
+                  "fullName": "DK Metcalf",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 6,
+              "playerId": 3116365,
+              "playerPoolEntry": {
+                "appliedStatTotal": 3.4000000000000004,
+                "player": {
+                  "id": 3116365,
+                  "fullName": "Mark Andrews",
+                  "eligibleSlots": [
+                    5,
+                    6,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 0,
+              "playerId": 4432577,
+              "playerPoolEntry": {
+                "appliedStatTotal": 18.66,
+                "player": {
+                  "id": 4432577,
+                  "fullName": "C.J. Stroud",
+                  "eligibleSlots": [
+                    0,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4239993,
+              "playerPoolEntry": {
+                "appliedStatTotal": 0,
+                "player": {
+                  "id": 4239993,
+                  "fullName": "Tee Higgins",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 23,
+              "playerId": 3116165,
+              "playerPoolEntry": {
+                "appliedStatTotal": 22.3,
+                "player": {
+                  "id": 3116165,
+                  "fullName": "Chris Godwin",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 3068267,
+              "playerPoolEntry": {
+                "appliedStatTotal": 10.2,
+                "player": {
+                  "id": 3068267,
+                  "fullName": "Austin Ekeler",
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4241372,
+              "playerPoolEntry": {
+                "appliedStatTotal": 0,
+                "player": {
+                  "id": 4241372,
+                  "fullName": "Hollywood Brown",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 2,
+              "playerId": 4040761,
+              "playerPoolEntry": {
+                "appliedStatTotal": 9.2,
+                "player": {
+                  "id": 4040761,
+                  "fullName": "Devin Singletary",
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4258595,
+              "playerPoolEntry": {
+                "appliedStatTotal": 1.4,
+                "player": {
+                  "id": 4258595,
+                  "fullName": "Cole Kmet",
+                  "eligibleSlots": [
+                    5,
+                    6,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 17,
+              "playerId": 4362081,
+              "playerPoolEntry": {
+                "appliedStatTotal": 12,
+                "player": {
+                  "id": 4362081,
+                  "fullName": "Cameron Dicker",
+                  "eligibleSlots": [
+                    17,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 16,
+              "playerId": -16008,
+              "playerPoolEntry": {
+                "appliedStatTotal": 4.25,
+                "player": {
+                  "id": -16008,
+                  "fullName": "Lions D/ST",
+                  "eligibleSlots": [
+                    16,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4038941,
+              "playerPoolEntry": {
+                "appliedStatTotal": 10.36,
+                "player": {
+                  "id": 4038941,
+                  "fullName": "Justin Herbert",
+                  "eligibleSlots": [
+                    0,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 3043116,
+              "playerPoolEntry": {
+                "appliedStatTotal": 8.2,
+                "player": {
+                  "id": 3043116,
+                  "fullName": "Demarcus Robinson",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 2980453,
+              "playerPoolEntry": {
+                "appliedStatTotal": 12.100000000000001,
+                "player": {
+                  "id": 2980453,
+                  "fullName": "Jamaal Williams",
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "away": {
+        "teamId": 13,
+        "totalPoints": 102.12,
+        "rosterForCurrentScoringPeriod": {
+          "entries": [
+            {
+              "lineupSlotId": 4,
+              "playerId": 4262921,
+              "playerPoolEntry": {
+                "appliedStatTotal": 15.9,
+                "player": {
+                  "id": 4262921,
+                  "fullName": "Justin Jefferson",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 2,
+              "playerId": 4239996,
+              "playerPoolEntry": {
+                "appliedStatTotal": 11.9,
+                "player": {
+                  "id": 4239996,
+                  "fullName": "Travis Etienne Jr.",
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 6,
+              "playerId": 4430027,
+              "playerPoolEntry": {
+                "appliedStatTotal": 8.5,
+                "player": {
+                  "id": 4430027,
+                  "fullName": "Sam LaPorta",
+                  "eligibleSlots": [
+                    5,
+                    6,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 4,
+              "playerId": 4241478,
+              "playerPoolEntry": {
+                "appliedStatTotal": 15.4,
+                "player": {
+                  "id": 4241478,
+                  "fullName": "DeVonta Smith",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 2,
+              "playerId": 3045147,
+              "playerPoolEntry": {
+                "appliedStatTotal": 19.3,
+                "player": {
+                  "id": 3045147,
+                  "fullName": "James Conner",
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 0,
+              "playerId": 4431611,
+              "playerPoolEntry": {
+                "appliedStatTotal": 7.220000000000001,
+                "player": {
+                  "id": 4431611,
+                  "fullName": "Caleb Williams",
+                  "eligibleSlots": [
+                    25,
+                    0,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 23,
+              "playerId": 4430878,
+              "playerPoolEntry": {
+                "appliedStatTotal": 3.9000000000000004,
+                "player": {
+                  "id": 4430878,
+                  "fullName": "Jaxon Smith-Njigba",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4248528,
+              "playerPoolEntry": {
+                "appliedStatTotal": 10.3,
+                "player": {
+                  "id": 4248528,
+                  "fullName": "Christian Watson",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 3051392,
+              "playerPoolEntry": {
+                "appliedStatTotal": 12.9,
+                "player": {
+                  "id": 3051392,
+                  "fullName": "Ezekiel Elliott",
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 3916433,
+              "playerPoolEntry": {
+                "appliedStatTotal": 9.4,
+                "player": {
+                  "id": 3916433,
+                  "fullName": "Jakobi Meyers",
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 3117256,
+              "playerPoolEntry": {
+                "appliedStatTotal": 4.6,
+                "player": {
+                  "id": 3117256,
+                  "fullName": "Dalton Schultz",
+                  "eligibleSlots": [
+                    5,
+                    6,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 16,
+              "playerId": -16006,
+              "playerPoolEntry": {
+                "appliedStatTotal": 19,
+                "player": {
+                  "id": -16006,
+                  "fullName": "Cowboys D/ST",
+                  "eligibleSlots": [
+                    16,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4241479,
+              "playerPoolEntry": {
+                "appliedStatTotal": 18.619999999999997,
+                "player": {
+                  "id": 4241479,
+                  "fullName": "Tua Tagovailoa",
+                  "eligibleSlots": [
+                    0,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 17,
+              "playerId": 14993,
+              "playerPoolEntry": {
+                "appliedStatTotal": 1,
+                "player": {
+                  "id": 14993,
+                  "fullName": "Greg Zuerlein",
+                  "eligibleSlots": [
+                    17,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4242214,
+              "playerPoolEntry": {
+                "appliedStatTotal": 0,
+                "player": {
+                  "id": 4242214,
+                  "fullName": "Clyde Edwards-Helaire",
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4430637,
+              "playerPoolEntry": {
+                "appliedStatTotal": 1.6,
+                "player": {
+                  "id": 4430637,
+                  "fullName": "Ja'Lynn Polk",
+                  "eligibleSlots": [
+                    25,
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "teams": [
+    {
+      "id": 10
+    },
+    {
+      "id": 13
+    }
+  ]
+}

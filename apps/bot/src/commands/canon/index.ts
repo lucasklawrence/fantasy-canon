@@ -16,6 +16,7 @@ import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
 import { handleManagersSubcommand } from './managers.js';
 import { handleAllPlaySubcommand } from './allPlay.js';
+import { handleLineupSubcommand } from './lineup.js';
 import {
   handleLuckSubcommand,
   handleDraftProphecySubcommand,
@@ -48,6 +49,27 @@ export const canonCommand = new SlashCommandBuilder()
       .setDescription('All-play record (Wins vs. All %) — schedule-independent strength')
       .addIntegerOption((opt) =>
         opt.setName('season').setDescription('Season year (e.g., 2025)').setRequired(true),
+      )
+      .addIntegerOption((opt) =>
+        opt.setName('limit').setDescription('Number of teams to show (default all)').setMinValue(1),
+      )
+      .addStringOption((opt) =>
+        opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
+      ),
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('lineup')
+      .setDescription('Optimal-lineup % leaderboard (points left on the bench)')
+      .addIntegerOption((opt) =>
+        opt.setName('season').setDescription('Season year (e.g., 2025)').setRequired(true),
+      )
+      .addIntegerOption((opt) =>
+        opt
+          .setName('weeks')
+          .setDescription('Number of weeks to include (default: regular season)')
+          .setMinValue(1)
+          .setMaxValue(18),
       )
       .addIntegerOption((opt) =>
         opt.setName('limit').setDescription('Number of teams to show (default all)').setMinValue(1),
@@ -558,6 +580,8 @@ export async function handleCanonInteraction(
     await handleLuckSubcommand(interaction, context);
   } else if (subcommand === 'allplay') {
     await handleAllPlaySubcommand(interaction, context);
+  } else if (subcommand === 'lineup') {
+    await handleLineupSubcommand(interaction, context);
   } else if (subcommand === 'draft-prophecy') {
     await handleDraftProphecySubcommand(interaction, context);
   } else if (subcommand === 'streaks') {
