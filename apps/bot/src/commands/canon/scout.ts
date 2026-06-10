@@ -143,9 +143,12 @@ export async function handleScoutAutocomplete(
       return;
     }
     const season = interaction.options.getInteger('season');
-    const seasonChoices = season === null ? [] : context.teamNameCache.get(leagueId, season);
+    // When a season is chosen, respect it as a hard boundary — never suggest opponents from
+    // other seasons. Only fall back to the league-wide union when no season is picked yet.
     const choices =
-      seasonChoices.length > 0 ? seasonChoices : context.teamNameCache.getAllForLeague(leagueId);
+      season === null
+        ? context.teamNameCache.getAllForLeague(leagueId)
+        : context.teamNameCache.get(leagueId, season);
     const filtered = filterTeamChoices(choices, String(focused.value ?? ''));
     await interaction.respond(
       filtered.map((c) => ({

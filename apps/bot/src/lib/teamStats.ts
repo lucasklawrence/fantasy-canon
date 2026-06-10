@@ -109,7 +109,9 @@ export function extractTeams(payload: unknown): TeamInfo[] {
         (Number(tc?.trades) || 0),
       tradeBlockOn: onBlock,
       tradeBlockUntouchable: untouchable,
-      projectedRank: Number(t.draftDayProjectedRank),
+      projectedRank: Number.isFinite(Number(t.draftDayProjectedRank))
+        ? Number(t.draftDayProjectedRank)
+        : undefined,
       finishRank:
         Number(t.rankFinal) || Number(t.rankCalculatedFinal) || Number(t.playoffSeed) || undefined,
       homeWins: Number((home as { wins?: unknown })?.wins) || 0,
