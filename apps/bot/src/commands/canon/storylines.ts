@@ -1,7 +1,9 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { computeExpectedWins, computeLuckIndex } from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
 import { getLeagueInfo } from '../../lib/leagueInfo.js';
+import { extractWeeklyScores } from '../../lib/weeklyScores.js';
 
 type TeamLike = {
   id?: unknown;
@@ -41,38 +43,35 @@ export async function handleLuckSubcommand(
       return;
     }
 
-    const pointsRank = rankBy(teams, (t) => t.pointsFor, 'desc');
-    const winRank = rankBy(teams, (t) => t.wins, 'desc');
+    const mScoreboard = await ensureSnapshot(context, leagueId, season, 'mScoreboard');
+    const scores = extractWeeklyScores(mScoreboard);
+    if (scores.length === 0) {
+      await interaction.editReply({
+        content: 'No weekly scores found for this season (mScoreboard returned no matchups).',
+      });
+      return;
+    }
 
+    // Expected wins = average head-to-head wins across many randomized schedules
+    // (Monte Carlo). Luck = actual record wins − expected wins: a big positive
+    // gap means the schedule handed you wins; negative means it cost you.
+    const expected = new Map(computeExpectedWins(scores).map((r) => [r.teamId, r.expectedWins]));
     const entries = teams.map((t) => {
-      const pr = pointsRank.get(t.id) ?? teams.length;
-      const wr = winRank.get(t.id) ?? teams.length;
-      const luckIndex = pr - wr; // positive => luckier (wins outpace points rank)
-      return { ...t, luckIndex, pointsRank: pr, winRank: wr };
+      const expectedWins = expected.get(t.id) ?? 0;
+      return { ...t, expectedWins, luckIndex: computeLuckIndex({ wins: t.wins, expectedWins }) };
     });
 
     const luckiest = [...entries].sort((a, b) => b.luckIndex - a.luckIndex).slice(0, 3);
     const unluckiest = [...entries].sort((a, b) => a.luckIndex - b.luckIndex).slice(0, 3);
 
-    const lines: string[] = [];
-    lines.push('Luckiest:');
-    lines.push(
-      ...luckiest.map(
-        (e, idx) =>
-          `${idx + 1}. ${nameMap.get(e.id) ?? `Team ${e.id}`} — luck +${e.luckIndex.toFixed(
-            2,
-          )} (points rank ${e.pointsRank}, win rank ${e.winRank})`,
-      ),
-    );
-    lines.push('Unluckiest:');
-    lines.push(
-      ...unluckiest.map(
-        (e, idx) =>
-          `${idx + 1}. ${nameMap.get(e.id) ?? `Team ${e.id}`} — luck ${e.luckIndex.toFixed(
-            2,
-          )} (points rank ${e.pointsRank}, win rank ${e.winRank})`,
-      ),
-    );
+    const fmt = (e: (typeof entries)[number], idx: number) => {
+      const sign = e.luckIndex >= 0 ? '+' : '';
+      return `${idx + 1}. ${nameMap.get(e.id) ?? `Team ${e.id}`} — luck ${sign}${e.luckIndex.toFixed(
+        1,
+      )} (${e.wins} wins vs ${e.expectedWins.toFixed(1)} expected)`;
+    };
+
+    const lines = ['Luckiest:', ...luckiest.map(fmt), 'Unluckiest:', ...unluckiest.map(fmt)];
 
     await interaction.editReply({
       content: [`League ${leagueLabel} • Season ${season} • Luck`, ...lines].join('\n'),
