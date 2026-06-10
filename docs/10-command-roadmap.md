@@ -62,3 +62,34 @@ Near-term slash commands to ship next, with scope, dependencies, and acceptance 
 - Add tiny helper to resolve guild config vs env defaults for leagueId/season range.
 - Add snapshot cache read-before-fetch in commands to reduce requests.
 - Add unit tests for each handler’s pure functions (config validation, FAAB parsing).
+
+## `/canon` subcommand reorganization (issue #64)
+
+`/canon` hit Discord's hard ceiling of **25 top-level options** (subcommands + groups). To make room
+for future commands (#52/#53/#55), the flat list was reorganized into subcommand groups. The most-used
+analytics/fun verbs stay top-level; plumbing, FAAB, and legacy/awards moved into groups. `config` stays
+its own group (Discord forbids group-in-group nesting, and `config` already has `set`/`show`).
+
+Result: **13 top-level options (9 subcommands + 4 groups), 12 free.** After deploying
+(`pnpm -C apps/bot run deploy`), the paths are:
+
+| Old path                                                                                                                      | New path                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `/canon luck`, `allplay`, `draft-prophecy`, `streaks`, `homeaway`, `manager-archetypes`, `tradeblock`, `rivalry`, `rivalries` | **unchanged** (top-level)                                     |
+| `/canon leaderboard`                                                                                                          | `/canon faab leaderboard`                                     |
+| `/canon faabpace`                                                                                                             | `/canon faab faabpace`                                        |
+| `/canon bids`                                                                                                                 | `/canon faab bids`                                            |
+| `/canon transactions`                                                                                                         | `/canon faab transactions`                                    |
+| `/canon champ`                                                                                                                | `/canon legacy champ`                                         |
+| `/canon champs`                                                                                                               | `/canon legacy champs`                                        |
+| `/canon managers`                                                                                                             | `/canon legacy managers`                                      |
+| `/canon legacy season` / `history`                                                                                            | **unchanged** (already in `legacy`)                           |
+| `/canon status`                                                                                                               | `/canon admin status`                                         |
+| `/canon ping`                                                                                                                 | `/canon admin ping`                                           |
+| `/canon teams`                                                                                                                | `/canon admin teams`                                          |
+| `/canon inspect`                                                                                                              | `/canon admin inspect`                                        |
+| `/canon ingest`                                                                                                               | `/canon admin ingest`                                         |
+| `/canon timeline`                                                                                                             | `/canon admin timeline`                                       |
+| `/canon graph`                                                                                                                | `/canon admin graph`                                          |
+| `/canon config set` / `show`                                                                                                  | **unchanged**                                                 |
+| `/canon deep`                                                                                                                 | **removed** (was a disabled placeholder; freed a slot in #54) |

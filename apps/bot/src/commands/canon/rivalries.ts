@@ -49,7 +49,7 @@ export async function handleRivalrySubcommand(
     if (teamAId === undefined || teamBId === undefined) {
       await interaction.editReply({
         content:
-          'Unable to resolve one or both team names. Use exact team names from /canon teams.',
+          'Unable to resolve one or both team names. Use exact team names from /canon admin teams.',
       });
       return;
     }

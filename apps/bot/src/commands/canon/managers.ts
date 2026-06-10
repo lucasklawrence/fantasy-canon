@@ -27,7 +27,7 @@ interface ManagerAggregate {
 }
 
 /**
- * Handles `/canon managers`, aggregating manager performance across seasons with sortable rollups.
+ * Handles `/canon legacy managers`, aggregating manager performance across seasons with sortable rollups.
  */
 export async function handleManagersSubcommand(
   interaction: ChatInputCommandInteraction,
