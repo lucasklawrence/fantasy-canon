@@ -16,6 +16,7 @@ import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
 import { handleManagersSubcommand } from './managers.js';
 import { handleAllPlaySubcommand } from './allPlay.js';
+import { handleTrophiesSubcommand } from './trophies.js';
 import {
   handleLuckSubcommand,
   handleDraftProphecySubcommand,
@@ -51,6 +52,24 @@ export const canonCommand = new SlashCommandBuilder()
       )
       .addIntegerOption((opt) =>
         opt.setName('limit').setDescription('Number of teams to show (default all)').setMinValue(1),
+      )
+      .addStringOption((opt) =>
+        opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
+      ),
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('trophies')
+      .setDescription('Weekly trophies — high/low score, blowout, closest, luckiest, unluckiest')
+      .addIntegerOption((opt) =>
+        opt.setName('season').setDescription('Season year (e.g., 2025)').setRequired(true),
+      )
+      .addIntegerOption((opt) =>
+        opt
+          .setName('week')
+          .setDescription('Week (matchup period)')
+          .setRequired(true)
+          .setMinValue(1),
       )
       .addStringOption((opt) =>
         opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
@@ -558,6 +577,8 @@ export async function handleCanonInteraction(
     await handleLuckSubcommand(interaction, context);
   } else if (subcommand === 'allplay') {
     await handleAllPlaySubcommand(interaction, context);
+  } else if (subcommand === 'trophies') {
+    await handleTrophiesSubcommand(interaction, context);
   } else if (subcommand === 'draft-prophecy') {
     await handleDraftProphecySubcommand(interaction, context);
   } else if (subcommand === 'streaks') {
