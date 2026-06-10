@@ -7,7 +7,7 @@ import {
   Partials,
 } from 'discord.js';
 import { BotContext } from '../config.js';
-import { handleCanonInteraction } from '../commands/canon/index.js';
+import { handleCanonInteraction, handleCanonAutocomplete } from '../commands/canon/index.js';
 
 export function createDiscordClient(): Client {
   return new Client({
@@ -18,6 +18,28 @@ export function createDiscordClient(): Client {
 
 export function registerInteractionHandlers(client: Client, context: BotContext): void {
   client.on('interactionCreate', (interaction: Interaction) => {
+    // Autocomplete must answer within 3s and cannot be deferred — handle it first
+    // and keep the handler cache-only (no live ESPN fetch on the response path).
+    if (interaction.isAutocomplete()) {
+      if (interaction.commandName === 'canon') {
+        void (async () => {
+          try {
+            await handleCanonAutocomplete(interaction, context);
+          } catch (error) {
+            console.error('Failed to handle /canon autocomplete', error);
+            try {
+              if (!interaction.responded) {
+                await interaction.respond([]);
+              }
+            } catch {
+              // Nothing more we can do if the response window has closed.
+            }
+          }
+        })();
+      }
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) {
       return;
     }

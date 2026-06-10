@@ -1,4 +1,9 @@
-import { ChannelType, ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
+import {
+  AutocompleteInteraction,
+  ChannelType,
+  ChatInputCommandInteraction,
+  SlashCommandBuilder,
+} from 'discord.js';
 import { BotContext } from '../../config.js';
 import { handleStatusSubcommand } from './status.js';
 import { handlePingSubcommand } from './ping.js';
@@ -16,6 +21,7 @@ import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
 import { handleManagersSubcommand } from './managers.js';
 import { handleAllPlaySubcommand } from './allPlay.js';
+import { handleScoutSubcommand, handleScoutAutocomplete } from './scout.js';
 import {
   handleLuckSubcommand,
   handleDraftProphecySubcommand,
@@ -137,6 +143,24 @@ export const canonCommand = new SlashCommandBuilder()
       )
       .addIntegerOption((opt) =>
         opt.setName('limit').setDescription('Number of rows (default 5)').setMinValue(1),
+      )
+      .addStringOption((opt) =>
+        opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
+      ),
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('scout')
+      .setDescription('Scout a team — record, ranks, and FAAB (private)')
+      .addIntegerOption((opt) =>
+        opt.setName('season').setDescription('Season year (e.g., 2025)').setRequired(true),
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName('opponent')
+          .setDescription('Team to scout (start typing for autocomplete)')
+          .setRequired(true)
+          .setAutocomplete(true),
       )
       .addStringOption((opt) =>
         opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
@@ -558,6 +582,8 @@ export async function handleCanonInteraction(
     await handleLuckSubcommand(interaction, context);
   } else if (subcommand === 'allplay') {
     await handleAllPlaySubcommand(interaction, context);
+  } else if (subcommand === 'scout') {
+    await handleScoutSubcommand(interaction, context);
   } else if (subcommand === 'draft-prophecy') {
     await handleDraftProphecySubcommand(interaction, context);
   } else if (subcommand === 'streaks') {
@@ -574,5 +600,17 @@ export async function handleCanonInteraction(
     await handleRivalriesSubcommand(interaction, context);
   } else {
     await handleNotImplemented(interaction, subcommand);
+  }
+}
+
+export async function handleCanonAutocomplete(
+  interaction: AutocompleteInteraction,
+  context: BotContext,
+): Promise<void> {
+  const subcommand = interaction.options.getSubcommand(false);
+  if (subcommand === 'scout') {
+    await handleScoutAutocomplete(interaction, context);
+  } else {
+    await interaction.respond([]);
   }
 }
