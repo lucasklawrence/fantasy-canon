@@ -10,6 +10,17 @@ Fantasy Canon is a Discord-first offseason companion for ESPN Fantasy Football l
 3. **Discord bot**: slash commands to generate storylines and weekly recap cards.
 4. **Viz layer**: simple charts/“cards” generated server-side and posted to Discord.
 
+## CI / Deployment
+- **CI** (`.github/workflows/ci.yml`): typecheck · lint · format:check · test · build on every PR and push to `main`.
+- **Slash-command deploy** (`.github/workflows/deploy-commands.yml`): registers the `/canon` command tree
+  with Discord (global commands) automatically when command sources change on `main`, or via a manual
+  **Run workflow** (workflow_dispatch). Requires two repository **Actions secrets**:
+  - `DISCORD_TOKEN` — the bot token.
+  - `DISCORD_APP_ID` — the application (client) ID.
+
+  Add them under **Settings → Secrets and variables → Actions**. Without them the deploy job fails fast
+  (`loadEnv` throws). Global commands can take up to ~1h to propagate.
+
 ## Docs
 - `docs/00-product-overview.md`
 - `docs/01-espn-data-access.md`
