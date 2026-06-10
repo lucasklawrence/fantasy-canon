@@ -12,6 +12,7 @@ import {
   CanonEventsRepo,
 } from '@fantasy-canon/db';
 import { EnvConfig } from '@fantasy-canon/shared';
+import { TeamNameCache } from './lib/teamNameCache.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json') as { version?: string };
@@ -34,6 +35,8 @@ export interface BotContext {
   snapshotsRepo: SnapshotsRepo;
   leagueConfigRepo: LeagueConfigRepo;
   canonEventsRepo: CanonEventsRepo;
+  /** Process-local cache of team/manager names per league+season, for autocomplete. */
+  teamNameCache: TeamNameCache;
 }
 
 export function loadEnv(): EnvConfig {
@@ -74,6 +77,15 @@ export function createBotContext(): BotContext {
   const snapshotsRepo = new InMemorySnapshotsRepo();
   const leagueConfigRepo = new InMemoryLeagueConfigRepo();
   const canonEventsRepo = new InMemoryCanonEventsRepo();
+  const teamNameCache = new TeamNameCache();
 
-  return { env, version, espnClient, snapshotsRepo, leagueConfigRepo, canonEventsRepo };
+  return {
+    env,
+    version,
+    espnClient,
+    snapshotsRepo,
+    leagueConfigRepo,
+    canonEventsRepo,
+    teamNameCache,
+  };
 }

@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { DEFAULT_VIEWS, FetchLeagueParams } from '@fantasy-canon/espn-client';
 import { BotContext } from '../../config.js';
 import { DEFAULT_VIEWS as CORE_DEFAULT_VIEWS } from '@fantasy-canon/espn-client';
+import { populateTeamNameCache } from '../../lib/snapshots.js';
 
 const EXTENDED_VIEWS = new Set([
   'mTeam',
@@ -59,6 +60,10 @@ export async function handleIngestSubcommand(
           fetchedAt: new Date(),
           payload: res.payload,
         });
+        if (view === 'mTeam') {
+          // Warm the autocomplete cache so /canon scout can suggest opponents without an ESPN call.
+          populateTeamNameCache(context, leagueId, season, res.payload);
+        }
         const bytes = JSON.stringify(res.payload)?.length ?? 0;
         results.push(`✅ ${season} ${view} (${bytes} bytes)`);
       } catch (error) {
