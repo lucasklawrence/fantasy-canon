@@ -10,7 +10,7 @@
  * command (and future commands) can reuse it.
  */
 
-type TeamLike = {
+export type ManagerOwnerFields = {
   id?: unknown;
   owners?: unknown;
   primaryOwner?: unknown;
@@ -39,14 +39,14 @@ export function buildOwnerDisplayMap(payload: unknown): Map<string, string> {
     const first = typeof m.firstName === 'string' ? m.firstName : '';
     const last = typeof m.lastName === 'string' ? m.lastName : '';
     const combo = `${first} ${last}`.trim();
-    const name = dn || nick || (combo ? combo : undefined);
+    const name = dn || nick || combo || undefined;
     if (name) map.set(id, name);
   }
   return map;
 }
 
 /** Best-available manager SWID id for a team, falling back to a synthetic per-team id. */
-function getManagerId(team: TeamLike, fallbackId: number): string {
+export function getManagerId(team: ManagerOwnerFields, fallbackId: number): string {
   const primary =
     typeof team.primaryOwner === 'string' && team.primaryOwner ? team.primaryOwner : undefined;
   if (primary) return primary;
@@ -60,7 +60,7 @@ function getManagerId(team: TeamLike, fallbackId: number): string {
 }
 
 /** Pick a displayable manager name from owner metadata embedded on the team entry. */
-function getEmbeddedManagerName(team: TeamLike): string | undefined {
+export function getEmbeddedManagerName(team: ManagerOwnerFields): string | undefined {
   if (Array.isArray(team.owners)) {
     for (const entry of team.owners) {
       if (entry && typeof entry === 'object') {
@@ -89,7 +89,7 @@ export function buildManagerNameMap(payload: unknown): Map<number, string> {
   const ownerMap = buildOwnerDisplayMap(payload);
   for (const team of teams) {
     if (!team || typeof team !== 'object') continue;
-    const t = team as TeamLike;
+    const t = team as ManagerOwnerFields;
     const teamId = Number(t.id);
     if (!Number.isFinite(teamId)) continue;
     const managerId = getManagerId(t, teamId);
