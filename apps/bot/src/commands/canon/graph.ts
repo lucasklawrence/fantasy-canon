@@ -7,11 +7,13 @@ import {
   renderFaabPaceGraph,
   renderLuckGraph,
 } from '@fantasy-canon/renderer';
+import { computeExpectedWins } from '@fantasy-canon/core';
 import {
   ensureTransactionsPayload,
   getTransactionTeamId,
   isWaiverSpend,
 } from '../../lib/transactions.js';
+import { extractWeeklyScores } from '../../lib/weeklyScores.js';
 
 export async function handleGraphSubcommand(
   interaction: ChatInputCommandInteraction,
@@ -41,16 +43,21 @@ export async function handleGraphSubcommand(
     const teams = extractTeams(mTeamPayload);
 
     if (metric === 'luck') {
-      const avgPoints = average(teams.map((t) => t.pointsFor));
-      const avgWins = average(teams.map((t) => t.wins));
-      const points = teams.map((t) => {
-        const expectedWins = avgPoints > 0 ? (t.pointsFor / avgPoints) * avgWins : avgWins;
-        return {
-          team: nameMap.get(t.id) ?? `Team ${t.id}`,
-          wins: t.wins,
-          expectedWins,
-        };
-      });
+      const mScoreboard = await ensureSnapshot(context, leagueId, season, 'mScoreboard');
+      const scores = extractWeeklyScores(mScoreboard);
+      if (scores.length === 0) {
+        await interaction.editReply({
+          content: 'No weekly scores found for this season (mScoreboard returned no matchups).',
+        });
+        return;
+      }
+      // Monte Carlo expected wins (schedule-independent) vs actual record wins.
+      const expected = new Map(computeExpectedWins(scores).map((r) => [r.teamId, r.expectedWins]));
+      const points = teams.map((t) => ({
+        team: nameMap.get(t.id) ?? `Team ${t.id}`,
+        wins: t.wins,
+        expectedWins: expected.get(t.id) ?? 0,
+      }));
       const buffer = await renderLuckGraph({
         title: `${leagueInfo.name ?? leagueId} • Luck graph`,
         subtitle: `Season ${season}`,
@@ -211,12 +218,6 @@ async function sendBuffer(
     content: `League ${leagueName ?? ''} • Season ${season} • ${label}`,
     files: [attachment],
   });
-}
-
-function average(values: number[]): number {
-  if (!values.length) return 0;
-  const sum = values.reduce((acc, v) => acc + v, 0);
-  return sum / values.length;
 }
 
 function buildFaabLines(
