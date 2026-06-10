@@ -17,6 +17,7 @@ import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.
 import { handleManagersSubcommand } from './managers.js';
 import { handleAllPlaySubcommand } from './allPlay.js';
 import { handleTrophiesSubcommand } from './trophies.js';
+import { handleLineupSubcommand } from './lineup.js';
 import {
   handleLuckSubcommand,
   handleDraftProphecySubcommand,
@@ -60,7 +61,7 @@ export const canonCommand = new SlashCommandBuilder()
   .addSubcommand((sub) =>
     sub
       .setName('trophies')
-      .setDescription('Weekly trophies — high/low score, blowout, closest, luckiest, unluckiest')
+      .setDescription('Weekly trophies — high/low score, blowout, closest, luckiest, unluckiest…')
       .addIntegerOption((opt) =>
         opt.setName('season').setDescription('Season year (e.g., 2025)').setRequired(true),
       )
@@ -69,7 +70,29 @@ export const canonCommand = new SlashCommandBuilder()
           .setName('week')
           .setDescription('Week (matchup period)')
           .setRequired(true)
-          .setMinValue(1),
+          .setMinValue(1)
+          .setMaxValue(18),
+      )
+      .addStringOption((opt) =>
+        opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
+      ),
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('lineup')
+      .setDescription('Optimal-lineup % leaderboard (points left on the bench)')
+      .addIntegerOption((opt) =>
+        opt.setName('season').setDescription('Season year (e.g., 2025)').setRequired(true),
+      )
+      .addIntegerOption((opt) =>
+        opt
+          .setName('weeks')
+          .setDescription('Number of weeks to include (default: regular season)')
+          .setMinValue(1)
+          .setMaxValue(18),
+      )
+      .addIntegerOption((opt) =>
+        opt.setName('limit').setDescription('Number of teams to show (default all)').setMinValue(1),
       )
       .addStringOption((opt) =>
         opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
@@ -579,6 +602,8 @@ export async function handleCanonInteraction(
     await handleAllPlaySubcommand(interaction, context);
   } else if (subcommand === 'trophies') {
     await handleTrophiesSubcommand(interaction, context);
+  } else if (subcommand === 'lineup') {
+    await handleLineupSubcommand(interaction, context);
   } else if (subcommand === 'draft-prophecy') {
     await handleDraftProphecySubcommand(interaction, context);
   } else if (subcommand === 'streaks') {
