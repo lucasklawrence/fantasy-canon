@@ -1,15 +1,21 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
-import { computeAllPlayRecord } from '@fantasy-canon/core';
+import { computeWeeklyTrophies } from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
-import { extractWeeklyScores } from '../../lib/weeklyScores.js';
+import { extractWeeklyMatchups } from '../../lib/weeklyScores.js';
 
-export async function handleAllPlaySubcommand(
+/**
+ * `/canon trophies` — the weekly banter awards for one week. Surfaces the six
+ * score-based categories (👑 high, 💩 low, 😱 blowout, 😅 closest, 🍀 luckiest,
+ * 😡 unluckiest); the projected- and optimal-lineup-based trophies light up once
+ * those extractors exist (the core engine already supports them).
+ */
+export async function handleTrophiesSubcommand(
   interaction: ChatInputCommandInteraction,
   context: BotContext,
 ): Promise<void> {
   const season = interaction.options.getInteger('season', true);
-  const limit = interaction.options.getInteger('limit') ?? undefined;
+  const week = interaction.options.getInteger('week', true);
   const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
@@ -30,36 +36,29 @@ export async function handleAllPlaySubcommand(
     const nameMap = buildTeamNameMap(mTeamPayload);
 
     const mScoreboard = await ensureSnapshot(context, leagueId, season, 'mScoreboard');
-    const scores = extractWeeklyScores(mScoreboard);
+    const matchups = extractWeeklyMatchups(mScoreboard).filter((m) => m.week === week);
 
-    if (scores.length === 0) {
+    if (matchups.length === 0) {
       await interaction.editReply({
-        content: 'No weekly scores found for this season (mScoreboard returned no matchups).',
+        content: `No matchups found for week ${week} of ${season}.`,
       });
       return;
     }
 
-    const records = computeAllPlayRecord(scores);
-    const shown = typeof limit === 'number' ? records.slice(0, limit) : records;
-
-    const rows = shown.map((rec, idx) => {
-      const name = nameMap.get(rec.teamId) ?? `Team ${rec.teamId}`;
-      const pct = (rec.winPct * 100).toFixed(1);
-      const tie = rec.ties > 0 ? `-${rec.ties}` : '';
-      return `${idx + 1}. ${name} — ${rec.wins}-${rec.losses}${tie} (${pct}% vs all)`;
-    });
+    const trophies = computeWeeklyTrophies(matchups);
+    const lines = trophies.map(
+      (t) => `${t.emoji} ${t.label}: ${nameMap.get(t.teamId) ?? `Team ${t.teamId}`} — ${t.detail}`,
+    );
 
     await interaction.editReply({
-      content: [
-        `League ${leagueId} • Season ${season} • All-Play (Wins vs. All %)`,
-        'Each week every team is scored against every other team. Schedule-independent.',
-        ...rows,
-      ].join('\n'),
+      content: [`League ${leagueId} • Season ${season} • Week ${week} Trophies`, ...lines].join(
+        '\n',
+      ),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({
-      content: `Failed to compute all-play record: ${message}`,
+      content: `Failed to compute trophies: ${message}`,
     });
   }
 }

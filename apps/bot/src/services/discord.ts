@@ -7,7 +7,7 @@ import {
   Partials,
 } from 'discord.js';
 import { BotContext } from '../config.js';
-import { handleCanonInteraction } from '../commands/canon/index.js';
+import { handleCanonInteraction, handleCanonAutocomplete } from '../commands/canon/index.js';
 
 export function createDiscordClient(): Client {
   return new Client({
@@ -18,6 +18,15 @@ export function createDiscordClient(): Client {
 
 export function registerInteractionHandlers(client: Client, context: BotContext): void {
   client.on('interactionCreate', (interaction: Interaction) => {
+    if (interaction.isAutocomplete()) {
+      if (interaction.commandName === 'canon') {
+        void handleCanonAutocomplete(interaction, context).catch((error) => {
+          console.error('Failed to handle /canon autocomplete', error);
+        });
+      }
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) {
       return;
     }

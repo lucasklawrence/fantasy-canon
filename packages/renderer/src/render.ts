@@ -93,6 +93,20 @@ function renderSvg(
       );
     } else if (payload.type === 'faab-pace') {
       body += renderFaabPace(payload as Parameters<typeof renderFaabPace>[0], theme, width, height);
+    } else if (payload.type === 'power-ranking') {
+      body += renderPowerRanking(
+        payload as Parameters<typeof renderPowerRanking>[0],
+        theme,
+        width,
+        height,
+      );
+    } else if (payload.type === 'awards-recap') {
+      body += renderAwardsRecap(
+        payload as Parameters<typeof renderAwardsRecap>[0],
+        theme,
+        width,
+        height,
+      );
     }
   }
 
@@ -293,6 +307,101 @@ function renderFaabPace(
   );
 
   return body;
+}
+
+function renderPowerRanking(
+  payload: {
+    rows: Array<{ rank: number; team: string; score: number; gap: number }>;
+  },
+  theme: typeof DEFAULT_THEME,
+  width: number,
+  height: number,
+): string {
+  const plotArea = { x: 80, y: 160, w: width - 160, h: height - 240 };
+  const rows = payload.rows;
+  if (rows.length === 0) return '';
+
+  const maxScore = Math.max(...rows.map((r) => r.score), 1);
+  // Leave room on the right for the score/gap label.
+  const barMaxW = plotArea.w - 220;
+  const rowH = plotArea.h / rows.length;
+  const barH = Math.min(28, rowH * 0.55);
+
+  let body = '';
+  rows.forEach((r, idx) => {
+    const color = palette(theme, idx);
+    const cy = plotArea.y + idx * rowH + rowH / 2;
+    const barW = Math.max(2, (r.score / maxScore) * barMaxW);
+    const barX = plotArea.x + 150;
+
+    // Rank + team name on the left.
+    body += `<text x="${plotArea.x}" y="${cy + 5}" fill="${theme.colors.muted}" font-family="${theme.fonts.heading}" font-size="18" font-weight="bold">${r.rank}.</text>`;
+    body += `<text x="${plotArea.x + 34}" y="${cy + 5}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="16">${escape(
+      r.team,
+    )}</text>`;
+
+    // Score bar.
+    body += `<rect x="${barX}" y="${cy - barH / 2}" width="${barW}" height="${barH}" rx="4" fill="${color}" opacity="0.85" />`;
+
+    // Score value, and the gap to the team above (the headline insight).
+    const scoreLabel = r.score.toFixed(1);
+    body += `<text x="${barX + barW + 10}" y="${cy + 5}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="15">${scoreLabel}</text>`;
+    if (idx > 0 && r.gap > 0) {
+      body += `<text x="${barX + barW + 70}" y="${cy + 5}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="13">▼ ${r.gap.toFixed(1)}</text>`;
+    }
+  });
+
+  return body;
+}
+
+function renderAwardsRecap(
+  payload: {
+    awards: Array<{ label: string; winner: string; detail?: string; emoji?: string }>;
+  },
+  theme: typeof DEFAULT_THEME,
+  width: number,
+  height: number,
+): string {
+  const awards = payload.awards;
+  if (awards.length === 0) return '';
+
+  const plotArea = { x: 60, y: 150, w: width - 120, h: height - 200 };
+  const cols = awards.length > 6 ? 2 : 1;
+  const rows = Math.ceil(awards.length / cols);
+  const colW = plotArea.w / cols;
+  const rowH = plotArea.h / rows;
+  // Rough character budget so long names don't overrun their tile.
+  const charBudget = Math.max(12, Math.floor((colW - 32) / 11));
+
+  let body = '';
+  awards.forEach((a, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const tileX = plotArea.x + col * colW + 8;
+    const tileY = plotArea.y + row * rowH + 8;
+    const textX = tileX + 14;
+
+    body += `<rect x="${tileX}" y="${tileY}" width="${colW - 16}" height="${rowH - 16}" rx="10" fill="${theme.colors.surface}" opacity="0.6" />`;
+
+    const label = (a.emoji ? `${a.emoji} ` : '') + a.label;
+    body += `<text x="${textX}" y="${tileY + 30}" fill="${theme.colors.secondary}" font-family="${theme.fonts.heading}" font-size="16" font-weight="bold">${escape(
+      truncate(label, charBudget),
+    )}</text>`;
+    body += `<text x="${textX}" y="${tileY + 58}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="20">${escape(
+      truncate(a.winner, charBudget),
+    )}</text>`;
+    if (a.detail) {
+      body += `<text x="${textX}" y="${tileY + 82}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="14">${escape(
+        truncate(a.detail, charBudget + 6),
+      )}</text>`;
+    }
+  });
+
+  return body;
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text;
 }
 
 function escape(text: string): string {

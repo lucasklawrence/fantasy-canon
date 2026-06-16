@@ -1,22 +1,11 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { computeExpectedWins, computeLuckIndex } from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
 import { getLeagueInfo } from '../../lib/leagueInfo.js';
-
-type TeamLike = {
-  id?: unknown;
-  name?: unknown;
-  abbrev?: unknown;
-  location?: unknown;
-  nickname?: unknown;
-  record?: unknown;
-  transactionCounter?: unknown;
-  tradeBlock?: unknown;
-  draftDayProjectedRank?: unknown;
-  rankFinal?: unknown;
-  rankCalculatedFinal?: unknown;
-  playoffSeed?: unknown;
-};
+import { extractTeams, TeamInfo } from '../../lib/teamStats.js';
+import { ensureSnapshot } from '../../lib/snapshots.js';
+import { extractWeeklyScores } from '../../lib/weeklyScores.js';
 
 export async function handleLuckSubcommand(
   interaction: ChatInputCommandInteraction,
@@ -41,38 +30,35 @@ export async function handleLuckSubcommand(
       return;
     }
 
-    const pointsRank = rankBy(teams, (t) => t.pointsFor, 'desc');
-    const winRank = rankBy(teams, (t) => t.wins, 'desc');
+    const mScoreboard = await ensureSnapshot(context, leagueId, season, 'mScoreboard');
+    const scores = extractWeeklyScores(mScoreboard);
+    if (scores.length === 0) {
+      await interaction.editReply({
+        content: 'No weekly scores found for this season (mScoreboard returned no matchups).',
+      });
+      return;
+    }
 
+    // Expected wins = average head-to-head wins across many randomized schedules
+    // (Monte Carlo). Luck = actual record wins − expected wins: a big positive
+    // gap means the schedule handed you wins; negative means it cost you.
+    const expected = new Map(computeExpectedWins(scores).map((r) => [r.teamId, r.expectedWins]));
     const entries = teams.map((t) => {
-      const pr = pointsRank.get(t.id) ?? teams.length;
-      const wr = winRank.get(t.id) ?? teams.length;
-      const luckIndex = pr - wr; // positive => luckier (wins outpace points rank)
-      return { ...t, luckIndex, pointsRank: pr, winRank: wr };
+      const expectedWins = expected.get(t.id) ?? 0;
+      return { ...t, expectedWins, luckIndex: computeLuckIndex({ wins: t.wins, expectedWins }) };
     });
 
     const luckiest = [...entries].sort((a, b) => b.luckIndex - a.luckIndex).slice(0, 3);
     const unluckiest = [...entries].sort((a, b) => a.luckIndex - b.luckIndex).slice(0, 3);
 
-    const lines: string[] = [];
-    lines.push('Luckiest:');
-    lines.push(
-      ...luckiest.map(
-        (e, idx) =>
-          `${idx + 1}. ${nameMap.get(e.id) ?? `Team ${e.id}`} — luck +${e.luckIndex.toFixed(
-            2,
-          )} (points rank ${e.pointsRank}, win rank ${e.winRank})`,
-      ),
-    );
-    lines.push('Unluckiest:');
-    lines.push(
-      ...unluckiest.map(
-        (e, idx) =>
-          `${idx + 1}. ${nameMap.get(e.id) ?? `Team ${e.id}`} — luck ${e.luckIndex.toFixed(
-            2,
-          )} (points rank ${e.pointsRank}, win rank ${e.winRank})`,
-      ),
-    );
+    const fmt = (e: (typeof entries)[number], idx: number) => {
+      const sign = e.luckIndex >= 0 ? '+' : '';
+      return `${idx + 1}. ${nameMap.get(e.id) ?? `Team ${e.id}`} — luck ${sign}${e.luckIndex.toFixed(
+        1,
+      )} (${e.wins} wins vs ${e.expectedWins.toFixed(1)} expected)`;
+    };
+
+    const lines = ['Luckiest:', ...luckiest.map(fmt), 'Unluckiest:', ...unluckiest.map(fmt)];
 
     await interaction.editReply({
       content: [`League ${leagueLabel} • Season ${season} • Luck`, ...lines].join('\n'),
@@ -498,130 +484,6 @@ async function missingLeagueReply(interaction: ChatInputCommandInteraction): Pro
     content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
     flags: MessageFlags.Ephemeral,
   });
-}
-
-async function ensureSnapshot(
-  context: BotContext,
-  leagueId: string,
-  season: number,
-  view: string,
-): Promise<unknown> {
-  const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
-  const match = existing.find((s) => s.view === view);
-  if (match) return match.payload;
-  const res = await context.espnClient.fetchLeague({ leagueId, season, view });
-  await context.snapshotsRepo.save({
-    leagueId,
-    season,
-    view,
-    fetchedAt: new Date(),
-    payload: res.payload,
-  });
-  return res.payload;
-}
-
-interface TeamInfo {
-  id: number;
-  wins: number;
-  losses: number;
-  ties: number;
-  pointsFor: number;
-  pointsAgainst: number;
-  streakType?: string;
-  streakLength: number;
-  acquisitions: number;
-  moves: number;
-  movesToIr: number;
-  totalMoves: number;
-  tradeBlockOn: number;
-  tradeBlockUntouchable: number;
-  projectedRank?: number;
-  finishRank?: number;
-  homeWins: number;
-  homeLosses: number;
-  awayWins: number;
-  awayLosses: number;
-  acquisitionBudgetSpent?: number;
-}
-
-function extractTeams(payload: unknown): TeamInfo[] {
-  if (!payload || typeof payload !== 'object') return [];
-  const maybeTeams = (payload as { teams?: unknown }).teams;
-  if (!Array.isArray(maybeTeams)) return [];
-  const teams: TeamInfo[] = [];
-  for (const team of maybeTeams) {
-    if (!team || typeof team !== 'object') continue;
-    const t = team as TeamLike;
-    const id = Number(t.id);
-    if (!Number.isFinite(id)) continue;
-    const record =
-      t.record && typeof t.record === 'object'
-        ? (t.record as { overall?: unknown; home?: unknown; away?: unknown })
-        : {};
-    const overall =
-      record && typeof record === 'object' ? (record as { overall?: unknown }).overall : undefined;
-    const home =
-      record && typeof record === 'object' ? (record as { home?: unknown }).home : undefined;
-    const away =
-      record && typeof record === 'object' ? (record as { away?: unknown }).away : undefined;
-    const tc =
-      t.transactionCounter && typeof t.transactionCounter === 'object'
-        ? (t.transactionCounter as {
-            acquisitionBudgetSpent?: unknown;
-            acquisitions?: unknown;
-            drops?: unknown;
-            moveToActive?: unknown;
-            moveToIR?: unknown;
-            trades?: unknown;
-          })
-        : undefined;
-    const tradeBlock =
-      t.tradeBlock && typeof t.tradeBlock === 'object'
-        ? (t.tradeBlock as { players?: unknown[] })
-        : undefined;
-    const players = Array.isArray(tradeBlock?.players) ? tradeBlock?.players : [];
-    const onBlock = players.filter(
-      (p) => p && typeof p === 'object' && (p as { status?: unknown }).status === 'ON_THE_BLOCK',
-    ).length;
-    const untouchable = players.filter(
-      (p) => p && typeof p === 'object' && (p as { status?: unknown }).status === 'UNTOUCHABLE',
-    ).length;
-
-    teams.push({
-      id,
-      wins: Number((overall as { wins?: unknown })?.wins) || 0,
-      losses: Number((overall as { losses?: unknown })?.losses) || 0,
-      ties: Number((overall as { ties?: unknown })?.ties) || 0,
-      pointsFor: Number((overall as { pointsFor?: unknown })?.pointsFor) || 0,
-      pointsAgainst: Number((overall as { pointsAgainst?: unknown })?.pointsAgainst) || 0,
-      streakType:
-        typeof (overall as { streakType?: unknown })?.streakType === 'string'
-          ? ((overall as { streakType?: unknown }).streakType as string)
-          : undefined,
-      streakLength: Number((overall as { streakLength?: unknown })?.streakLength) || 0,
-      acquisitions: Number(tc?.acquisitions) || 0,
-      moves: Number(tc?.moveToActive) || 0,
-      movesToIr: Number(tc?.moveToIR) || 0,
-      totalMoves:
-        (Number(tc?.acquisitions) || 0) +
-        (Number(tc?.drops) || 0) +
-        (Number(tc?.moveToActive) || 0) +
-        (Number(tc?.moveToIR) || 0) +
-        (Number(tc?.trades) || 0),
-      tradeBlockOn: onBlock,
-      tradeBlockUntouchable: untouchable,
-      projectedRank: Number(t.draftDayProjectedRank),
-      finishRank:
-        Number(t.rankFinal) || Number(t.rankCalculatedFinal) || Number(t.playoffSeed) || undefined,
-      homeWins: Number((home as { wins?: unknown })?.wins) || 0,
-      homeLosses: Number((home as { losses?: unknown })?.losses) || 0,
-      awayWins: Number((away as { wins?: unknown })?.wins) || 0,
-      awayLosses: Number((away as { losses?: unknown })?.losses) || 0,
-      acquisitionBudgetSpent:
-        typeof tc?.acquisitionBudgetSpent === 'number' ? tc.acquisitionBudgetSpent : undefined,
-    });
-  }
-  return teams;
 }
 
 function rankBy(

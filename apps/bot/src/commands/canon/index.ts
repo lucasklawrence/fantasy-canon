@@ -1,4 +1,9 @@
-import { ChannelType, ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
+import {
+  AutocompleteInteraction,
+  ChannelType,
+  ChatInputCommandInteraction,
+  SlashCommandBuilder,
+} from 'discord.js';
 import { BotContext } from '../../config.js';
 import { handleStatusSubcommand } from './status.js';
 import { handlePingSubcommand } from './ping.js';
@@ -17,6 +22,8 @@ import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.
 import { handleManagersSubcommand } from './managers.js';
 import { handleAllPlaySubcommand } from './allPlay.js';
 import { handleLineupSubcommand } from './lineup.js';
+import { handleScoutSubcommand, handleScoutAutocomplete } from './scout.js';
+import { handleTrophiesSubcommand } from './trophies.js';
 import {
   handleLuckSubcommand,
   handleDraftProphecySubcommand,
@@ -73,6 +80,24 @@ export const canonCommand = new SlashCommandBuilder()
       )
       .addIntegerOption((opt) =>
         opt.setName('limit').setDescription('Number of teams to show (default all)').setMinValue(1),
+      )
+      .addStringOption((opt) =>
+        opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
+      ),
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('trophies')
+      .setDescription('Weekly trophies — high/low score, blowout, closest, luckiest, unluckiest')
+      .addIntegerOption((opt) =>
+        opt.setName('season').setDescription('Season year (e.g., 2025)').setRequired(true),
+      )
+      .addIntegerOption((opt) =>
+        opt
+          .setName('week')
+          .setDescription('Week (matchup period)')
+          .setRequired(true)
+          .setMinValue(1),
       )
       .addStringOption((opt) =>
         opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
@@ -159,6 +184,24 @@ export const canonCommand = new SlashCommandBuilder()
       )
       .addIntegerOption((opt) =>
         opt.setName('limit').setDescription('Number of rows (default 5)').setMinValue(1),
+      )
+      .addStringOption((opt) =>
+        opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
+      ),
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('scout')
+      .setDescription('Scout an opponent: record, tendencies, and roster snapshot')
+      .addIntegerOption((opt) =>
+        opt.setName('season').setDescription('Season year (e.g., 2025)').setRequired(true),
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName('opponent')
+          .setDescription('Opponent team or manager (pick from suggestions)')
+          .setRequired(true)
+          .setAutocomplete(true),
       )
       .addStringOption((opt) =>
         opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
@@ -582,6 +625,8 @@ export async function handleCanonInteraction(
     await handleAllPlaySubcommand(interaction, context);
   } else if (subcommand === 'lineup') {
     await handleLineupSubcommand(interaction, context);
+  } else if (subcommand === 'trophies') {
+    await handleTrophiesSubcommand(interaction, context);
   } else if (subcommand === 'draft-prophecy') {
     await handleDraftProphecySubcommand(interaction, context);
   } else if (subcommand === 'streaks') {
@@ -596,7 +641,25 @@ export async function handleCanonInteraction(
     await handleRivalrySubcommand(interaction, context);
   } else if (subcommand === 'rivalries') {
     await handleRivalriesSubcommand(interaction, context);
+  } else if (subcommand === 'scout') {
+    await handleScoutSubcommand(interaction, context);
   } else {
     await handleNotImplemented(interaction, subcommand);
   }
+}
+
+/**
+ * Route `/canon` autocomplete interactions. Only `scout` exposes an autocomplete option today;
+ * any other focused field gets an empty menu.
+ */
+export async function handleCanonAutocomplete(
+  interaction: AutocompleteInteraction,
+  context: BotContext,
+): Promise<void> {
+  const subcommand = interaction.options.getSubcommand(false);
+  if (subcommand === 'scout') {
+    await handleScoutAutocomplete(interaction, context);
+    return;
+  }
+  await interaction.respond([]);
 }

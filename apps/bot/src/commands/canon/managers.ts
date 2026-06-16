@@ -2,6 +2,11 @@ import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { BotContext } from '../../config.js';
 import { buildTeamNameMap, formatTeamName } from '../../lib/teamNames.js';
 import { getLeagueInfo } from '../../lib/leagueInfo.js';
+import {
+  buildOwnerDisplayMap,
+  getManagerId,
+  getEmbeddedManagerName,
+} from '../../lib/managerNames.js';
 
 type TeamLike = {
   id?: unknown;
@@ -222,7 +227,7 @@ function extractTeams(
     const managerId = getManagerId(t, teamId);
     const teamName =
       nameMap.get(teamId) ?? formatTeamName(team as Parameters<typeof formatTeamName>[0], teamId);
-    const managerName = ownerMap.get(managerId) ?? getManagerName(t) ?? teamName;
+    const managerName = ownerMap.get(managerId) ?? getEmbeddedManagerName(t) ?? teamName;
 
     const record =
       t.record && typeof t.record === 'object'
@@ -263,75 +268,6 @@ function extractTeams(
   }
 
   return results;
-}
-
-/**
- * Builds a map of owner ID to preferred display name from the league members list.
- */
-function buildOwnerDisplayMap(payload: unknown): Map<string, string> {
-  const map = new Map<string, string>();
-  if (!payload || typeof payload !== 'object') return map;
-  const members = (payload as { members?: unknown }).members;
-  if (!Array.isArray(members)) return map;
-  for (const member of members) {
-    if (!member || typeof member !== 'object') continue;
-    const m = member as {
-      id?: unknown;
-      displayName?: unknown;
-      firstName?: unknown;
-      lastName?: unknown;
-      nickname?: unknown;
-    };
-    const id = typeof m.id === 'string' ? m.id : undefined;
-    if (!id) continue;
-    const dn = typeof m.displayName === 'string' ? m.displayName : undefined;
-    const nick = typeof m.nickname === 'string' ? m.nickname : undefined;
-    const first = typeof m.firstName === 'string' ? m.firstName : '';
-    const last = typeof m.lastName === 'string' ? m.lastName : '';
-    const combo = `${first} ${last}`.trim();
-    const name = dn || nick || (combo ? combo : undefined);
-    if (name) map.set(id, name);
-  }
-  return map;
-}
-
-/**
- * Derives the best-available manager identifier, falling back to team slot when missing.
- */
-function getManagerId(team: TeamLike, fallbackId: number): string {
-  const primary =
-    typeof team.primaryOwner === 'string' && team.primaryOwner ? team.primaryOwner : undefined;
-  if (primary) return primary;
-
-  if (Array.isArray(team.owners)) {
-    const ownerId = team.owners.find((o) => typeof o === 'string' && o) as string | undefined;
-    if (ownerId) return ownerId;
-  }
-
-  const owner = typeof team.owner === 'string' && team.owner ? team.owner : undefined;
-  if (owner) return owner;
-
-  return `team-${fallbackId}`;
-}
-
-/**
- * Picks a displayable manager name from owners/owner metadata on the team entry.
- */
-function getManagerName(team: TeamLike): string | undefined {
-  if (Array.isArray(team.owners)) {
-    for (const entry of team.owners) {
-      if (entry && typeof entry === 'object') {
-        const nickname = (entry as { nickname?: unknown }).nickname;
-        const first = (entry as { firstName?: unknown }).firstName;
-        const last = (entry as { lastName?: unknown }).lastName;
-        const combined =
-          `${typeof first === 'string' ? first : ''} ${typeof last === 'string' ? last : ''}`.trim();
-        if (typeof nickname === 'string' && nickname) return nickname;
-        if (combined) return combined;
-      }
-    }
-  }
-  return undefined;
 }
 
 /**
