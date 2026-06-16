@@ -107,6 +107,13 @@ function renderSvg(
         width,
         height,
       );
+    } else if (payload.type === 'bump-chart') {
+      body += renderBumpChart(
+        payload as Parameters<typeof renderBumpChart>[0],
+        theme,
+        width,
+        height,
+      );
     }
   }
 
@@ -402,6 +409,74 @@ function renderAwardsRecap(
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text;
+}
+
+function renderBumpChart(
+  payload: {
+    weeks: number[];
+    lines: Array<{ team: string; ranks: number[] }>;
+  },
+  theme: typeof DEFAULT_THEME,
+  width: number,
+  height: number,
+): string {
+  const { weeks, lines } = payload;
+  if (weeks.length === 0 || lines.length === 0) return '';
+
+  // Reserve space on the right for direct line-end team labels (no side legend).
+  const labelSpace = 150;
+  const plotArea = { x: 90, y: 160, w: width - 160 - labelSpace, h: height - 240 };
+  const maxRank = Math.max(1, ...lines.flatMap((l) => l.ranks));
+
+  const scaleX = (weekIdx: number) =>
+    plotArea.x + (weekIdx / Math.max(1, weeks.length - 1)) * plotArea.w;
+  // Inverted: rank 1 at the top.
+  const scaleY = (rank: number) =>
+    plotArea.y + ((rank - 1) / Math.max(1, maxRank - 1)) * plotArea.h;
+
+  let body = '';
+
+  // Y gridlines + rank labels (1..maxRank), rank 1 at top.
+  for (let rank = 1; rank <= maxRank; rank += 1) {
+    const y = scaleY(rank);
+    body += `<line x1="${plotArea.x}" y1="${y}" x2="${plotArea.x + plotArea.w}" y2="${y}" stroke="${theme.colors.surface}" stroke-width="1" opacity="0.35" />`;
+    body += `<text x="${plotArea.x - 12}" y="${y + 4}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="12" text-anchor="end">${rank}</text>`;
+  }
+
+  // X labels (weeks).
+  const stepX = Math.max(1, Math.ceil(weeks.length / 10));
+  weeks.forEach((wk, i) => {
+    if (i % stepX !== 0 && i !== weeks.length - 1) return;
+    const x = scaleX(i);
+    body += `<text x="${x}" y="${plotArea.y + plotArea.h + 22}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="12" text-anchor="middle">W${wk}</text>`;
+  });
+
+  lines.forEach((line, idx) => {
+    const color = palette(theme, idx);
+    const pts = line.ranks
+      .map((rank, i) => (Number.isFinite(rank) ? `${scaleX(i)},${scaleY(rank)}` : null))
+      .filter((p): p is string => p !== null);
+    if (pts.length >= 2) {
+      body += `<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="2.5" opacity="0.85" />`;
+    }
+    line.ranks.forEach((rank, i) => {
+      if (!Number.isFinite(rank)) return;
+      body += `<circle cx="${scaleX(i)}" cy="${scaleY(rank)}" r="3.5" fill="${color}" />`;
+    });
+    // Direct end label at the final week.
+    const lastIdx = line.ranks.length - 1;
+    if (lastIdx >= 0 && Number.isFinite(line.ranks[lastIdx])) {
+      const lx = scaleX(lastIdx) + 8;
+      const ly = scaleY(line.ranks[lastIdx]) + 4;
+      body += `<text x="${lx}" y="${ly}" fill="${color}" font-family="${theme.fonts.body}" font-size="13">${escape(
+        line.team,
+      )}</text>`;
+    }
+  });
+
+  body += axisLabels(theme, plotArea, 'Week', 'Standings rank');
+
+  return body;
 }
 
 function escape(text: string): string {
