@@ -1,0 +1,1052 @@
+{
+  "scoringPeriodId": 1,
+  "seasonId": 2024,
+  "schedule": [
+    {
+      "id": 1,
+      "matchupPeriodId": 1,
+      "home": {
+        "teamId": 10,
+        "totalPoints": 95.81,
+        "rosterForCurrentScoringPeriod": {
+          "entries": [
+            {
+              "lineupSlotId": 4,
+              "playerId": 4374302,
+              "playerPoolEntry": {
+                "appliedStatTotal": 4.3,
+                "player": {
+                  "id": 4374302,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 19.40932086
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 4.3
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 2,
+              "playerId": 4361529,
+              "playerPoolEntry": {
+                "appliedStatTotal": 15.8,
+                "player": {
+                  "id": 4361529,
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 15.25943122
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 15.8
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 4,
+              "playerId": 4047650,
+              "playerPoolEntry": {
+                "appliedStatTotal": 5.9,
+                "player": {
+                  "id": 4047650,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 13.94289223
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 5.9
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 6,
+              "playerId": 3116365,
+              "playerPoolEntry": {
+                "appliedStatTotal": 3.4000000000000004,
+                "player": {
+                  "id": 3116365,
+                  "eligibleSlots": [
+                    5,
+                    6,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 13.12757402
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 3.4
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 0,
+              "playerId": 4432577,
+              "playerPoolEntry": {
+                "appliedStatTotal": 18.66,
+                "player": {
+                  "id": 4432577,
+                  "eligibleSlots": [
+                    0,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 19.16812578
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 18.66
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4239993,
+              "playerPoolEntry": {
+                "appliedStatTotal": 0,
+                "player": {
+                  "id": 4239993,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 0
+                    },
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 0
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 23,
+              "playerId": 3116165,
+              "playerPoolEntry": {
+                "appliedStatTotal": 22.3,
+                "player": {
+                  "id": 3116165,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 13.8850851
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 22.3
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 3068267,
+              "playerPoolEntry": {
+                "appliedStatTotal": 10.2,
+                "player": {
+                  "id": 3068267,
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 12.1275672
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 10.2
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4241372,
+              "playerPoolEntry": {
+                "appliedStatTotal": 0,
+                "player": {
+                  "id": 4241372,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 0
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 0
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 2,
+              "playerId": 4040761,
+              "playerPoolEntry": {
+                "appliedStatTotal": 9.2,
+                "player": {
+                  "id": 4040761,
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 11.95961497
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 9.2
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4258595,
+              "playerPoolEntry": {
+                "appliedStatTotal": 1.4,
+                "player": {
+                  "id": 4258595,
+                  "eligibleSlots": [
+                    5,
+                    6,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 7.1576597
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 1.4
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 17,
+              "playerId": 4362081,
+              "playerPoolEntry": {
+                "appliedStatTotal": 12,
+                "player": {
+                  "id": 4362081,
+                  "eligibleSlots": [
+                    17,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 8.16593347
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 12
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 16,
+              "playerId": -16008,
+              "playerPoolEntry": {
+                "appliedStatTotal": 4.25,
+                "player": {
+                  "id": -16008,
+                  "eligibleSlots": [
+                    16,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 5.05491634
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 4.25
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4038941,
+              "playerPoolEntry": {
+                "appliedStatTotal": 10.36,
+                "player": {
+                  "id": 4038941,
+                  "eligibleSlots": [
+                    0,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 17.09728517
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 10.36
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 3043116,
+              "playerPoolEntry": {
+                "appliedStatTotal": 8.2,
+                "player": {
+                  "id": 3043116,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 9.03167372
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 8.2
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 2980453,
+              "playerPoolEntry": {
+                "appliedStatTotal": 12.100000000000001,
+                "player": {
+                  "id": 2980453,
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 5.7140986
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 12.1
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "away": {
+        "teamId": 13,
+        "totalPoints": 102.12,
+        "rosterForCurrentScoringPeriod": {
+          "entries": [
+            {
+              "lineupSlotId": 4,
+              "playerId": 4262921,
+              "playerPoolEntry": {
+                "appliedStatTotal": 15.9,
+                "player": {
+                  "id": 4262921,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 18.13402825
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 15.9
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 2,
+              "playerId": 4239996,
+              "playerPoolEntry": {
+                "appliedStatTotal": 11.9,
+                "player": {
+                  "id": 4239996,
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 11.9
+                    },
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 14.28629773
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 6,
+              "playerId": 4430027,
+              "playerPoolEntry": {
+                "appliedStatTotal": 8.5,
+                "player": {
+                  "id": 4430027,
+                  "eligibleSlots": [
+                    5,
+                    6,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 14.0587996
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 8.5
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 4,
+              "playerId": 4241478,
+              "playerPoolEntry": {
+                "appliedStatTotal": 15.4,
+                "player": {
+                  "id": 4241478,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 15.4
+                    },
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 14.52600816
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 2,
+              "playerId": 3045147,
+              "playerPoolEntry": {
+                "appliedStatTotal": 19.3,
+                "player": {
+                  "id": 3045147,
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 19.3
+                    },
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 13.33262264
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 0,
+              "playerId": 4431611,
+              "playerPoolEntry": {
+                "appliedStatTotal": 7.220000000000001,
+                "player": {
+                  "id": 4431611,
+                  "eligibleSlots": [
+                    25,
+                    0,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 17.29443096
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 7.22
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 23,
+              "playerId": 4430878,
+              "playerPoolEntry": {
+                "appliedStatTotal": 3.9000000000000004,
+                "player": {
+                  "id": 4430878,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 12.47585851
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 3.9
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4248528,
+              "playerPoolEntry": {
+                "appliedStatTotal": 10.3,
+                "player": {
+                  "id": 4248528,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 10.3
+                    },
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 12.32814918
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 3051392,
+              "playerPoolEntry": {
+                "appliedStatTotal": 12.9,
+                "player": {
+                  "id": 3051392,
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 9.80302682
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 12.9
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 3916433,
+              "playerPoolEntry": {
+                "appliedStatTotal": 9.4,
+                "player": {
+                  "id": 3916433,
+                  "eligibleSlots": [
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 11.1392467
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 9.4
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 3117256,
+              "playerPoolEntry": {
+                "appliedStatTotal": 4.6,
+                "player": {
+                  "id": 3117256,
+                  "eligibleSlots": [
+                    5,
+                    6,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 9.16000017
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 4.6
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 16,
+              "playerId": -16006,
+              "playerPoolEntry": {
+                "appliedStatTotal": 19,
+                "player": {
+                  "id": -16006,
+                  "eligibleSlots": [
+                    16,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 6.06684498
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 19
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4241479,
+              "playerPoolEntry": {
+                "appliedStatTotal": 18.619999999999997,
+                "player": {
+                  "id": 4241479,
+                  "eligibleSlots": [
+                    0,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 18.62
+                    },
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 15.34939345
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 17,
+              "playerId": 14993,
+              "playerPoolEntry": {
+                "appliedStatTotal": 1,
+                "player": {
+                  "id": 14993,
+                  "eligibleSlots": [
+                    17,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 7.7671769
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 1
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4242214,
+              "playerPoolEntry": {
+                "appliedStatTotal": 0,
+                "player": {
+                  "id": 4242214,
+                  "eligibleSlots": [
+                    2,
+                    3,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 0
+                    },
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 0
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "lineupSlotId": 20,
+              "playerId": 4430637,
+              "playerPoolEntry": {
+                "appliedStatTotal": 1.6,
+                "player": {
+                  "id": 4430637,
+                  "eligibleSlots": [
+                    25,
+                    3,
+                    4,
+                    5,
+                    23,
+                    7,
+                    20,
+                    21
+                  ],
+                  "stats": [
+                    {
+                      "statSourceId": 0,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 1.6
+                    },
+                    {
+                      "statSourceId": 1,
+                      "statSplitTypeId": 1,
+                      "scoringPeriodId": 1,
+                      "appliedTotal": 9.56348263
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "teams": [
+    {
+      "id": 10
+    },
+    {
+      "id": 13
+    }
+  ]
+}
