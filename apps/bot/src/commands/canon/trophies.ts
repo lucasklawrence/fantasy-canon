@@ -3,12 +3,14 @@ import { computeWeeklyTrophies } from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
 import { extractWeeklyMatchups } from '../../lib/weeklyScores.js';
+import { parseStarterSlots } from '../../lib/lineupEfficiency.js';
+import { extractTrophyExtras, type TrophyExtras } from '../../lib/trophyExtras.js';
 
 /**
  * `/canon trophies` — the weekly banter awards for one week. Surfaces the six
  * score-based categories (👑 high, 💩 low, 😱 blowout, 😅 closest, 🍀 luckiest,
- * 😡 unluckiest); the projected- and optimal-lineup-based trophies light up once
- * those extractors exist (the core engine already supports them).
+ * 😡 unluckiest) plus, when the boxscore is available, the four data-dependent ones
+ * (📈/📉 over/underachiever vs projection, 🤖/🤡 best/worst manager by optimal-lineup %).
  */
 export async function handleTrophiesSubcommand(
   interaction: ChatInputCommandInteraction,
@@ -35,8 +37,10 @@ export async function handleTrophiesSubcommand(
     const mTeamPayload = await ensureSnapshot(context, leagueId, season, 'mTeam');
     const nameMap = buildTeamNameMap(mTeamPayload);
 
-    const mScoreboard = await ensureSnapshot(context, leagueId, season, 'mScoreboard');
-    const matchups = extractWeeklyMatchups(mScoreboard).filter((m) => m.week === week);
+    // mMatchupScore (not mScoreboard) carries per-week home/away totals for completed
+    // seasons; mScoreboard returns the schedule without resolvable per-week matchups here.
+    const mMatchupScore = await ensureSnapshot(context, leagueId, season, 'mMatchupScore');
+    const matchups = extractWeeklyMatchups(mMatchupScore).filter((m) => m.week === week);
 
     if (matchups.length === 0) {
       await interaction.editReply({
@@ -45,7 +49,8 @@ export async function handleTrophiesSubcommand(
       return;
     }
 
-    const trophies = computeWeeklyTrophies(matchups);
+    const extras = await loadTrophyExtras(context, leagueId, season, week);
+    const trophies = computeWeeklyTrophies(matchups, extras);
     const lines = trophies.map(
       (t) => `${t.emoji} ${t.label}: ${nameMap.get(t.teamId) ?? `Team ${t.teamId}`} — ${t.detail}`,
     );
@@ -63,6 +68,28 @@ export async function handleTrophiesSubcommand(
   }
 }
 
+/**
+ * Best-effort build of the projected / optimal-lineup-% extras that light up the four
+ * data-dependent trophies. Needs `mSettings` (starter slots) and the week's `mBoxscore`;
+ * if either is unavailable it returns `{}` so the six score-based trophies still post.
+ */
+async function loadTrophyExtras(
+  context: BotContext,
+  leagueId: string,
+  season: number,
+  week: number,
+): Promise<TrophyExtras> {
+  try {
+    const mSettings = await ensureSnapshot(context, leagueId, season, 'mSettings');
+    const starterSlots = parseStarterSlots(mSettings);
+    if (starterSlots.length === 0) return {};
+    const boxscore = await ensureWeekSnapshot(context, leagueId, season, week);
+    return extractTrophyExtras(boxscore, starterSlots, week);
+  } catch {
+    return {};
+  }
+}
+
 async function ensureSnapshot(
   context: BotContext,
   leagueId: string,
@@ -73,6 +100,33 @@ async function ensureSnapshot(
   const match = existing.find((s) => s.view === view);
   if (match) return match.payload;
   const res = await context.espnClient.fetchLeague({ leagueId, season, view });
+  await context.snapshotsRepo.save({
+    leagueId,
+    season,
+    view,
+    fetchedAt: new Date(),
+    payload: res.payload,
+  });
+  return res.payload;
+}
+
+/** Per-week `mBoxscore` snapshot — rosters + projections come back per `scoringPeriodId`. */
+async function ensureWeekSnapshot(
+  context: BotContext,
+  leagueId: string,
+  season: number,
+  scoringPeriodId: number,
+): Promise<unknown> {
+  const view = `mBoxscore:wk${scoringPeriodId}`;
+  const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
+  const match = existing.find((s) => s.view === view);
+  if (match) return match.payload;
+  const res = await context.espnClient.fetchLeague({
+    leagueId,
+    season,
+    view: 'mBoxscore',
+    scoringPeriodId,
+  });
   await context.snapshotsRepo.save({
     leagueId,
     season,
