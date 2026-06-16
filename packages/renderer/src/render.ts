@@ -93,6 +93,13 @@ function renderSvg(
       );
     } else if (payload.type === 'faab-pace') {
       body += renderFaabPace(payload as Parameters<typeof renderFaabPace>[0], theme, width, height);
+    } else if (payload.type === 'power-ranking') {
+      body += renderPowerRanking(
+        payload as Parameters<typeof renderPowerRanking>[0],
+        theme,
+        width,
+        height,
+      );
     }
   }
 
@@ -291,6 +298,51 @@ function renderFaabPace(
     payload.axes?.x ?? 'Week',
     payload.axes?.y ?? 'Cumulative FAAB',
   );
+
+  return body;
+}
+
+function renderPowerRanking(
+  payload: {
+    rows: Array<{ rank: number; team: string; score: number; gap: number }>;
+  },
+  theme: typeof DEFAULT_THEME,
+  width: number,
+  height: number,
+): string {
+  const plotArea = { x: 80, y: 160, w: width - 160, h: height - 240 };
+  const rows = payload.rows;
+  if (rows.length === 0) return '';
+
+  const maxScore = Math.max(...rows.map((r) => r.score), 1);
+  // Leave room on the right for the score/gap label.
+  const barMaxW = plotArea.w - 220;
+  const rowH = plotArea.h / rows.length;
+  const barH = Math.min(28, rowH * 0.55);
+
+  let body = '';
+  rows.forEach((r, idx) => {
+    const color = palette(theme, idx);
+    const cy = plotArea.y + idx * rowH + rowH / 2;
+    const barW = Math.max(2, (r.score / maxScore) * barMaxW);
+    const barX = plotArea.x + 150;
+
+    // Rank + team name on the left.
+    body += `<text x="${plotArea.x}" y="${cy + 5}" fill="${theme.colors.muted}" font-family="${theme.fonts.heading}" font-size="18" font-weight="bold">${r.rank}.</text>`;
+    body += `<text x="${plotArea.x + 34}" y="${cy + 5}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="16">${escape(
+      r.team,
+    )}</text>`;
+
+    // Score bar.
+    body += `<rect x="${barX}" y="${cy - barH / 2}" width="${barW}" height="${barH}" rx="4" fill="${color}" opacity="0.85" />`;
+
+    // Score value, and the gap to the team above (the headline insight).
+    const scoreLabel = r.score.toFixed(1);
+    body += `<text x="${barX + barW + 10}" y="${cy + 5}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="15">${scoreLabel}</text>`;
+    if (idx > 0 && r.gap > 0) {
+      body += `<text x="${barX + barW + 70}" y="${cy + 5}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="13">▼ ${r.gap.toFixed(1)}</text>`;
+    }
+  });
 
   return body;
 }
