@@ -18,15 +18,7 @@
                 "player": {
                   "id": 4374302,
                   "fullName": "Amon-Ra St. Brown",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -38,14 +30,7 @@
                 "player": {
                   "id": 4361529,
                   "fullName": "Isiah Pacheco",
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21]
                 }
               }
             },
@@ -57,15 +42,7 @@
                 "player": {
                   "id": 4047650,
                   "fullName": "DK Metcalf",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -77,14 +54,7 @@
                 "player": {
                   "id": 3116365,
                   "fullName": "Mark Andrews",
-                  "eligibleSlots": [
-                    5,
-                    6,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [5, 6, 23, 7, 20, 21]
                 }
               }
             },
@@ -96,12 +66,7 @@
                 "player": {
                   "id": 4432577,
                   "fullName": "C.J. Stroud",
-                  "eligibleSlots": [
-                    0,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [0, 7, 20, 21]
                 }
               }
             },
@@ -113,15 +78,7 @@
                 "player": {
                   "id": 4239993,
                   "fullName": "Tee Higgins",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -133,15 +90,7 @@
                 "player": {
                   "id": 3116165,
                   "fullName": "Chris Godwin",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -153,14 +102,7 @@
                 "player": {
                   "id": 3068267,
                   "fullName": "Austin Ekeler",
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21]
                 }
               }
             },
@@ -172,15 +114,7 @@
                 "player": {
                   "id": 4241372,
                   "fullName": "Hollywood Brown",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -192,14 +126,7 @@
                 "player": {
                   "id": 4040761,
                   "fullName": "Devin Singletary",
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21]
                 }
               }
             },
@@ -211,14 +138,7 @@
                 "player": {
                   "id": 4258595,
                   "fullName": "Cole Kmet",
-                  "eligibleSlots": [
-                    5,
-                    6,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [5, 6, 23, 7, 20, 21]
                 }
               }
             },
@@ -230,11 +150,7 @@
                 "player": {
                   "id": 4362081,
                   "fullName": "Cameron Dicker",
-                  "eligibleSlots": [
-                    17,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [17, 20, 21]
                 }
               }
             },
@@ -246,11 +162,7 @@
                 "player": {
                   "id": -16008,
                   "fullName": "Lions D/ST",
-                  "eligibleSlots": [
-                    16,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [16, 20, 21]
                 }
               }
             },
@@ -262,12 +174,7 @@
                 "player": {
                   "id": 4038941,
                   "fullName": "Justin Herbert",
-                  "eligibleSlots": [
-                    0,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [0, 7, 20, 21]
                 }
               }
             },
@@ -279,15 +186,7 @@
                 "player": {
                   "id": 3043116,
                   "fullName": "Demarcus Robinson",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -299,14 +198,7 @@
                 "player": {
                   "id": 2980453,
                   "fullName": "Jamaal Williams",
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21]
                 }
               }
             }
@@ -326,15 +218,7 @@
                 "player": {
                   "id": 4262921,
                   "fullName": "Justin Jefferson",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -346,14 +230,7 @@
                 "player": {
                   "id": 4239996,
                   "fullName": "Travis Etienne Jr.",
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21]
                 }
               }
             },
@@ -365,14 +242,7 @@
                 "player": {
                   "id": 4430027,
                   "fullName": "Sam LaPorta",
-                  "eligibleSlots": [
-                    5,
-                    6,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [5, 6, 23, 7, 20, 21]
                 }
               }
             },
@@ -384,15 +254,7 @@
                 "player": {
                   "id": 4241478,
                   "fullName": "DeVonta Smith",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -404,14 +266,7 @@
                 "player": {
                   "id": 3045147,
                   "fullName": "James Conner",
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21]
                 }
               }
             },
@@ -423,13 +278,7 @@
                 "player": {
                   "id": 4431611,
                   "fullName": "Caleb Williams",
-                  "eligibleSlots": [
-                    25,
-                    0,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [25, 0, 7, 20, 21]
                 }
               }
             },
@@ -441,15 +290,7 @@
                 "player": {
                   "id": 4430878,
                   "fullName": "Jaxon Smith-Njigba",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -461,15 +302,7 @@
                 "player": {
                   "id": 4248528,
                   "fullName": "Christian Watson",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -481,14 +314,7 @@
                 "player": {
                   "id": 3051392,
                   "fullName": "Ezekiel Elliott",
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21]
                 }
               }
             },
@@ -500,15 +326,7 @@
                 "player": {
                   "id": 3916433,
                   "fullName": "Jakobi Meyers",
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21]
                 }
               }
             },
@@ -520,14 +338,7 @@
                 "player": {
                   "id": 3117256,
                   "fullName": "Dalton Schultz",
-                  "eligibleSlots": [
-                    5,
-                    6,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [5, 6, 23, 7, 20, 21]
                 }
               }
             },
@@ -539,11 +350,7 @@
                 "player": {
                   "id": -16006,
                   "fullName": "Cowboys D/ST",
-                  "eligibleSlots": [
-                    16,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [16, 20, 21]
                 }
               }
             },
@@ -555,12 +362,7 @@
                 "player": {
                   "id": 4241479,
                   "fullName": "Tua Tagovailoa",
-                  "eligibleSlots": [
-                    0,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [0, 7, 20, 21]
                 }
               }
             },
@@ -572,11 +374,7 @@
                 "player": {
                   "id": 14993,
                   "fullName": "Greg Zuerlein",
-                  "eligibleSlots": [
-                    17,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [17, 20, 21]
                 }
               }
             },
@@ -588,14 +386,7 @@
                 "player": {
                   "id": 4242214,
                   "fullName": "Clyde Edwards-Helaire",
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21]
                 }
               }
             },
@@ -607,16 +398,7 @@
                 "player": {
                   "id": 4430637,
                   "fullName": "Ja'Lynn Polk",
-                  "eligibleSlots": [
-                    25,
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ]
+                  "eligibleSlots": [25, 3, 4, 5, 23, 7, 20, 21]
                 }
               }
             }
