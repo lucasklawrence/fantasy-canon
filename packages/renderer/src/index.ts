@@ -6,3 +6,4 @@ export * from './graphs/luckGraph.js';
 export * from './graphs/draftProphecyGraph.js';
 export * from './graphs/faabPaceGraph.js';
 export * from './graphs/powerRankingGraph.js';
+export * from './graphs/bumpChartGraph.js';
