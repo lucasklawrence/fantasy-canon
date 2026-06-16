@@ -72,6 +72,25 @@ export function computeLineupEfficiency(
 }
 
 /**
+ * Aggregate per-week efficiencies into a season total. The season optimal-lineup % is
+ * points-based — total actual over total optimal across the weeks — not the mean of the
+ * weekly percentages (a 0-point bye week shouldn't count as 100%). Points left on bench
+ * sum across weeks. An empty list yields a perfect, zero-point season.
+ */
+export function aggregateLineupEfficiency(weeks: LineupEfficiency[]): LineupEfficiency {
+  let actualPoints = 0;
+  let optimalPoints = 0;
+  let pointsLeftOnBench = 0;
+  for (const w of weeks) {
+    actualPoints += w.actualPoints;
+    optimalPoints += w.optimalPoints;
+    pointsLeftOnBench += w.pointsLeftOnBench;
+  }
+  const efficiency = optimalPoints > 0 ? actualPoints / optimalPoints : 1;
+  return { actualPoints, optimalPoints, pointsLeftOnBench, efficiency };
+}
+
+/**
  * Maximum total points obtainable by seating players into starting seats, respecting
  * eligibility (each player ≤ 1 seat, each seat ≤ 1 player). Transversal-matroid greedy:
  * take players in descending points, seat each via an augmenting path if one exists.

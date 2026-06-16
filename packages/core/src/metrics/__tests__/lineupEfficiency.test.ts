@@ -1,5 +1,7 @@
 import {
   computeLineupEfficiency,
+  aggregateLineupEfficiency,
+  type LineupEfficiency,
   type LineupPlayer,
   type StarterSlot,
 } from '../lineupEfficiency.js';
@@ -115,6 +117,39 @@ describe('computeLineupEfficiency', () => {
       { playerId: 1, points: 10, eligibleSlots: [RB], started: false },
     ];
     expect(computeLineupEfficiency(players, [])).toEqual({
+      actualPoints: 0,
+      optimalPoints: 0,
+      pointsLeftOnBench: 0,
+      efficiency: 1,
+    });
+  });
+});
+
+describe('aggregateLineupEfficiency', () => {
+  it('sums points and computes a points-based season efficiency', () => {
+    const weeks: LineupEfficiency[] = [
+      { actualPoints: 90, optimalPoints: 100, pointsLeftOnBench: 10, efficiency: 0.9 },
+      { actualPoints: 120, optimalPoints: 150, pointsLeftOnBench: 30, efficiency: 0.8 },
+    ];
+    expect(aggregateLineupEfficiency(weeks)).toEqual({
+      actualPoints: 210,
+      optimalPoints: 250,
+      pointsLeftOnBench: 40,
+      efficiency: 210 / 250,
+    });
+  });
+
+  it('does not let a 0-point week read as 100% (points-based, not mean-of-percentages)', () => {
+    const weeks: LineupEfficiency[] = [
+      { actualPoints: 0, optimalPoints: 0, pointsLeftOnBench: 0, efficiency: 1 },
+      { actualPoints: 50, optimalPoints: 100, pointsLeftOnBench: 50, efficiency: 0.5 },
+    ];
+    // Mean of percentages would be 75%; points-based is the honest 50%.
+    expect(aggregateLineupEfficiency(weeks).efficiency).toBeCloseTo(0.5, 6);
+  });
+
+  it('yields a perfect, zero-point season for no weeks', () => {
+    expect(aggregateLineupEfficiency([])).toEqual({
       actualPoints: 0,
       optimalPoints: 0,
       pointsLeftOnBench: 0,
