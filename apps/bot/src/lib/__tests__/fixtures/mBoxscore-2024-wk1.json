@@ -17,15 +17,7 @@
                 "appliedStatTotal": 4.3,
                 "player": {
                   "id": 4374302,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -50,14 +42,7 @@
                 "appliedStatTotal": 15.8,
                 "player": {
                   "id": 4361529,
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -82,15 +67,7 @@
                 "appliedStatTotal": 5.9,
                 "player": {
                   "id": 4047650,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -115,14 +92,7 @@
                 "appliedStatTotal": 3.4000000000000004,
                 "player": {
                   "id": 3116365,
-                  "eligibleSlots": [
-                    5,
-                    6,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [5, 6, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -147,12 +117,7 @@
                 "appliedStatTotal": 18.66,
                 "player": {
                   "id": 4432577,
-                  "eligibleSlots": [
-                    0,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [0, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -177,15 +142,7 @@
                 "appliedStatTotal": 0,
                 "player": {
                   "id": 4239993,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 0,
@@ -210,15 +167,7 @@
                 "appliedStatTotal": 22.3,
                 "player": {
                   "id": 3116165,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -243,14 +192,7 @@
                 "appliedStatTotal": 10.2,
                 "player": {
                   "id": 3068267,
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -275,15 +217,7 @@
                 "appliedStatTotal": 0,
                 "player": {
                   "id": 4241372,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -308,14 +242,7 @@
                 "appliedStatTotal": 9.2,
                 "player": {
                   "id": 4040761,
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -340,14 +267,7 @@
                 "appliedStatTotal": 1.4,
                 "player": {
                   "id": 4258595,
-                  "eligibleSlots": [
-                    5,
-                    6,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [5, 6, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -372,11 +292,7 @@
                 "appliedStatTotal": 12,
                 "player": {
                   "id": 4362081,
-                  "eligibleSlots": [
-                    17,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [17, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -401,11 +317,7 @@
                 "appliedStatTotal": 4.25,
                 "player": {
                   "id": -16008,
-                  "eligibleSlots": [
-                    16,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [16, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -430,12 +342,7 @@
                 "appliedStatTotal": 10.36,
                 "player": {
                   "id": 4038941,
-                  "eligibleSlots": [
-                    0,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [0, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -460,15 +367,7 @@
                 "appliedStatTotal": 8.2,
                 "player": {
                   "id": 3043116,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -493,14 +392,7 @@
                 "appliedStatTotal": 12.100000000000001,
                 "player": {
                   "id": 2980453,
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -533,15 +425,7 @@
                 "appliedStatTotal": 15.9,
                 "player": {
                   "id": 4262921,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -566,14 +450,7 @@
                 "appliedStatTotal": 11.9,
                 "player": {
                   "id": 4239996,
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 0,
@@ -598,14 +475,7 @@
                 "appliedStatTotal": 8.5,
                 "player": {
                   "id": 4430027,
-                  "eligibleSlots": [
-                    5,
-                    6,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [5, 6, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -630,15 +500,7 @@
                 "appliedStatTotal": 15.4,
                 "player": {
                   "id": 4241478,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 0,
@@ -663,14 +525,7 @@
                 "appliedStatTotal": 19.3,
                 "player": {
                   "id": 3045147,
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 0,
@@ -695,13 +550,7 @@
                 "appliedStatTotal": 7.220000000000001,
                 "player": {
                   "id": 4431611,
-                  "eligibleSlots": [
-                    25,
-                    0,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [25, 0, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -726,15 +575,7 @@
                 "appliedStatTotal": 3.9000000000000004,
                 "player": {
                   "id": 4430878,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -759,15 +600,7 @@
                 "appliedStatTotal": 10.3,
                 "player": {
                   "id": 4248528,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 0,
@@ -792,14 +625,7 @@
                 "appliedStatTotal": 12.9,
                 "player": {
                   "id": 3051392,
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -824,15 +650,7 @@
                 "appliedStatTotal": 9.4,
                 "player": {
                   "id": 3916433,
-                  "eligibleSlots": [
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -857,14 +675,7 @@
                 "appliedStatTotal": 4.6,
                 "player": {
                   "id": 3117256,
-                  "eligibleSlots": [
-                    5,
-                    6,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [5, 6, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -889,11 +700,7 @@
                 "appliedStatTotal": 19,
                 "player": {
                   "id": -16006,
-                  "eligibleSlots": [
-                    16,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [16, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -918,12 +725,7 @@
                 "appliedStatTotal": 18.619999999999997,
                 "player": {
                   "id": 4241479,
-                  "eligibleSlots": [
-                    0,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [0, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 0,
@@ -948,11 +750,7 @@
                 "appliedStatTotal": 1,
                 "player": {
                   "id": 14993,
-                  "eligibleSlots": [
-                    17,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [17, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -977,14 +775,7 @@
                 "appliedStatTotal": 0,
                 "player": {
                   "id": 4242214,
-                  "eligibleSlots": [
-                    2,
-                    3,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [2, 3, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 1,
@@ -1009,16 +800,7 @@
                 "appliedStatTotal": 1.6,
                 "player": {
                   "id": 4430637,
-                  "eligibleSlots": [
-                    25,
-                    3,
-                    4,
-                    5,
-                    23,
-                    7,
-                    20,
-                    21
-                  ],
+                  "eligibleSlots": [25, 3, 4, 5, 23, 7, 20, 21],
                   "stats": [
                     {
                       "statSourceId": 0,
