@@ -492,6 +492,8 @@ export const canonCommand = new SlashCommandBuilder()
                 { name: 'luck', value: 'luck' },
                 { name: 'draft-prophecy', value: 'draft-prophecy' },
                 { name: 'faab-pace', value: 'faab-pace' },
+                { name: 'power-ranking', value: 'power-ranking' },
+                { name: 'standings', value: 'standings' },
               ),
           )
           .addIntegerOption((opt) =>
