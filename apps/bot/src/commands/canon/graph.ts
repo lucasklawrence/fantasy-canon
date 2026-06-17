@@ -3,6 +3,7 @@ import { BotContext } from '../../config.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
 import { getLeagueInfo } from '../../lib/leagueInfo.js';
 import {
+  renderAwardsRecapCard,
   renderBumpChartGraph,
   renderDraftProphecyGraph,
   renderFaabPaceGraph,
@@ -10,10 +11,13 @@ import {
   renderPowerRankingGraph,
 } from '@fantasy-canon/renderer';
 import {
+  computeAllPlayRecord,
   computeExpectedWins,
   computePowerRanking,
+  computeSeasonAwards,
   computeWeeklyStandings,
   type PowerRankingInput,
+  type SeasonTeamSummary,
   type WeeklyResult,
 } from '@fantasy-canon/core';
 import {
@@ -21,6 +25,7 @@ import {
   getTransactionTeamId,
   isWaiverSpend,
 } from '../../lib/transactions.js';
+import { extractTeams as extractTeamStats } from '../../lib/teamStats.js';
 import { extractWeeklyMatchups, extractWeeklyScores } from '../../lib/weeklyScores.js';
 
 export async function handleGraphSubcommand(
@@ -223,6 +228,54 @@ export async function handleGraphSubcommand(
         leagueInfo.name,
         season,
         'Standings by Week',
+      );
+    } else if (metric === 'awards') {
+      const mScoreboard = await ensureSnapshot(context, leagueId, season, 'mScoreboard');
+      const scores = extractWeeklyScores(mScoreboard);
+      const expected = new Map(computeExpectedWins(scores).map((r) => [r.teamId, r.expectedWins]));
+      const allPlay = new Map(computeAllPlayRecord(scores).map((r) => [r.teamId, r.winPct]));
+      const scoresByTeam = new Map<number, number[]>();
+      for (const s of scores) {
+        const arr = scoresByTeam.get(s.teamId) ?? [];
+        arr.push(s.score);
+        scoresByTeam.set(s.teamId, arr);
+      }
+      const statsTeams = extractTeamStats(mTeamPayload);
+      const summaries: SeasonTeamSummary[] = statsTeams.map((t) => ({
+        teamId: t.id,
+        wins: t.wins,
+        losses: t.losses,
+        ties: t.ties,
+        pointsFor: t.pointsFor,
+        weeklyScores: scoresByTeam.get(t.id) ?? [],
+        projectedRank: t.projectedRank,
+        finishRank: t.finishRank,
+        expectedWins: expected.get(t.id),
+        allPlayWinPct: allPlay.get(t.id),
+        moves: t.totalMoves,
+      }));
+      const awards = computeSeasonAwards(summaries).map((a) => ({
+        label: a.label,
+        winner: nameMap.get(a.teamId) ?? `Team ${a.teamId}`,
+        detail: a.detail,
+        emoji: a.emoji,
+      }));
+      if (awards.length === 0) {
+        await interaction.editReply({ content: 'No data found to compute season awards.' });
+        return;
+      }
+      const buffer = await renderAwardsRecapCard({
+        title: `${leagueInfo.name ?? leagueId} • Season Awards`,
+        subtitle: `Season ${season}`,
+        awards,
+      });
+      await sendBuffer(
+        interaction,
+        buffer,
+        `${leagueId}-awards-${season}.png`,
+        leagueInfo.name,
+        season,
+        'Season Awards',
       );
     } else {
       await interaction.editReply({

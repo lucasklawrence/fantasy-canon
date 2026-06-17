@@ -494,6 +494,7 @@ export const canonCommand = new SlashCommandBuilder()
                 { name: 'faab-pace', value: 'faab-pace' },
                 { name: 'power-ranking', value: 'power-ranking' },
                 { name: 'standings', value: 'standings' },
+                { name: 'awards', value: 'awards' },
               ),
           )
           .addIntegerOption((opt) =>
