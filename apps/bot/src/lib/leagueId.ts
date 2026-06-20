@@ -16,7 +16,8 @@ export async function resolveLeagueId(
   context: BotContext,
 ): Promise<string | undefined> {
   const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
+  if (leagueOverride) return leagueOverride;
   const guildId = interaction.guildId;
   const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  return leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
+  return guildConfig?.leagueId ?? context.env.defaultLeagueId;
 }
