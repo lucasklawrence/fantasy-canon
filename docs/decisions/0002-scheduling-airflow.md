@@ -52,3 +52,18 @@ Use **Airflow**, matching the existing `orchestration/` scaffold (#13) and DAG b
   in whatever environment runs the broadcast CLI — the Airflow worker/runner, not the CI deploy job.
 - Heavier to operate than `node-cron`; accepted in exchange for a real, observable pipeline that
   aligns with the orchestration work already underway.
+
+## Addendum (2026-06): hobby runtime = in-process scheduler
+
+In practice, hosting Airflow for a single weekly post is overkill at hobby scale, and the
+local-only Airflow stack only fires while `docker compose up` is running on a machine — not a
+dependable weekly cron. Since the bot is **already an always-on process** (it must stay connected
+for slash commands), the weekly broadcast now also runs **in-process** via a small dependency-free
+scheduler (`apps/bot/src/services/scheduler.ts`), opt-in through `BROADCAST_CHANNEL_ID` /
+`BROADCAST_SEASON` env. It reuses the same `renderBroadcast()` lib as the CLI/DAG.
+
+This does not reverse the decision: **Airflow stays** for local development and the broader
+ESPN→normalize→storylines pipeline (epic #12). The in-process scheduler is simply the right
+**production runtime for the weekly post at hobby scale**. The broadcast CLI and Airflow DAG remain
+valid paths (e.g. if Airflow is later hosted on an always-on host or Composer). See the ops issues
+for hosting (#95–#97).

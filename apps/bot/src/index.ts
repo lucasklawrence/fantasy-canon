@@ -1,5 +1,6 @@
 import { createBotContext } from './config.js';
 import { createDiscordClient, registerInteractionHandlers } from './services/discord.js';
+import { startScheduledBroadcasts } from './services/scheduler.js';
 
 async function start(): Promise<void> {
   const context = createBotContext();
@@ -12,6 +13,10 @@ async function start(): Promise<void> {
   registerInteractionHandlers(client, context);
 
   await client.login(context.env.discordToken);
+
+  // Hobby-scale scheduler: post weekly cards from this always-on process (see ADR 0002).
+  // No-op unless BROADCAST_* env is set.
+  startScheduledBroadcasts(context);
 }
 
 start().catch((error) => {

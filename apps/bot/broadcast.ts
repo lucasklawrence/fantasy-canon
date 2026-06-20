@@ -1,6 +1,6 @@
-import { REST, Routes } from 'discord.js';
 import { createBotContext } from './src/config.js';
 import { isBroadcastMetric, renderBroadcast } from './src/lib/broadcastRender.js';
+import { postBroadcast } from './src/lib/postBroadcast.js';
 
 /**
  * One-shot broadcaster: render a weekly card and post it to a Discord channel, then exit.
@@ -51,11 +51,7 @@ async function main(): Promise<void> {
   const rendered = await renderBroadcast(context, leagueId, season, metric);
   if (!rendered) fail(`No data available to render "${metric}" for season ${season}.`);
 
-  const rest = new REST({ version: '10' }).setToken(context.env.discordToken);
-  await rest.post(Routes.channelMessages(channelId), {
-    body: { content: `${rendered.label} • Season ${season}` },
-    files: [{ name: rendered.filename, data: rendered.buffer }],
-  });
+  await postBroadcast(context.env.discordToken, channelId, season, rendered);
 
   console.log(
     `Posted ${rendered.label} (${rendered.buffer.length} bytes) to channel ${channelId}.`,
