@@ -91,4 +91,21 @@ describe('handleAllPlaySubcommand', () => {
     const rows = content.split('\n').filter((l) => /^\d+\./.test(l));
     expect(rows).toHaveLength(2);
   });
+
+  it('resolves the league from the guild config when no override or env default is set', async () => {
+    const { context } = createMockContext({
+      // No defaultLeagueId — resolution must come from the guild config branch.
+      guildConfigs: { 'guild-1': { leagueId: 'GUILD_LEAGUE' } },
+      fetchPayloads: { mTeam: FOUR_TEAMS, mScoreboard: SCOREBOARD },
+    });
+    const { interaction, deferred, lastContent } = createMockInteraction({
+      options: { season: 2024 },
+      guildId: 'guild-1',
+    });
+
+    await handleAllPlaySubcommand(interaction, context);
+
+    expect(deferred()).toBe(true);
+    expect(lastContent()).toContain('League GUILD_LEAGUE • Season 2024 • All-Play');
+  });
 });
