@@ -1,15 +1,7 @@
 import { handleTrophiesSubcommand } from '../trophies.js';
 import { createMockContext } from '../../../lib/__tests__/mockContext.js';
 import { createMockInteraction } from '../../../lib/__tests__/mockInteraction.js';
-
-const TEAMS = {
-  teams: [
-    { id: 1, location: 'Alpha', nickname: 'Aces' },
-    { id: 2, location: 'Beta', nickname: 'Bears' },
-    { id: 3, location: 'Gamma', nickname: 'Goats' },
-    { id: 4, location: 'Delta', nickname: 'Ducks' },
-  ],
-};
+import { FOUR_TEAMS } from '../../../lib/__tests__/handlerFixtures.js';
 
 // Week 1: a blowout (1 over 2 by 40) and a nail-biter (3 over 4 by 2).
 const MATCHUPS = {
@@ -44,7 +36,7 @@ describe('handleTrophiesSubcommand', () => {
   it('reports no matchups when the week has none', async () => {
     const { context } = createMockContext({
       defaultLeagueId: 'L',
-      fetchPayloads: { mTeam: TEAMS },
+      fetchPayloads: { mTeam: FOUR_TEAMS },
     });
     const { interaction, deferred, lastContent } = createMockInteraction({
       options: { season: 2024, week: 1 },
@@ -61,7 +53,7 @@ describe('handleTrophiesSubcommand', () => {
       defaultLeagueId: 'L',
       // mSettings defaults to {} → no starter slots → trophy extras stay empty, so only the
       // six score-based trophies render (no boxscore fixture needed).
-      fetchPayloads: { mTeam: TEAMS, mMatchupScore: MATCHUPS },
+      fetchPayloads: { mTeam: FOUR_TEAMS, mMatchupScore: MATCHUPS },
     });
     const { interaction, deferred, lastContent } = createMockInteraction({
       options: { season: 2024, week: 1 },
@@ -72,8 +64,8 @@ describe('handleTrophiesSubcommand', () => {
     expect(deferred()).toBe(true);
     const content = lastContent() ?? '';
     expect(content).toContain('League L • Season 2024 • Week 1 Trophies');
-    expect(content).toContain('👑 High Score:'); // top scorer this week
-    expect(content).toContain('💩 Low Score:');
-    expect(content).toContain('Alpha Aces'); // team 1 = high score (130)
+    // Assert the correct team earns each award, not just that the category rendered:
+    expect(content).toContain('👑 High Score: Alpha Aces'); // team 1 scored 130, the week high
+    expect(content).toContain('💩 Low Score: Beta Bears'); // team 2 scored 90, the week low
   });
 });

@@ -1,15 +1,7 @@
 import { handleLuckSubcommand } from '../storylines.js';
 import { createMockContext } from '../../../lib/__tests__/mockContext.js';
 import { createMockInteraction } from '../../../lib/__tests__/mockInteraction.js';
-
-const TEAMS = {
-  teams: [
-    { id: 1, location: 'Alpha', nickname: 'Aces', record: { overall: { wins: 10, losses: 3 } } },
-    { id: 2, location: 'Beta', nickname: 'Bears', record: { overall: { wins: 7, losses: 6 } } },
-    { id: 3, location: 'Gamma', nickname: 'Goats', record: { overall: { wins: 5, losses: 8 } } },
-    { id: 4, location: 'Delta', nickname: 'Ducks', record: { overall: { wins: 3, losses: 10 } } },
-  ],
-};
+import { FOUR_TEAMS } from '../../../lib/__tests__/handlerFixtures.js';
 
 const SCOREBOARD = {
   schedule: [
@@ -55,7 +47,7 @@ describe('handleLuckSubcommand', () => {
   it('renders the luck leaderboard on the happy path', async () => {
     const { context } = createMockContext({
       defaultLeagueId: 'L',
-      fetchPayloads: { mTeam: TEAMS, mScoreboard: SCOREBOARD },
+      fetchPayloads: { mTeam: FOUR_TEAMS, mScoreboard: SCOREBOARD },
     });
     const { interaction, deferred, lastContent } = createMockInteraction({
       options: { season: 2024 },

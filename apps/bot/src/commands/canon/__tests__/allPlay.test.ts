@@ -1,15 +1,7 @@
 import { handleAllPlaySubcommand } from '../allPlay.js';
 import { createMockContext } from '../../../lib/__tests__/mockContext.js';
 import { createMockInteraction } from '../../../lib/__tests__/mockInteraction.js';
-
-const TEAMS = {
-  teams: [
-    { id: 1, location: 'Alpha', nickname: 'Aces' },
-    { id: 2, location: 'Beta', nickname: 'Bears' },
-    { id: 3, location: 'Gamma', nickname: 'Goats' },
-    { id: 4, location: 'Delta', nickname: 'Ducks' },
-  ],
-};
+import { FOUR_TEAMS } from '../../../lib/__tests__/handlerFixtures.js';
 
 const SCOREBOARD = {
   schedule: [
@@ -53,7 +45,7 @@ describe('handleAllPlaySubcommand', () => {
   it('reports no weekly scores when the scoreboard is empty', async () => {
     const { context } = createMockContext({
       defaultLeagueId: 'L',
-      fetchPayloads: { mTeam: TEAMS },
+      fetchPayloads: { mTeam: FOUR_TEAMS },
     });
     const { interaction, deferred, lastContent } = createMockInteraction({
       options: { season: 2024 },
@@ -68,7 +60,7 @@ describe('handleAllPlaySubcommand', () => {
   it('renders the all-play leaderboard on the happy path', async () => {
     const { context } = createMockContext({
       defaultLeagueId: 'L',
-      fetchPayloads: { mTeam: TEAMS, mScoreboard: SCOREBOARD },
+      fetchPayloads: { mTeam: FOUR_TEAMS, mScoreboard: SCOREBOARD },
     });
     const { interaction, deferred, lastContent } = createMockInteraction({
       options: { season: 2024 },
@@ -86,7 +78,7 @@ describe('handleAllPlaySubcommand', () => {
   it('honors the limit option', async () => {
     const { context } = createMockContext({
       defaultLeagueId: 'L',
-      fetchPayloads: { mTeam: TEAMS, mScoreboard: SCOREBOARD },
+      fetchPayloads: { mTeam: FOUR_TEAMS, mScoreboard: SCOREBOARD },
     });
     const { interaction, lastContent } = createMockInteraction({
       options: { season: 2024, limit: 2 },
@@ -94,7 +86,9 @@ describe('handleAllPlaySubcommand', () => {
 
     await handleAllPlaySubcommand(interaction, context);
 
-    const rows = (lastContent() ?? '').split('\n').filter((l) => /^\d+\./.test(l));
+    const content = lastContent() ?? '';
+    expect(content).toContain('All-Play (Wins vs. All %)'); // the success message, not an error
+    const rows = content.split('\n').filter((l) => /^\d+\./.test(l));
     expect(rows).toHaveLength(2);
   });
 });
