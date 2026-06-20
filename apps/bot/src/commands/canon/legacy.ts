@@ -1,5 +1,7 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { BotContext } from '../../config.js';
+import { resolveLeagueId } from '../../lib/leagueId.js';
+import { ensureSnapshot } from '../../lib/snapshots.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
 import { getLeagueInfo } from '../../lib/leagueInfo.js';
 
@@ -30,10 +32,7 @@ export async function handleLegacySubcommand(
   context: BotContext,
 ): Promise<void> {
   const season = interaction.options.getInteger('season', true);
-  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
-  const guildId = interaction.guildId;
-  const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
+  const leagueId = await resolveLeagueId(interaction, context);
 
   if (!leagueId) {
     await interaction.reply({
@@ -118,10 +117,7 @@ export async function handleLegacyHistorySubcommand(
   context: BotContext,
 ): Promise<void> {
   const seasonsText = interaction.options.getString('seasons', true);
-  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
-  const guildId = interaction.guildId;
-  const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
+  const leagueId = await resolveLeagueId(interaction, context);
 
   if (!leagueId) {
     await interaction.reply({
@@ -332,22 +328,3 @@ function parseSeasonList(text: string): number[] {
 /**
  * Returns a cached league snapshot for a view and season, fetching and saving it when absent.
  */
-async function ensureSnapshot(
-  context: BotContext,
-  leagueId: string,
-  season: number,
-  view: string,
-): Promise<unknown> {
-  const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
-  const match = existing.find((s) => s.view === view);
-  if (match) return match.payload;
-  const res = await context.espnClient.fetchLeague({ leagueId, season, view });
-  await context.snapshotsRepo.save({
-    leagueId,
-    season,
-    view,
-    fetchedAt: new Date(),
-    payload: res.payload,
-  });
-  return res.payload;
-}

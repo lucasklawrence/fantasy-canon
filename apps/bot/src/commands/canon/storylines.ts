@@ -5,6 +5,8 @@ import { buildTeamNameMap } from '../../lib/teamNames.js';
 import { getLeagueInfo } from '../../lib/leagueInfo.js';
 import { extractTeams, TeamInfo } from '../../lib/teamStats.js';
 import { ensureSnapshot } from '../../lib/snapshots.js';
+import { classifyArchetype } from '../../lib/archetype.js';
+import { resolveLeagueId } from '../../lib/leagueId.js';
 import { extractWeeklyScores } from '../../lib/weeklyScores.js';
 
 export async function handleLuckSubcommand(
@@ -221,39 +223,10 @@ export async function handleManagerArchetypesSubcommand(
     const nameMap = buildTeamNameMap(mTeamPayload);
     const teams = extractTeams(mTeamPayload);
 
-    const avg = (field: 'acquisitions' | 'moves' | 'movesToIr' | 'totalMoves'): number => {
-      const vals = teams.map((t) => t[field] ?? 0);
-      const total = vals.reduce((acc, v) => acc + v, 0);
-      return teams.length ? total / teams.length : 0;
-    };
-    const avgAdds = avg('acquisitions');
-    const avgMoves = avg('moves');
-    const avgIr = avg('movesToIr');
-    const avgTotal = avg('totalMoves');
-
-    const archetypes = teams.map((t) => {
-      const ratios = [
-        { key: 'Wire Addict', score: ratio(t.acquisitions, avgAdds) },
-        { key: 'Lineup Tinkerer', score: ratio(t.moves, avgMoves) },
-        { key: 'IR Surgeon', score: ratio(t.movesToIr, avgIr) },
-      ];
-      const best = ratios.sort((a, b) => b.score - a.score)[0];
-      const minimalist = ratio(t.totalMoves, avgTotal) < 0.5;
-      const label = minimalist ? 'Minimalist' : best.key;
-      const detail =
-        label === 'Minimalist'
-          ? `total ${t.totalMoves}`
-          : label === 'Wire Addict'
-            ? `adds ${t.acquisitions}`
-            : label === 'Lineup Tinkerer'
-              ? `moveToActive ${t.moves}`
-              : `moveToIR ${t.movesToIr}`;
-      return { id: t.id, label, detail };
+    const lines = teams.map((t) => {
+      const { label, detail } = classifyArchetype(t, teams);
+      return `${nameMap.get(t.id) ?? `Team ${t.id}`} — ${label} (${detail})`;
     });
-
-    const lines = archetypes.map(
-      (a) => `${nameMap.get(a.id) ?? `Team ${a.id}`} — ${a.label} (${a.detail})`,
-    );
 
     await interaction.editReply({
       content: [`League ${leagueLabel} • Season ${season} • Manager archetypes`, ...lines].join(
@@ -469,16 +442,6 @@ export async function handleChampsSubcommand(
 
 // Helpers
 
-async function resolveLeagueId(
-  interaction: ChatInputCommandInteraction,
-  context: BotContext,
-): Promise<string | undefined> {
-  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
-  const guildId = interaction.guildId;
-  const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  return leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
-}
-
 async function missingLeagueReply(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.reply({
     content: 'League ID is required. Set it via /canon config set or ESPN_LEAGUE_ID.',
@@ -509,13 +472,6 @@ function maxBy<T>(items: T[], getter: (t: T) => number): T | undefined {
     }
   }
   return best;
-}
-
-function ratio(value: number, baseline: number): number {
-  if (!Number.isFinite(baseline) || baseline === 0) {
-    return Number.isFinite(value) ? value : 0;
-  }
-  return value / baseline;
 }
 
 function winPct(wins: number, losses: number): number {

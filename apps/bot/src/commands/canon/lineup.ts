@@ -5,6 +5,8 @@ import {
   type LineupEfficiency,
 } from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
+import { resolveLeagueId } from '../../lib/leagueId.js';
+import { ensureSnapshot } from '../../lib/snapshots.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
 import {
   parseStarterSlots,
@@ -30,10 +32,7 @@ export async function handleLineupSubcommand(
   const season = interaction.options.getInteger('season', true);
   const weeksOverride = interaction.options.getInteger('weeks') ?? undefined;
   const limit = interaction.options.getInteger('limit') ?? undefined;
-  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
-  const guildId = interaction.guildId;
-  const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
+  const leagueId = await resolveLeagueId(interaction, context);
 
   if (!leagueId) {
     await interaction.reply({
@@ -106,26 +105,6 @@ export async function handleLineupSubcommand(
       content: `Failed to compute lineup efficiency: ${message}`,
     });
   }
-}
-
-async function ensureSnapshot(
-  context: BotContext,
-  leagueId: string,
-  season: number,
-  view: string,
-): Promise<unknown> {
-  const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
-  const match = existing.find((s) => s.view === view);
-  if (match) return match.payload;
-  const res = await context.espnClient.fetchLeague({ leagueId, season, view });
-  await context.snapshotsRepo.save({
-    leagueId,
-    season,
-    view,
-    fetchedAt: new Date(),
-    payload: res.payload,
-  });
-  return res.payload;
 }
 
 /**

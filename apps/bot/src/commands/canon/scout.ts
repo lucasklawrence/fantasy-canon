@@ -8,19 +8,10 @@ import { extractTeams } from '../../lib/teamStats.js';
 import { extractRoster } from '../../lib/roster.js';
 import { buildScoutProfile } from '../../lib/scoutProfile.js';
 import { filterTeamChoices } from '../../lib/teamNameCache.js';
+import { resolveLeagueId } from '../../lib/leagueId.js';
 
 const DISCORD_MESSAGE_LIMIT = 2000;
 const DISCORD_CHOICE_NAME_LIMIT = 100;
-
-async function resolveLeagueId(
-  interaction: ChatInputCommandInteraction | AutocompleteInteraction,
-  context: BotContext,
-): Promise<string | undefined> {
-  const override = interaction.options.getString('leagueid') ?? undefined;
-  const guildId = interaction.guildId;
-  const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  return override ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
-}
 
 /**
  * Resolve the opponent option (either a team id from autocomplete, or a free-typed name)

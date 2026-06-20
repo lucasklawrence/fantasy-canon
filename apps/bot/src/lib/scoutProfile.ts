@@ -8,50 +8,11 @@
 
 import { TeamInfo } from './teamStats.js';
 import { RosterPlayer } from './roster.js';
+import { classifyArchetype } from './archetype.js';
 
 function winPct(wins: number, losses: number): number {
   const total = wins + losses;
   return total === 0 ? 0 : wins / total;
-}
-
-function ratio(value: number, baseline: number): number {
-  if (!Number.isFinite(baseline) || baseline === 0) {
-    return Number.isFinite(value) ? value : 0;
-  }
-  return value / baseline;
-}
-
-/**
- * Classify a team's manager archetype against the league averages, mirroring
- * `/canon manager-archetypes`. Returns a label plus a short supporting detail.
- */
-export function classifyArchetype(
-  team: TeamInfo,
-  allTeams: TeamInfo[],
-): { label: string; detail: string } {
-  const avg = (field: 'acquisitions' | 'moves' | 'movesToIr' | 'totalMoves'): number => {
-    if (allTeams.length === 0) return 0;
-    const total = allTeams.reduce((acc, t) => acc + (t[field] ?? 0), 0);
-    return total / allTeams.length;
-  };
-
-  const ratios = [
-    { key: 'Wire Addict', score: ratio(team.acquisitions, avg('acquisitions')) },
-    { key: 'Lineup Tinkerer', score: ratio(team.moves, avg('moves')) },
-    { key: 'IR Surgeon', score: ratio(team.movesToIr, avg('movesToIr')) },
-  ];
-  const best = [...ratios].sort((a, b) => b.score - a.score)[0];
-  const minimalist = ratio(team.totalMoves, avg('totalMoves')) < 0.5;
-  const label = minimalist ? 'Minimalist' : best.key;
-  const detail =
-    label === 'Minimalist'
-      ? `total moves ${team.totalMoves}`
-      : label === 'Wire Addict'
-        ? `adds ${team.acquisitions}`
-        : label === 'Lineup Tinkerer'
-          ? `lineup moves ${team.moves}`
-          : `IR moves ${team.movesToIr}`;
-  return { label, detail };
 }
 
 function streakLine(team: TeamInfo): string {

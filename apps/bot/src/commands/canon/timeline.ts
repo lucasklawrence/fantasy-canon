@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { BotContext } from '../../config.js';
+import { resolveLeagueId } from '../../lib/leagueId.js';
 import { getLeagueInfo } from '../../lib/leagueInfo.js';
 
 export async function handleTimelineSubcommand(
@@ -9,10 +10,7 @@ export async function handleTimelineSubcommand(
   const seasons = interaction.options.getString('seasons') ?? '';
   const limit = interaction.options.getInteger('limit') ?? 10;
   const offset = interaction.options.getInteger('offset') ?? 0;
-  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
-  const guildId = interaction.guildId;
-  const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
+  const leagueId = await resolveLeagueId(interaction, context);
 
   if (!leagueId) {
     await interaction.reply({

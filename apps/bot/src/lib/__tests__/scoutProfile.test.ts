@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildScoutProfile, classifyArchetype } from '../scoutProfile.js';
+import { buildScoutProfile } from '../scoutProfile.js';
 import { TeamInfo } from '../teamStats.js';
 import { RosterPlayer } from '../roster.js';
 
@@ -25,26 +25,6 @@ function team(overrides: Partial<TeamInfo> = {}): TeamInfo {
     ...overrides,
   };
 }
-
-describe('classifyArchetype', () => {
-  it('labels a heavy adder as a Wire Addict', () => {
-    const target = team({ id: 1, acquisitions: 40, totalMoves: 40 });
-    const league = [target, team({ id: 2, acquisitions: 5, totalMoves: 5 })];
-    const result = classifyArchetype(target, league);
-    expect(result.label).toBe('Wire Addict');
-    expect(result.detail).toBe('adds 40');
-  });
-
-  it('labels a low-activity manager as a Minimalist', () => {
-    const target = team({ id: 1, totalMoves: 1, acquisitions: 1 });
-    const league = [
-      target,
-      team({ id: 2, totalMoves: 40, acquisitions: 40 }),
-      team({ id: 3, totalMoves: 40, acquisitions: 40 }),
-    ];
-    expect(classifyArchetype(target, league).label).toBe('Minimalist');
-  });
-});
 
 describe('buildScoutProfile', () => {
   const roster: RosterPlayer[] = [
