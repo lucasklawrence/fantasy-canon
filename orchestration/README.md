@@ -48,13 +48,41 @@ orchestration/
   .env.example          # league id, ESPN cookies (private leagues only), admin login
   dags/
     hello_canon.py      # smoke-test DAG — delete once real DAGs exist
+    weekly_broadcast.py # posts weekly cards to Discord (#51)
+    canon_broadcast.py  # airflow-free helper for the broadcast command (unit-tested)
+  tests/
+    test_canon_broadcast.py
 ```
+
+## `weekly_broadcast` DAG (issue #51)
+
+Posts the **power-ranking** and **standings** cards to the league Discord channel once a
+week (Tuesdays 16:00 UTC). Each metric is a mapped task that retries independently. The
+task shells out to the bot's broadcast CLI (`apps/bot/broadcast.ts`); rendering + posting
+live in the bot, per [ADR 0002](../docs/decisions/0002-scheduling-airflow.md).
+
+**Config** (Airflow Variables, or env via `.env` — see `.env.example`):
+
+| Key | Purpose |
+|-----|---------|
+| `BROADCAST_CHANNEL_ID` | Discord channel to post to (required) |
+| `DISCORD_TOKEN` | Bot token used to post (required) |
+| `BROADCAST_SEASON` | Season year to render (required) |
+| `BROADCAST_LEAGUE_ID` | League id (falls back to `ESPN_LEAGUE_ID`) |
+| `CANON_BROADCAST_CMD` | How the worker runs the CLI (override per deployment) |
+
+> **Runtime requirement:** the `apache/airflow` image has **no Node and doesn't mount the
+> repo**, so the default `CANON_BROADCAST_CMD` won't run as-is. To actually post, the worker
+> must be able to run the Node CLI — bake Node + the repo into a custom Airflow image, or
+> point `CANON_BROADCAST_CMD` at a bot container — and provide `DISCORD_TOKEN` in its env.
+> That image work is the deployment follow-up; the DAG, config, and command wiring land here.
 
 ## Local tooling (optional)
 
 ```powershell
 uv sync                          # installs airflow + ruff for editor support / unit tests
 uv run ruff check dags
+uv run pytest                    # runs the airflow-free helper tests
 ```
 
 ## Notes

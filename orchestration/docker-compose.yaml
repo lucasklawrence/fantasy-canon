@@ -21,6 +21,12 @@ x-airflow-common: &airflow-common
     ESPN_LEAGUE_ID: "${ESPN_LEAGUE_ID:-}"
     ESPN_S2: "${ESPN_S2:-}"
     ESPN_SWID: "${ESPN_SWID:-}"
+    # weekly_broadcast DAG knobs (issue #51) — see .env.example.
+    BROADCAST_CHANNEL_ID: "${BROADCAST_CHANNEL_ID:-}"
+    BROADCAST_SEASON: "${BROADCAST_SEASON:-}"
+    BROADCAST_LEAGUE_ID: "${BROADCAST_LEAGUE_ID:-}"
+    CANON_BROADCAST_CMD: "${CANON_BROADCAST_CMD:-}"
+    DISCORD_TOKEN: "${DISCORD_TOKEN:-}"
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
