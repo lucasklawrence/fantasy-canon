@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { BotContext } from '../../config.js';
+import { resolveLeagueId } from '../../lib/leagueId.js';
 import { formatTeamName } from '../../lib/teamNames.js';
 
 interface TeamSummary {
@@ -14,10 +15,7 @@ export async function handleTeamsSubcommand(
   context: BotContext,
 ): Promise<void> {
   const season = interaction.options.getInteger('season', true);
-  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
-  const guildId = interaction.guildId;
-  const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
+  const leagueId = await resolveLeagueId(interaction, context);
 
   if (!leagueId) {
     await interaction.reply({

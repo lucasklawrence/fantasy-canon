@@ -1,5 +1,7 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { BotContext } from '../../config.js';
+import { resolveLeagueId } from '../../lib/leagueId.js';
+import { ensureSnapshot } from '../../lib/snapshots.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
 
 interface Matchup {
@@ -25,10 +27,7 @@ export async function handleRivalrySubcommand(
   const season = interaction.options.getInteger('season', true);
   const teamAInput = interaction.options.getString('teama', true);
   const teamBInput = interaction.options.getString('teamb', true);
-  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
-  const guildId = interaction.guildId;
-  const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
+  const leagueId = await resolveLeagueId(interaction, context);
 
   if (!leagueId) {
     await interaction.reply({
@@ -99,10 +98,7 @@ export async function handleRivalriesSubcommand(
 ): Promise<void> {
   const season = interaction.options.getInteger('season', true);
   const limit = interaction.options.getInteger('limit') ?? 5;
-  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
-  const guildId = interaction.guildId;
-  const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
+  const leagueId = await resolveLeagueId(interaction, context);
 
   if (!leagueId) {
     await interaction.reply({
@@ -256,24 +252,4 @@ function buildTeamResolver(nameMap: Map<number, string>): (input: string) => num
     const partial = entries.find(([, name]) => name.toLowerCase().includes(lc));
     return partial?.[0];
   };
-}
-
-async function ensureSnapshot(
-  context: BotContext,
-  leagueId: string,
-  season: number,
-  view: string,
-): Promise<unknown> {
-  const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
-  const match = existing.find((s) => s.view === view);
-  if (match) return match.payload;
-  const res = await context.espnClient.fetchLeague({ leagueId, season, view });
-  await context.snapshotsRepo.save({
-    leagueId,
-    season,
-    view,
-    fetchedAt: new Date(),
-    payload: res.payload,
-  });
-  return res.payload;
 }

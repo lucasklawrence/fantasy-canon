@@ -1,5 +1,7 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { BotContext } from '../../config.js';
+import { resolveLeagueId } from '../../lib/leagueId.js';
+import { ensureSnapshot } from '../../lib/snapshots.js';
 import { buildTeamNameMap, formatTeamName } from '../../lib/teamNames.js';
 import { getLeagueInfo } from '../../lib/leagueInfo.js';
 import {
@@ -41,11 +43,7 @@ export async function handleManagersSubcommand(
   const seasonsText = interaction.options.getString('seasons', true);
   const sort = interaction.options.getString('sort') ?? 'wins';
   const limit = interaction.options.getInteger('limit') ?? 10;
-  const leagueOverride = interaction.options.getString('leagueid') ?? undefined;
-
-  const guildId = interaction.guildId;
-  const guildConfig = guildId ? await context.leagueConfigRepo.getByGuildId(guildId) : undefined;
-  const leagueId = leagueOverride ?? guildConfig?.leagueId ?? context.env.defaultLeagueId;
+  const leagueId = await resolveLeagueId(interaction, context);
 
   if (!leagueId) {
     await interaction.reply({
@@ -320,22 +318,3 @@ function parseSeasonList(text: string): number[] {
 /**
  * Returns a cached ESPN snapshot for the given league/season/view, fetching and saving if absent.
  */
-async function ensureSnapshot(
-  context: BotContext,
-  leagueId: string,
-  season: number,
-  view: string,
-): Promise<unknown> {
-  const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
-  const match = existing.find((s) => s.view === view);
-  if (match) return match.payload;
-  const res = await context.espnClient.fetchLeague({ leagueId, season, view });
-  await context.snapshotsRepo.save({
-    leagueId,
-    season,
-    view,
-    fetchedAt: new Date(),
-    payload: res.payload,
-  });
-  return res.payload;
-}
