@@ -86,6 +86,13 @@ committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
 
 - **TypeScript is the only source of truth.** Don't commit compiled `.js`/`.d.ts` into `src/` — build
   output belongs in `dist/` (gitignored).
+- **Module resolution (don't be confused by `main` → `dist`).** Package `main`/`exports` point at
+  `dist` so a `node dist/...` consumer resolves compiled output, but **dev and tests still run from
+  source** — `exports` carries a `development` condition → `src/index.ts`. `tsc` (typecheck/build) and
+  `tsx` (`dev`/`deploy`/`broadcast`) resolve cross-package imports via tsconfig `paths` → `src`;
+  `vitest` selects the `development` condition (`vitest.config.ts`) → `src`. So **no build is needed
+  before dev/test**. Full rationale + the per-tool resolution table in
+  [`docs/decisions/0003`](docs/decisions/0003-package-exports-dist.md).
 - Imports use `.js` extensions on relative paths (ESM/NodeNext resolution).
 - `core` stays pure (no network/DB/discord). Side-effectful code lives in `apps/*`, `espn-client`,
   `db`, `renderer`.

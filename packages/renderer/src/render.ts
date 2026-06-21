@@ -51,10 +51,6 @@ export function renderImage(spec: RenderSpec, options: RenderOptions = {}): Prom
   return Promise.resolve(Buffer.from(lines.join('\n'), 'utf8'));
 }
 
-export function renderCard(options: RenderSpec): Promise<Buffer> {
-  return renderImage(options);
-}
-
 function renderSvg(
   spec: RenderSpec,
   theme: typeof DEFAULT_THEME,

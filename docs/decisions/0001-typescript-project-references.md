@@ -13,6 +13,10 @@ Considered: (a) project references, (b) resolving workspace deps to built `dist`
 `exports` (breaks the run-from-source dev flow — every `pnpm dev`/`pnpm test` would need a prior
 build), (c) deleting the build scripts until output is consumed.
 
+> Update: [`0003-package-exports-dist.md`](./0003-package-exports-dist.md) later adopted (b) — `exports`
+> point at `dist` — but kept run-from-source by adding a `development` export condition (→ `src`) that
+> `vitest` selects and `tsc`/`tsx` bypass via tsconfig `paths`. So no prior build is needed for dev/test.
+
 ## Decision
 
 Use **project references**: every `packages/*` tsconfig sets `composite: true` and `references` its
