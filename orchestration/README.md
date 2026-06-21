@@ -50,9 +50,36 @@ orchestration/
     hello_canon.py      # smoke-test DAG — delete once real DAGs exist
     weekly_broadcast.py # posts weekly cards to Discord (#51)
     canon_broadcast.py  # airflow-free helper for the broadcast command (unit-tested)
+    espn_ingest.py      # extract: ESPN views → idempotent snapshots (#14)
+    espn.py             # airflow-free ESPN read client (URL builder unit-tested)
+    snapshots.py        # airflow-free partitioned/idempotent snapshot storage (unit-tested)
   tests/
     test_canon_broadcast.py
+    test_espn.py
+    test_snapshots.py
+  data/                 # snapshot output (gitignored; mounted into the worker)
 ```
+
+## `espn_ingest` DAG (issue #14)
+
+The **extract** step: pulls ESPN views for a season and writes them as **idempotent,
+partitioned snapshots** (`data/season=<yyyy>/<view>.json`, atomic overwrite). One mapped
+task per view, fetched in pure Python (`requests`) — no Node worker needed for ingest.
+Re-runs/backfills overwrite the same partition, so they're safe. Feeds the future
+normalize → storylines steps (#15–#16).
+
+**Config** (Airflow Variables, or env via `.env`):
+
+| Key | Purpose |
+|-----|---------|
+| `ESPN_LEAGUE_ID` | League to pull (required) |
+| `INGEST_SEASON` | Season year (required) |
+| `INGEST_VIEWS` | Optional comma list (default: mTeam, mRoster, mScoreboard, mTransactions2, mSettings, mDraftDetail) |
+| `SNAPSHOT_ROOT` | Output dir in the worker (default `/opt/airflow/data/snapshots`, mounted to `./data`) |
+| `ESPN_S2` / `ESPN_SWID` | Cookies — private leagues only |
+
+Trigger it from the UI; snapshots land under `orchestration/data/`. This DAG runs as-is in
+the stock image (Python only — unlike `weekly_broadcast`, no Node required).
 
 ## `weekly_broadcast` DAG (issue #51)
 

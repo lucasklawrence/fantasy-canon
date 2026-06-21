@@ -27,10 +27,16 @@ x-airflow-common: &airflow-common
     BROADCAST_LEAGUE_ID: "${BROADCAST_LEAGUE_ID:-}"
     CANON_BROADCAST_CMD: "${CANON_BROADCAST_CMD:-}"
     DISCORD_TOKEN: "${DISCORD_TOKEN:-}"
+    # espn_ingest DAG knobs (issue #14) — see .env.example.
+    INGEST_SEASON: "${INGEST_SEASON:-}"
+    INGEST_VIEWS: "${INGEST_VIEWS:-}"
+    SNAPSHOT_ROOT: "${SNAPSHOT_ROOT:-/opt/airflow/data/snapshots}"
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
+    # Persisted snapshot output for the ingest pipeline (gitignored).
+    - ./data:/opt/airflow/data
   depends_on:
     postgres:
       condition: service_healthy
