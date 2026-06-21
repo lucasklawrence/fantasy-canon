@@ -36,7 +36,8 @@ its own files. Supporting choices:
 - `package.json` `main`/`types` still point at `src/index.ts` — the dev flow is unchanged and dist
   is opt-in. All cross-package imports are currently type-only, so the emitted JS runs under plain
   node; if a runtime cross-package import appears, `main`/`exports` must move to `dist` for the
-  consuming deploy.
+  consuming deploy. _(Superseded by [ADR 0003](./0003-package-exports-dist.md): `main`/`exports` now
+  point at `dist`, with a `development` condition keeping dev/test on `src`.)_
 
 ## Consequences
 
