@@ -1,0 +1,86 @@
+import type { ChatInputCommandInteraction } from 'discord.js';
+
+/**
+ * A fake `ChatInputCommandInteraction` for exercising command handlers end-to-end without
+ * a live discord.js client. Implements only the surface the canon handlers touch — the
+ * `getInteger`/`getString` option getters, `guildId`, and the `reply`/`deferReply`/
+ * `editReply` lifecycle — and captures every content-bearing reply so tests can assert on
+ * the message the user would see. Pairs with {@link createMockContext}.
+ */
+
+export interface MockInteractionOptions {
+  /** Option name → value. Numbers resolve via `getInteger`, strings via `getString`. */
+  options?: Record<string, string | number>;
+  /** guildId the handler sees; `null` simulates a DM. Defaults to `'guild-1'`. */
+  guildId?: string | null;
+}
+
+export interface CapturedReply {
+  method: 'reply' | 'editReply' | 'followUp';
+  /** The `content` string of the payload, if any. */
+  content?: string;
+  /** The full options object passed (e.g. to inspect `flags`). */
+  payload: Record<string, unknown>;
+}
+
+export interface MockInteractionHandle {
+  interaction: ChatInputCommandInteraction;
+  /** Whether `deferReply` was called. */
+  deferred: () => boolean;
+  /** Every content-bearing reply (`reply`/`editReply`/`followUp`) in call order. */
+  replies: CapturedReply[];
+  /** Content of the last reply — the final message the user sees. */
+  lastContent: () => string | undefined;
+}
+
+export function createMockInteraction(opts: MockInteractionOptions = {}): MockInteractionHandle {
+  const values = opts.options ?? {};
+  const guildId = opts.guildId === undefined ? 'guild-1' : opts.guildId;
+  const replies: CapturedReply[] = [];
+  let deferred = false;
+
+  const getInteger = (name: string, required?: boolean): number | null => {
+    const v = values[name];
+    if (typeof v === 'number') return v;
+    if (required) throw new Error(`Missing required integer option "${name}"`);
+    return null;
+  };
+
+  const getString = (name: string, required?: boolean): string | null => {
+    const v = values[name];
+    if (typeof v === 'string') return v;
+    if (required) throw new Error(`Missing required string option "${name}"`);
+    return null;
+  };
+
+  const capture = (method: CapturedReply['method'], payload: unknown): Promise<unknown> => {
+    const p = (payload ?? {}) as Record<string, unknown>;
+    const content = typeof p.content === 'string' ? p.content : undefined;
+    replies.push({ method, content, payload: p });
+    return Promise.resolve({});
+  };
+
+  const interaction = {
+    guildId,
+    options: { getInteger, getString },
+    reply: (payload: unknown) => capture('reply', payload),
+    deferReply: (): Promise<unknown> => {
+      deferred = true;
+      return Promise.resolve({});
+    },
+    editReply: (payload: unknown) => capture('editReply', payload),
+    followUp: (payload: unknown) => capture('followUp', payload),
+  } as unknown as ChatInputCommandInteraction;
+
+  return {
+    interaction,
+    deferred: () => deferred,
+    replies,
+    lastContent: () => {
+      for (let i = replies.length - 1; i >= 0; i -= 1) {
+        if (replies[i].content !== undefined) return replies[i].content;
+      }
+      return undefined;
+    },
+  };
+}

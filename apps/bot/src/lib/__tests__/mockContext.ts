@@ -16,6 +16,10 @@ export interface MockContextOptions {
   fetchPayloads?: Record<string, unknown>;
   /** Views for which `fetchLeague` should reject (simulate an ESPN failure). */
   fetchThrows?: string[];
+  /** `env.defaultLeagueId` — the league a command falls back to when none is configured. */
+  defaultLeagueId?: string;
+  /** guildId → stored guild config, resolved by `leagueConfigRepo.getByGuildId`. */
+  guildConfigs?: Record<string, { leagueId?: string }>;
 }
 
 export interface MockContextHandle {
@@ -72,6 +76,11 @@ export function createMockContext(opts: MockContextOptions = {}): MockContextHan
         cacheSets.push({ leagueId, season, count: choices.length });
       },
     },
+    leagueConfigRepo: {
+      getByGuildId: (guildId: string): Promise<{ leagueId?: string } | undefined> =>
+        Promise.resolve(opts.guildConfigs?.[guildId]),
+    },
+    env: { defaultLeagueId: opts.defaultLeagueId },
   } as unknown as BotContext;
 
   return { context, fetchCalls, saved, cacheSets };
