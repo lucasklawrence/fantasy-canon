@@ -44,6 +44,7 @@ docker compose down -v           # stop and wipe the metadata DB (fresh start)
 ```
 orchestration/
   docker-compose.yaml   # postgres + LocalExecutor webserver + scheduler (local only)
+  Dockerfile            # custom Airflow image: + Node + pnpm + baked repo (#96)
   pyproject.toml        # uv deps for local tooling; airflow version mirrors the image tag
   .env.example          # league id, ESPN cookies (private leagues only), admin login
   dags/
@@ -95,14 +96,31 @@ live in the bot, per [ADR 0002](../docs/decisions/0002-scheduling-airflow.md).
 | `BROADCAST_CHANNEL_ID` | Discord channel to post to (required) |
 | `DISCORD_TOKEN` | Bot token used to post (required) |
 | `BROADCAST_SEASON` | Season year to render (required) |
+| `DISCORD_APP_ID` | Application (client) id — required by the bot's config loader |
 | `BROADCAST_LEAGUE_ID` | League id (falls back to `ESPN_LEAGUE_ID`) |
-| `CANON_BROADCAST_CMD` | How the worker runs the CLI (override per deployment) |
+| `CANON_BROADCAST_CMD` | How the worker runs the CLI (defaults to the baked-in repo path) |
 
-> **Runtime requirement:** the `apache/airflow` image has **no Node and doesn't mount the
-> repo**, so the default `CANON_BROADCAST_CMD` won't run as-is. To actually post, the worker
-> must be able to run the Node CLI — bake Node + the repo into a custom Airflow image, or
-> point `CANON_BROADCAST_CMD` at a bot container — and provide `DISCORD_TOKEN` in its env.
-> That image work is the deployment follow-up; the DAG, config, and command wiring land here.
+### Node-capable worker (issue #96)
+
+The broadcast task shells out to a **Node** CLI, but the stock `apache/airflow` image has no
+Node and doesn't carry the repo — so out of the box the task fails with `pnpm: not found`.
+This stack therefore builds a **custom Airflow image** (`orchestration/Dockerfile`, ADR 0002
+option 1) that extends `apache/airflow:2.10.5` with Node 24 + pnpm and bakes the pnpm
+workspace in at `/opt/fantasy-canon` (a frozen `pnpm install`; the CLI runs via `tsx`, no
+compile step). With the repo baked in, the default
+`CANON_BROADCAST_CMD = pnpm --dir /opt/fantasy-canon/apps/bot run broadcast --` runs as-is.
+
+- `docker compose up` builds the image on first run (slow once: installs the workspace,
+  including the renderer's native `@resvg/resvg-js` Linux prebuilt).
+- **After changing bot code, rebuild:** `docker compose up --build` (the repo is baked at
+  build time, not bind-mounted — the most reliable option on Windows, where pnpm's symlink
+  store doesn't bind-mount cleanly). DAG files under `dags/` are still mounted, so DAG edits
+  need no rebuild.
+- Provide `DISCORD_TOKEN` **and** `DISCORD_APP_ID` in `.env` — the bot's `loadEnv()` requires
+  both, even though REST posting only uses the token.
+
+To verify end-to-end, fill in `.env` and trigger the DAG (issue #97): both mapped tasks
+(`power-ranking`, `standings`) should go green and the cards appear in the channel.
 
 ## Local tooling (optional)
 

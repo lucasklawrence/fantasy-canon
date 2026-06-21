@@ -1,0 +1,31 @@
+# Build-context excludes for orchestration/Dockerfile (build context = repo root).
+# Keeps the image lean and — critically — keeps the host's Windows node_modules and
+# build output out, so pnpm installs fresh Linux modules inside the image.
+
+# Dependencies & build output (re-installed/rebuilt in-image).
+**/node_modules
+**/dist
+**/.turbo
+
+# VCS & editor.
+.git
+.gitignore
+**/.DS_Store
+.vscode
+*.code-workspace
+
+# Secrets & local env (never bake these into an image).
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python / Airflow sidecar runtime artifacts (not needed by the Node CLI).
+orchestration/.venv
+orchestration/logs
+orchestration/data
+orchestration/**/__pycache__
+orchestration/**/*.pyc
+orchestration/*.stackdump
+
+# Tests & docs aren't needed at runtime, but are cheap; leave them in so the image
+# can run the workspace's own scripts if needed. (Intentionally not excluded.)
