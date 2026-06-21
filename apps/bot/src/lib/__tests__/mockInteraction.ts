@@ -1,4 +1,4 @@
-import type { ChatInputCommandInteraction } from 'discord.js';
+import type { AutocompleteInteraction, ChatInputCommandInteraction } from 'discord.js';
 
 /**
  * A fake `ChatInputCommandInteraction` for exercising command handlers end-to-end without
@@ -82,5 +82,74 @@ export function createMockInteraction(opts: MockInteractionOptions = {}): MockIn
       }
       return undefined;
     },
+  };
+}
+
+/** A single autocomplete choice as captured from `interaction.respond`. */
+export interface AutocompleteChoice {
+  name: string;
+  value: string | number;
+}
+
+export interface MockAutocompleteOptions {
+  /** The currently-focused option (name + typed value), returned by `getFocused(true)`. */
+  focused?: { name: string; value: string };
+  /** Non-focused option values. Numbers resolve via `getInteger`, strings via `getString`. */
+  options?: Record<string, string | number>;
+  /** guildId the handler sees; `null` simulates a DM. Defaults to `'guild-1'`. */
+  guildId?: string | null;
+}
+
+export interface MockAutocompleteHandle {
+  interaction: AutocompleteInteraction;
+  /** Every `respond(...)` call's choice array, in order. */
+  responses: AutocompleteChoice[][];
+  /** Choices from the last `respond` — what the user would see suggested. */
+  lastChoices: () => AutocompleteChoice[] | undefined;
+}
+
+/**
+ * A fake `AutocompleteInteraction` for exercising the scout opponent autocomplete without a
+ * live discord.js client. Implements `getFocused`, the `getInteger`/`getString` getters,
+ * `guildId`, and a `respond` that captures the suggested choices. Pairs with
+ * {@link createMockContext}; the autocomplete reads team names from `context.teamNameCache`.
+ */
+export function createMockAutocomplete(opts: MockAutocompleteOptions = {}): MockAutocompleteHandle {
+  const values = opts.options ?? {};
+  const focused = opts.focused ?? { name: 'opponent', value: '' };
+  const guildId = opts.guildId === undefined ? 'guild-1' : opts.guildId;
+  const responses: AutocompleteChoice[][] = [];
+
+  const getInteger = (name: string, required?: boolean): number | null => {
+    const v = values[name];
+    if (typeof v === 'number') return v;
+    if (required) throw new Error(`Missing required integer option "${name}"`);
+    return null;
+  };
+
+  const getString = (name: string, required?: boolean): string | null => {
+    const v = values[name];
+    if (typeof v === 'string') return v;
+    if (required) throw new Error(`Missing required string option "${name}"`);
+    return null;
+  };
+
+  const interaction = {
+    guildId,
+    options: {
+      getFocused: (returnFull?: boolean) => (returnFull ? focused : focused.value),
+      getInteger,
+      getString,
+    },
+    respond: (choices: AutocompleteChoice[]): Promise<unknown> => {
+      responses.push(choices);
+      return Promise.resolve({});
+    },
+  } as unknown as AutocompleteInteraction;
+
+  return {
+    interaction,
+    responses,
+    lastChoices: () => (responses.length > 0 ? responses[responses.length - 1] : undefined),
   };
 }
