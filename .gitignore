@@ -11,6 +11,10 @@ coverage
 *.stackdump
 screenshots
 
+# temp/scratch files (e.g. ESPN payload dumps)
+tmp-*
+*.tmp.json
+
 # ignore everything under .claude (local settings, caches, per-machine state)
 # except shared slash commands and team settings (settings.local.json stays ignored)
 .claude/*
