@@ -32,3 +32,10 @@ Fantasy Canon is a Discord-first offseason companion for ESPN Fantasy Football l
 - `docs/07-backlog.md`
 - `docs/08-app-description-and-tags.md`
 - `docs/09-discord-bot-start.md`
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, the five verification gates
+(`typecheck · lint · format:check · test · build`), and branch/commit/PR conventions.
+[`CLAUDE.md`](CLAUDE.md) is the deeper guide for architecture and conventions.
+Issue and PR templates live in [`.github/`](.github/).
