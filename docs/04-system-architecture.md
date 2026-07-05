@@ -12,8 +12,9 @@ sidecar see [`orchestration/README.md`](../orchestration/README.md).
 
 > **Honest-state callouts (read these before the diagrams):**
 >
-> - **No live app database.** `packages/db` is a `NoopDbClient` placeholder; the bot's repos are
->   in-memory. The only Postgres in the system is Airflow's **metadata** DB. The
+> - **No live app database.** `packages/db` ships in-memory repos plus a no-op `NoopDbClient`; the
+>   bot wires the **in-memory repos**, so nothing is persisted. The only Postgres is Airflow's
+>   **metadata** DB. The
 >   [target data model](#target-data-model-not-yet-persisted) below is where persistence is _headed_,
 >   not what runs today.
 > - **Scheduling is not `node-cron`.** The weekly post runs on a dependency-free, self-rescheduling
@@ -100,11 +101,12 @@ C4Container
 
 ## C4 Level 3 — Component (Discord Bot internals)
 
-Zooming into the bot container. An interaction arrives at the **router**, dispatches to one of ~25
-**command handlers**, which compose the shared packages (`core` for metrics/storylines, `renderer`
-for cards, `espn-client` through the bot's fetch-through cache) and reply over REST. The **scheduler**
-is a parallel entry that reuses the **broadcast render/post** lib — the same lib the standalone CLI
-calls. `shared` (types/config) underpins every package and is omitted from the graph to reduce noise.
+Zooming into the bot container. An interaction arrives at the **router**, which dispatches to one of
+~30 **`/canon` subcommands**. Each composes the shared packages (`core` for metrics/storylines,
+`renderer` for cards, `espn-client` — usually via the bot's fetch-through cache) and replies over
+REST. The **scheduler** is a parallel entry that reuses the **broadcast render/post** lib — the same
+lib the standalone CLI calls. `shared` (types/config) underpins every package and is omitted from the
+graph to reduce noise.
 
 ```mermaid
 C4Component
@@ -116,14 +118,14 @@ C4Component
     Container_Boundary(bot, "Discord Bot") {
         Component(entry, "Entry and Config", "index.ts, config.ts", "loadEnv + createBotContext: espnClient, in-memory repos, teamNameCache. Logs in and starts the scheduler")
         Component(router, "Interaction router", "services/discord.ts", "Handles interactionCreate; routes the /canon command and autocomplete")
-        Component(handlers, "Command handlers", "commands/canon/*", "~25 handlers: leaderboard, rivalries, storylines, timeline, transactions, bids, faabPace, trophies, luck, scout")
+        Component(handlers, "Command handlers", "commands/canon/*", "~30 subcommands: luck, allplay, trophies, rivalries, scout, plus faab/legacy/admin/config groups")
         Component(scheduler, "Weekly scheduler", "services/scheduler.ts", "Dependency-free self-rescheduling timer - NOT node-cron. Opt-in via BROADCAST_* env")
         Component(bcast, "Broadcast render/post", "lib/broadcastRender.ts, lib/postBroadcast.ts", "Assembles a card and posts via REST. Shared with the broadcast CLI")
         Component(botlib, "Bot lib", "lib/*", "Glue helpers: leagueInfo, teamNames, roster, weeklyScores, snapshots fetch-through cache")
         Component(core, "core", "@fantasy-canon/core", "Pure domain: storylines incl faab, metrics incl luck, narratives")
         Component(espnc, "espn-client", "@fantasy-canon/espn-client", "Unofficial ESPN fetch and view registry")
         Component(renderer, "renderer", "@fantasy-canon/renderer", "SVG to PNG cards and graphs via @resvg/resvg-js")
-        ComponentDb(db, "db repos", "@fantasy-canon/db", "NoopDbClient placeholder - in-memory, not persisted")
+        ComponentDb(db, "db repos", "@fantasy-canon/db", "In-memory repos plus a no-op DbClient - nothing persisted")
     }
 
     Rel(discord, router, "Interactions", "gateway WS")
@@ -159,17 +161,18 @@ C4Component
   webserver + scheduler) runs on your machine at ~$0; Cloud Composer is deliberately avoided
   (~$300–400/mo). It's for developing the ingest pipeline and as an alternate broadcast path, not the
   production cron.
-- **Persistence is not wired.** Repos resolve to `NoopDbClient`; the bot caches ESPN payloads
-  in-memory per process. Standing up a real Postgres (Supabase or otherwise) behind the repos is
-  future work.
+- **Persistence is not wired.** The bot uses **in-memory repos** (the db package's `DbClient` is a
+  no-op `NoopDbClient`); ESPN payloads are cached in-memory per process. Standing up a real Postgres
+  (Supabase or otherwise) behind the repos is future work.
 
 ## Data flow
 
 **On-demand command** (the live path):
 
 1. Member runs a `/canon …` slash command; Discord delivers the interaction over the gateway.
-2. The router dispatches to the handler, which fetches the needed ESPN views through the
-   fetch-through cache (`ensureSnapshot`: repo hit, else `espn-client` → save).
+2. The router dispatches to the handler, which fetches the needed ESPN views — most commands via the
+   `ensureSnapshot` fetch-through cache (repo hit, else `espn-client` → save); a few admin commands
+   hit `espn-client` directly.
 3. The handler computes metrics/storylines in `core` and renders a card in `renderer`.
 4. It replies to the interaction over REST (card PNG + text).
 
@@ -183,9 +186,9 @@ C4Component
 
 ## Target data model (not yet persisted)
 
-> ⚠️ **Not live.** The bot runs on `NoopDbClient` + in-memory repos today. This is the schema the
-> repos (`snapshotsRepo`, `teamsRepo`, `transactionsRepo`, `leagueConfigRepo`, `canonEventsRepo`) are
-> shaped for once a real Postgres is wired.
+> ⚠️ **Not live.** The bot runs on **in-memory repos** today; no database is connected. This is the
+> schema those repos (`snapshotsRepo`, `teamsRepo`, `transactionsRepo`, `leagueConfigRepo`,
+> `canonEventsRepo`) are shaped for once a real Postgres is wired.
 
 ### `league_config`
 
