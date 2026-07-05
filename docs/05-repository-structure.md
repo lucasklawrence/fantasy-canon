@@ -2,6 +2,10 @@
 
 A pragmatic TypeScript monorepo (PNPM workspaces or Turborepo) keeps shared logic clean.
 
+> **How these packages compose at runtime:** see the C4 Container/Component diagrams in
+> [`04-system-architecture.md`](04-system-architecture.md). Note this file is early _scaffolding_ —
+> the diagrams reflect the actual shape on `main`.
+
 ## Top-level
 
 ```text

@@ -67,3 +67,7 @@ ESPN→normalize→storylines pipeline (epic #12). The in-process scheduler is s
 **production runtime for the weekly post at hobby scale**. The broadcast CLI and Airflow DAG remain
 valid paths (e.g. if Airflow is later hosted on an always-on host or Composer). See the ops issues
 for hosting (#95–#97).
+
+> Both broadcast paths (in-process scheduler and `Airflow → broadcast CLI`, sharing the same
+> `renderBroadcast()`/`postBroadcast()` lib) are drawn in the C4 Container diagram in
+> [`docs/04-system-architecture.md`](../04-system-architecture.md).
