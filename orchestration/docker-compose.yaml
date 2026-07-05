@@ -9,7 +9,15 @@
 # Keep the airflow image tag in lockstep with apache-airflow in pyproject.toml.
 
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.10.5
+  # Custom image (orchestration/Dockerfile): stock Airflow + Node + pnpm + the baked
+  # repo at /opt/fantasy-canon, so the weekly_broadcast task can run the bot's broadcast
+  # CLI (issue #96). Build context is the repo root so the whole pnpm workspace is in
+  # scope. Compose builds once and the webserver/scheduler/init services share the image.
+  # After changing bot code, rebuild with `docker compose up --build`.
+  build:
+    context: ..
+    dockerfile: orchestration/Dockerfile
+  image: fantasy-canon/airflow:2.10.5
   environment: &airflow-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -27,6 +35,9 @@ x-airflow-common: &airflow-common
     BROADCAST_LEAGUE_ID: "${BROADCAST_LEAGUE_ID:-}"
     CANON_BROADCAST_CMD: "${CANON_BROADCAST_CMD:-}"
     DISCORD_TOKEN: "${DISCORD_TOKEN:-}"
+    # The broadcast CLI builds the bot context via loadEnv(), which requires DISCORD_APP_ID
+    # even though REST posting only needs the token. Pass it through so the task doesn't fail.
+    DISCORD_APP_ID: "${DISCORD_APP_ID:-}"
     # espn_ingest DAG knobs (issue #14) — see .env.example.
     INGEST_SEASON: "${INGEST_SEASON:-}"
     INGEST_VIEWS: "${INGEST_VIEWS:-}"
