@@ -2,6 +2,10 @@
 
 Guidance for AI coding agents (Claude Code, Cursor, Copilot) and humans working in this repo.
 
+> New here? [`CONTRIBUTING.md`](CONTRIBUTING.md) is the short operational guide (setup, the five
+> verification gates, branch/commit/PR conventions). This file is the deeper reference. Issue and PR
+> templates live in [`.github/`](.github/).
+
 > This describes the `main` branch. Active feature work (e.g. the draft-order lottery — API, web
 > "activity" app, and `draftOrder` modules in `core`/`db`) lives on feature branches and is **not** on
 > `main` yet. Don't assume code described on a feature branch exists here.

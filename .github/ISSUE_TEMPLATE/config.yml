@@ -1,0 +1,9 @@
+# Keep freeform issues available — the templates are the easy path, not a gate.
+blank_issues_enabled: true
+contact_links:
+  - name: Contributing guide
+    url: https://github.com/lucasklawrence/fantasy-canon/blob/main/CONTRIBUTING.md
+    about: Setup, the five verification gates, and branch/commit/PR conventions.
+  - name: Product & architecture docs
+    url: https://github.com/lucasklawrence/fantasy-canon/blob/main/docs/00-product-overview.md
+    about: Start here to understand what Fantasy Canon is and how it's structured.
