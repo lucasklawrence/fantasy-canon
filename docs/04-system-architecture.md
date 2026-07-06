@@ -1,8 +1,9 @@
 # System Architecture (Fantasy Canon)
 
-Architecture as [C4](https://c4model.com/) diagrams — **Context → Container → Component** — written
-as [Mermaid](https://mermaid.js.org/syntax/c4.html), which GitHub renders inline (no build step, no
-committed images, stays diffable).
+Architecture as [C4](https://c4model.com/) diagrams — **Context → Container → Component** — drawn as
+styled [Mermaid](https://mermaid.js.org/syntax/flowchart.html) flowcharts, which GitHub renders
+inline (no build step, no committed images, stays diffable). Colors follow C4 convention: people and
+the focus system/containers in blue, external systems in gray, data stores as cylinders.
 
 This doc is the single source of truth for **what talks to what**. It reflects `main` **plus the ops
 chain (#95–#97)** and calls out placeholders honestly rather than drawing the aspirational MVP. For
@@ -31,24 +32,25 @@ Two human roles drive one system that sits between **Discord** (how people reach
 Discord is the chat platform; ESPN's league endpoints are _unofficial_.
 
 ```mermaid
-C4Context
-    title System Context - Fantasy Canon
+flowchart LR
+  member["League member<br/><i>[Person]</i><br/>Runs /canon, gets cards"]
+  admin["League admin<br/><i>[Person]</i><br/>Configures + ingests"]
+  canon["Fantasy Canon<br/><i>[Software System]</i><br/>ESPN history to storylines to Discord"]
+  discord["Discord<br/><i>[External]</i><br/>Gateway + REST"]
+  espn["ESPN Fantasy API<br/><i>[External]</i><br/>Unofficial endpoints"]
 
-    Person(member, "League member", "Runs /canon commands; receives weekly cards")
-    Person(admin, "League admin", "Sets post channel and league via /canon config; runs /canon ingest")
+  member -->|/canon| discord
+  admin -->|config, ingest| discord
+  discord -->|interactions, gateway| canon
+  canon -->|cards + replies, REST| discord
+  canon -->|fetch views, HTTPS| espn
 
-    System(canon, "Fantasy Canon", "Discord-first offseason companion: pulls ESPN history, derives storylines, posts visuals and slash-command output")
-
-    System_Ext(discord, "Discord", "Chat platform. Gateway delivers interactions inbound; REST posts outbound")
-    System_Ext(espn, "ESPN Fantasy API", "Unofficial league endpoints. Public leagues 2020+; private needs ESPN_S2 and ESPN_SWID cookies")
-
-    Rel(member, discord, "Types /canon ...")
-    Rel(admin, discord, "Configures and ingests")
-    Rel(discord, canon, "Delivers interactions", "gateway WebSocket")
-    Rel(canon, discord, "Posts cards and replies", "REST")
-    Rel(canon, espn, "Fetches league views", "HTTPS")
-
-    UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="1")
+  classDef person fill:#08427b,stroke:#052e56,color:#fff;
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff;
+  classDef ext fill:#8a8a8a,stroke:#6b6b6b,color:#fff;
+  class member,admin person;
+  class canon system;
+  class discord,espn ext;
 ```
 
 ## C4 Level 2 — Container
@@ -67,36 +69,40 @@ Note the **two paths to the same weekly post**: the bot's in-process scheduler (
 Postgres holds Airflow metadata; snapshots are JSON files from the ingest DAG.
 
 ```mermaid
-C4Container
-    title Container - Fantasy Canon
+flowchart LR
+  member["League member<br/><i>[Person]</i>"]
+  admin["League admin<br/><i>[Person]</i>"]
+  discord["Discord<br/><i>[External]</i><br/>Gateway + REST"]
+  espn["ESPN Fantasy API<br/><i>[External]</i>"]
 
-    Person(member, "League member")
-    Person(admin, "League admin")
-    System_Ext(discord, "Discord", "Gateway + REST")
-    System_Ext(espn, "ESPN Fantasy API", "Unofficial endpoints")
+  subgraph canon["Fantasy Canon"]
+    bot["Discord Bot<br/><i>[Container: Node, discord.js]</i><br/>Always-on gateway + in-process weekly scheduler"]
+    cli["Broadcast CLI<br/><i>[Container: Node, tsx]</i><br/>apps/bot/broadcast.ts, one-shot"]
+    airflow["Airflow sidecar<br/><i>[Container: Python, Docker]</i><br/>DAGs: espn_ingest, weekly_broadcast"]
+    pg[("Postgres<br/><i>Airflow metadata only</i>")]
+    snap[("ESPN snapshots<br/><i>JSON files on disk</i>")]
+  end
 
-    System_Boundary(canon, "Fantasy Canon") {
-        Container(bot, "Discord Bot", "Node 24, discord.js v14, tsx", "Always-on gateway process. Routes /canon interactions and runs the in-process weekly scheduler - the hobby-scale production runtime per ADR 0002")
-        Container(cli, "Broadcast CLI", "Node, tsx, apps/bot/broadcast.ts", "Short-lived process the weekly_broadcast DAG shells out to; renders and posts one card via REST")
-        Container(airflow, "Airflow sidecar", "Python, Docker custom image with Node+pnpm+baked repo", "Local-first orchestration. DAGs: espn_ingest, weekly_broadcast, hello_canon")
-        ContainerDb(pg, "Postgres", "Postgres 16, Docker", "Airflow metadata only - NOT the app database")
-        ContainerDb(snap, "ESPN snapshots", "JSON files, orchestration/data", "Idempotent partitioned view dumps written by espn_ingest")
-    }
+  member -->|/canon| discord
+  admin -->|config, ingest| discord
+  discord -->|interactions, gateway| bot
+  bot -->|cards + replies, REST| discord
+  bot -->|fetch views, HTTPS| espn
+  airflow -->|runs weekly, Bash| cli
+  cli -->|posts card, REST| discord
+  cli -->|fetch views, HTTPS| espn
+  airflow -->|ingest views, HTTPS| espn
+  airflow -->|writes| snap
+  airflow -->|metadata, SQL| pg
 
-    Rel(member, discord, "/canon ...")
-    Rel(admin, discord, "/canon config, ingest")
-    Rel(discord, bot, "Interactions", "gateway WS")
-    Rel(bot, discord, "Cards and replies", "REST")
-    Rel(bot, espn, "Fetches views", "HTTPS")
-
-    Rel(airflow, cli, "Runs weekly", "BashOperator, pnpm/tsx")
-    Rel(cli, espn, "Fetches views", "HTTPS")
-    Rel(cli, discord, "Posts card", "REST")
-    Rel(airflow, espn, "Ingests views", "HTTPS, requests")
-    Rel(airflow, snap, "Writes", "atomic overwrite")
-    Rel(airflow, pg, "Reads/writes metadata", "SQL")
-
-    UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="1")
+  classDef person fill:#08427b,stroke:#052e56,color:#fff;
+  classDef container fill:#1168bd,stroke:#0b4884,color:#fff;
+  classDef store fill:#1168bd,stroke:#0b4884,color:#fff;
+  classDef ext fill:#8a8a8a,stroke:#6b6b6b,color:#fff;
+  class member,admin person;
+  class bot,cli,airflow container;
+  class pg,snap store;
+  class discord,espn ext;
 ```
 
 ## C4 Level 3 — Component (Discord Bot internals)
@@ -109,42 +115,45 @@ lib the standalone CLI calls. `shared` (types/config) underpins every package an
 graph to reduce noise.
 
 ```mermaid
-C4Component
-    title Component - Discord Bot (apps/bot)
+flowchart LR
+  discord["Discord<br/><i>[External]</i>"]
+  espn["ESPN Fantasy API<br/><i>[External]</i>"]
 
-    System_Ext(discord, "Discord", "Gateway + REST")
-    System_Ext(espn, "ESPN Fantasy API", "Unofficial endpoints")
+  subgraph bot["Discord Bot (apps/bot)"]
+    entry["Entry + Config<br/><i>index.ts, config.ts</i><br/>Builds BotContext, logs in, starts scheduler"]
+    router["Interaction router<br/><i>services/discord.ts</i><br/>Routes /canon + autocomplete"]
+    handlers["Command handlers<br/><i>commands/canon/*</i><br/>~30 subcommands"]
+    scheduler["Weekly scheduler<br/><i>services/scheduler.ts</i><br/>Dependency-free timer, opt-in"]
+    bcast["Broadcast render/post<br/><i>lib/broadcastRender, postBroadcast</i><br/>Shared with the CLI"]
+    botlib["Bot lib<br/><i>lib/*</i><br/>Glue + fetch-through cache"]
+    core["core<br/><i>@fantasy-canon/core</i><br/>storylines, metrics"]
+    espnc["espn-client<br/><i>@fantasy-canon/espn-client</i>"]
+    renderer["renderer<br/><i>@fantasy-canon/renderer</i><br/>SVG to PNG"]
+    db[("db repos<br/><i>@fantasy-canon/db</i><br/>In-memory, no-op client")]
+  end
 
-    Container_Boundary(bot, "Discord Bot") {
-        Component(entry, "Entry and Config", "index.ts, config.ts", "loadEnv + createBotContext: espnClient, in-memory repos, teamNameCache. Logs in and starts the scheduler")
-        Component(router, "Interaction router", "services/discord.ts", "Handles interactionCreate; routes the /canon command and autocomplete")
-        Component(handlers, "Command handlers", "commands/canon/*", "~30 subcommands: luck, allplay, trophies, rivalries, scout, plus faab/legacy/admin/config groups")
-        Component(scheduler, "Weekly scheduler", "services/scheduler.ts", "Dependency-free self-rescheduling timer - NOT node-cron. Opt-in via BROADCAST_* env")
-        Component(bcast, "Broadcast render/post", "lib/broadcastRender.ts, lib/postBroadcast.ts", "Assembles a card and posts via REST. Shared with the broadcast CLI")
-        Component(botlib, "Bot lib", "lib/*", "Glue helpers: leagueInfo, teamNames, roster, weeklyScores, snapshots fetch-through cache")
-        Component(core, "core", "@fantasy-canon/core", "Pure domain: storylines incl faab, metrics incl luck, narratives")
-        Component(espnc, "espn-client", "@fantasy-canon/espn-client", "Unofficial ESPN fetch and view registry")
-        Component(renderer, "renderer", "@fantasy-canon/renderer", "SVG to PNG cards and graphs via @resvg/resvg-js")
-        ComponentDb(db, "db repos", "@fantasy-canon/db", "In-memory repos plus a no-op DbClient - nothing persisted")
-    }
+  discord -->|interactions, gateway| router
+  entry -->|registers| router
+  entry -->|starts if configured| scheduler
+  router -->|dispatches| handlers
+  handlers -->|uses| botlib
+  handlers -->|metrics| core
+  handlers -->|renders| renderer
+  handlers -->|replies, REST| discord
+  botlib -->|fetch-through| espnc
+  botlib -->|snapshot cache| db
+  espnc -->|fetch, HTTPS| espn
+  scheduler -->|weekly| bcast
+  bcast -->|metrics| core
+  bcast -->|renders| renderer
+  bcast -->|posts, REST| discord
 
-    Rel(discord, router, "Interactions", "gateway WS")
-    Rel(entry, router, "Registers handlers")
-    Rel(entry, scheduler, "Starts if configured")
-    Rel(router, handlers, "Dispatches")
-    Rel(handlers, botlib, "Uses")
-    Rel(handlers, core, "Computes metrics")
-    Rel(handlers, renderer, "Renders cards")
-    Rel(handlers, discord, "Replies", "REST")
-    Rel(botlib, espnc, "Fetch-through")
-    Rel(botlib, db, "Snapshot cache")
-    Rel(espnc, espn, "Fetches views", "HTTPS")
-    Rel(scheduler, bcast, "Triggers weekly")
-    Rel(bcast, core, "Metrics")
-    Rel(bcast, renderer, "Renders")
-    Rel(bcast, discord, "Posts card", "REST")
-
-    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
+  classDef ext fill:#8a8a8a,stroke:#6b6b6b,color:#fff;
+  classDef comp fill:#85bbf0,stroke:#5a9abd,color:#000;
+  classDef store fill:#85bbf0,stroke:#5a9abd,color:#000;
+  class discord,espn ext;
+  class entry,router,handlers,scheduler,bcast,botlib,core,espnc,renderer comp;
+  class db store;
 ```
 
 ## Runtime & deployment (current)
