@@ -59,6 +59,8 @@ orchestration/
     storylines_dag.py   # storylines: normalized tables → luck / churn / waiver_spend / rivalries (#16)
     storylines.py       # airflow-free metric transforms over the derived tables (unit-tested)
     conventions.py      # airflow-free shared default_args + data-quality gate (#18, unit-tested)
+    weekly_throwback_dag.py # throwback: storyline tables → 'on this week in history' post (#17)
+    throwback.py        # airflow-free throwback selection + bot-command builder (unit-tested)
   tests/
     test_canon_broadcast.py
     test_espn.py
@@ -66,6 +68,7 @@ orchestration/
     test_normalize.py
     test_storylines.py
     test_conventions.py
+    test_throwback.py
   data/                 # snapshot output (gitignored; mounted into the worker)
 ```
 
@@ -191,6 +194,40 @@ is a one-line change per DAG:
 |----------|------|---------|
 | `SCHEDULE_FINALIZE` | `0 16 * * 2` (Tue 16:00 UTC) | authoritative recompute of the just-finished week, after ESPN's Mon/Tue stat corrections land |
 | `SCHEDULE_REFRESH` | `0 12 * * *` (daily 12:00 UTC) | refresh the in-progress week so mid-week views aren't stale; the finalize pass later supersedes it |
+
+## `weekly_throwback` DAG (issue #17)
+
+The **throwback** surface, downstream of `storylines`: once a week it reads the storyline tables
+and posts an *"on this week in history"* card to Discord. The DAG decides **what** to post; the bot
+**renders and posts** it — no bot logic in the sidecar (ADR 0002). Runs on Throwback Thursday
+(`0 16 * * 4`, delivered paused).
+
+- **Rotation.** `select_post_type(week)` cycles a fixed list of post types week to week —
+  `rivalry → waiver_legend → luck → churn`. `select_throwback` picks the single most-notable row
+  for that type (most-lopsided rivalry, biggest FAAB splash, most extreme luck swing, most active
+  roster). If the rotation's table is empty it **falls through** to the next type that has data, so
+  a run still posts something as long as any storyline exists; if *all* tables are empty the `post`
+  task no-ops (stays green) rather than posting nothing.
+- **Bot hand-off.** The `post` task shells out to the bot's throwback CLI (like `weekly_broadcast`),
+  passing `--post-type`, a compact `--ref` identifying the selected row, `--season`, `--channel`,
+  and `--league`. The bot resolves the ref back to the row and renders it.
+
+**Config** (Airflow Variables, or env via `.env`):
+
+| Key | Purpose |
+|-----|---------|
+| `INGEST_SEASON` | Season year whose storyline tables to read (required) |
+| `STORYLINES_ROOT` | Where `storylines` wrote its tables (default `/opt/airflow/data/storylines`) |
+| `THROWBACK_CHANNEL_ID` | Discord channel to post to (required to post) |
+| `THROWBACK_LEAGUE_ID` | League id (falls back to `ESPN_LEAGUE_ID`) |
+| `CANON_THROWBACK_CMD` | How the worker runs the bot CLI (defaults to the baked-in repo path) |
+| `DISCORD_TOKEN` | Bot token used to post (worker env) |
+
+> **Follow-up before this posts live.** The `post` task calls `pnpm … run throwback` — a bot-side
+> command that doesn't exist yet. This slice ships the orchestration half (selection logic + DAG +
+> command builder, all unit-tested in `test_throwback.py`); the bot's `throwback` renderer/CLI and a
+> live-post verification against a test channel land with the Discord ops work (#95/#97). Until
+> then, leave the DAG paused. Pure Python (stdlib only) — no Node needed to run the tests.
 
 ## `weekly_broadcast` DAG (issue #51)
 
