@@ -43,8 +43,7 @@ export async function handleBidsSubcommand(
     const teamNames = buildTeamNameMap(mTeamPayload);
     const playerNames = buildPlayerNameMap(mRosterPayload);
     const mTxPayload = (await ensureTransactionsPayload(context, leagueId, season)) as
-      | { transactions?: unknown[] }
-      | undefined;
+      { transactions?: unknown[] } | undefined;
     if (!mTxPayload) {
       await interaction.editReply({
         content: 'Transactions payload not available for this league/season.',
@@ -183,8 +182,7 @@ function buildPlayerLabel(
     const poolPlayer =
       i.playerPoolEntry && typeof i.playerPoolEntry === 'object'
         ? ((i.playerPoolEntry as { player?: unknown }).player as
-            | { fullName?: unknown; defaultPositionId?: unknown }
-            | undefined)
+            { fullName?: unknown; defaultPositionId?: unknown } | undefined)
         : undefined;
     const nameField =
       (directPlayer && typeof directPlayer.fullName === 'string'
