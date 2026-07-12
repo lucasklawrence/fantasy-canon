@@ -54,10 +54,13 @@ orchestration/
     espn_ingest.py      # extract: ESPN views → idempotent snapshots (#14)
     espn.py             # airflow-free ESPN read client (URL builder unit-tested)
     snapshots.py        # airflow-free partitioned/idempotent snapshot storage (unit-tested)
+    normalize_dag.py    # transform: snapshots → teams / team_week_scores / transactions (#15)
+    normalize.py        # airflow-free transforms + partitioned table storage (unit-tested)
   tests/
     test_canon_broadcast.py
     test_espn.py
     test_snapshots.py
+    test_normalize.py
   data/                 # snapshot output (gitignored; mounted into the worker)
 ```
 
@@ -66,8 +69,8 @@ orchestration/
 The **extract** step: pulls ESPN views for a season and writes them as **idempotent,
 partitioned snapshots** (`data/season=<yyyy>/<view>.json`, atomic overwrite). One mapped
 task per view, fetched in pure Python (`requests`) — no Node worker needed for ingest.
-Re-runs/backfills overwrite the same partition, so they're safe. Feeds the future
-normalize → storylines steps (#15–#16).
+Re-runs/backfills overwrite the same partition, so they're safe. Feeds the
+`normalize` DAG below (#15), then storylines (#16).
 
 **Config** (Airflow Variables, or env via `.env`):
 
@@ -81,6 +84,36 @@ normalize → storylines steps (#15–#16).
 
 Trigger it from the UI; snapshots land under `orchestration/data/`. This DAG runs as-is in
 the stock image (Python only — unlike `weekly_broadcast`, no Node required).
+
+## `normalize` DAG (issue #15)
+
+The **transform** step: reads the raw snapshots `espn_ingest` wrote and produces three
+**derived tables** as partitioned, idempotent JSON (mirroring the snapshot storage, atomic
+overwrite). Runs as its own DAG so the transform stage is independently triggerable and
+backfillable; the storylines DAG (#16) will consume these tables next.
+
+| Table | Source view | Partition | Row shape |
+|-------|-------------|-----------|-----------|
+| `teams` | `mTeam` | `season=<yyyy>/teams.json` | `teamId, name, abbrev, location, nickname` |
+| `team_week_scores` | `mScoreboard` | `season=<yyyy>/week=<n>/…` | `week, teamId, points, oppId, result` (W/L/T) |
+| `transactions` | `mTransactions2` | `season=<yyyy>/week=<n>/…` | `id, type, status, teamId, bid, week, time, items[]` |
+
+Each table file is an **envelope** (`{table, season, week, as_of, row_count, rows}`); `as_of`
+stamps when the run wrote the partition, so revised numbers become an auditable time series —
+the partition is the audit grain, since a re-run overwrites it whole. Transaction rows whose
+`scoringPeriodId` is absent fall into a `week=0` bucket so nothing is dropped. Pure Python
+(stdlib only) — no Node, and the transforms unit-test without Airflow (`test_normalize.py`).
+
+**Config** (Airflow Variables, or env via `.env`):
+
+| Key | Purpose |
+|-----|---------|
+| `INGEST_SEASON` | Season year to normalize (required) |
+| `SNAPSHOT_ROOT` | Where ingest wrote snapshots (default `/opt/airflow/data/snapshots`) |
+| `NORMALIZED_ROOT` | Output dir for derived tables (default `/opt/airflow/data/normalized`, mounted to `./data`) |
+
+Run `espn_ingest` first, then trigger `normalize`; derived tables land under
+`orchestration/data/normalized/`.
 
 ## `weekly_broadcast` DAG (issue #51)
 
