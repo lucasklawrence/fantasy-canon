@@ -8,10 +8,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dags"))
 
 from normalize import (  # noqa: E402
+    clear_weekly_partitions,
     group_rows_by_week,
     normalize_team_week_scores,
     normalize_teams,
     normalize_transactions,
+    read_all_weeks,
     read_table,
     table_path,
     write_table,
@@ -236,3 +238,41 @@ def test_week_partition_is_isolated_from_season_partition(tmp_path):
     write_table(str(tmp_path), 2024, "transactions", [{"scope": "week5"}], as_of="t", week=5)
     assert read_table(str(tmp_path), 2024, "transactions")["rows"] == [{"scope": "season"}]
     assert read_table(str(tmp_path), 2024, "transactions", week=5)["rows"] == [{"scope": "week5"}]
+
+
+# --------------------------------------------------------- read across week partitions
+
+
+def test_read_all_weeks_concatenates_partitions_in_week_order(tmp_path):
+    write_table(
+        str(tmp_path), 2024, "team_week_scores", [{"week": 2, "teamId": 1}], as_of="t", week=2
+    )
+    write_table(
+        str(tmp_path), 2024, "team_week_scores", [{"week": 1, "teamId": 9}], as_of="t", week=1
+    )
+    rows = read_all_weeks(str(tmp_path), 2024, "team_week_scores")
+    assert [(r["week"], r["teamId"]) for r in rows] == [(1, 9), (2, 1)]
+
+
+def test_read_all_weeks_missing_season_or_table_returns_empty(tmp_path):
+    assert read_all_weeks(str(tmp_path), 1999, "team_week_scores") == []
+    write_table(str(tmp_path), 2024, "transactions", [{"week": 1}], as_of="t", week=1)
+    assert read_all_weeks(str(tmp_path), 2024, "team_week_scores") == []  # other table absent
+
+
+# --------------------------------------------------- idempotent weekly partition clear
+
+
+def test_clear_weekly_partitions_removes_only_that_table(tmp_path):
+    root = str(tmp_path)
+    write_table(root, 2024, "waiver_spend", [{"week": 1}], as_of="t", week=1)
+    write_table(root, 2024, "waiver_spend", [{"week": 2}], as_of="t", week=2)
+    write_table(root, 2024, "transactions", [{"week": 1}], as_of="t", week=1)  # shares week=1 dir
+    removed = clear_weekly_partitions(root, 2024, "waiver_spend")
+    assert removed == 2
+    assert read_all_weeks(root, 2024, "waiver_spend") == []
+    assert read_all_weeks(root, 2024, "transactions") == [{"week": 1}]  # other table untouched
+
+
+def test_clear_weekly_partitions_missing_season_is_a_noop(tmp_path):
+    assert clear_weekly_partitions(str(tmp_path), 1999, "waiver_spend") == 0

@@ -13,18 +13,28 @@ Config via Airflow Variables with env fallbacks (see orchestration/README.md):
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from airflow.decorators import dag, task
 from airflow.models import Variable
-from normalize import group_rows_by_week, write_table
-from storylines import (
+from conventions import (
+    check_min_rows,
+    check_no_null_fields,
+    pipeline_default_args,
+    run_data_quality,
+)
+from normalize import (
     clear_weekly_partitions,
+    group_rows_by_week,
+    read_all_weeks,
+    read_table,
+    write_table,
+)
+from storylines import (
     compute_churn,
     compute_luck,
     compute_rivalries,
     compute_waiver_spend_by_week,
-    read_all_weeks,
     season_week_count,
 )
 
@@ -61,7 +71,7 @@ def _write_weekly(ctx: dict, table: str, rows: list) -> list[str]:
     schedule=None,
     start_date=datetime(2025, 1, 1),
     catchup=False,
-    default_args={"retries": 3, "retry_delay": timedelta(minutes=2)},
+    default_args=pipeline_default_args(),
     tags=["fantasy-canon", "storylines"],
 )
 def storylines():
@@ -114,12 +124,36 @@ def storylines():
         print(f"Wrote rivalries table ({len(rows)} rows) -> {path}")
         return str(path)
 
+    @task
+    def quality_gate(ctx: dict, _written: list) -> None:
+        """Fail the DAG if a storyline table looks wrong (no rows, null ids).
+
+        Runs after every table is written (``_written`` carries the upstream XComs only to order
+        this task last); re-reads the tables from disk and runs the shared checks so a bad load is
+        caught loudly here instead of silently feeding the bot/renderer.
+        """
+        luck = read_table(ctx["storylines_root"], ctx["season"], "luck")["rows"]
+        churn = read_table(ctx["storylines_root"], ctx["season"], "churn")["rows"]
+        rivalries = read_table(ctx["storylines_root"], ctx["season"], "rivalries")["rows"]
+        run_data_quality(
+            # luck has one row per team, so an empty luck table means the season failed to load.
+            check_min_rows(luck, table="luck"),
+            check_no_null_fields(luck, table="luck", fields=["teamId"]),
+            check_no_null_fields(churn, table="churn", fields=["teamId"]),
+            check_no_null_fields(rivalries, table="rivalries", fields=["teamA", "teamB"]),
+        )
+        print("data-quality gate passed")
+
     context = resolve_context()
     # The four storyline tables are independent; each fans out from the shared context.
-    luck_table(context)
-    churn_table(context)
-    waiver_spend_table(context)
-    rivalries_table(context)
+    written = [
+        luck_table(context),
+        churn_table(context),
+        waiver_spend_table(context),
+        rivalries_table(context),
+    ]
+    # Gate runs last: passing the four XComs makes it depend on all of them.
+    quality_gate(context, written)
 
 
 storylines()

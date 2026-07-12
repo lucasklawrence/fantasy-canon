@@ -13,10 +13,11 @@ Config via Airflow Variables with env fallbacks (see orchestration/README.md):
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from airflow.decorators import dag, task
 from airflow.models import Variable
+from conventions import pipeline_default_args
 from espn import fetch_view
 from snapshots import write_snapshot
 
@@ -36,7 +37,7 @@ def _cfg(key: str, default: str = "") -> str:
     schedule=None,
     start_date=datetime(2025, 1, 1),
     catchup=False,
-    default_args={"retries": 3, "retry_delay": timedelta(minutes=2)},
+    default_args=pipeline_default_args(),
     tags=["fantasy-canon", "ingest"],
 )
 def espn_ingest():
