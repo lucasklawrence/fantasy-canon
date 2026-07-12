@@ -19,6 +19,7 @@ from airflow.decorators import dag, task
 from airflow.models import Variable
 from normalize import group_rows_by_week, write_table
 from storylines import (
+    clear_weekly_partitions,
     compute_churn,
     compute_luck,
     compute_rivalries,
@@ -98,6 +99,9 @@ def storylines():
     def waiver_spend_table(ctx: dict) -> list[str]:
         transactions = read_all_weeks(ctx["normalized_root"], ctx["season"], "transactions")
         rows = compute_waiver_spend_by_week(transactions)
+        # Clear first so a rerun where a week goes empty doesn't leave a stale partition behind
+        # (weekly tables only write weeks that have rows) -- keeps the overwrite truly idempotent.
+        clear_weekly_partitions(ctx["storylines_root"], ctx["season"], "waiver_spend")
         return _write_weekly(ctx, "waiver_spend", rows)
 
     @task

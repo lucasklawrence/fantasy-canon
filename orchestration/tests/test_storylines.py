@@ -16,6 +16,7 @@ from normalize import (  # noqa: E402  (build/read partitions like the DAG does)
     write_table,
 )
 from storylines import (  # noqa: E402
+    clear_weekly_partitions,
     compute_churn,
     compute_luck,
     compute_rivalries,
@@ -150,12 +151,19 @@ def test_compute_churn_zero_weeks_gives_zero_rate():
     assert compute_churn(transactions, weeks=0)[0]["churnPerWeek"] == 0.0
 
 
+def test_compute_churn_status_is_case_insensitive():
+    # A lower-case "executed" status still counts (normalize preserves ESPN's raw case).
+    transactions = [{"status": "executed", "teamId": 1, "items": [{"toTeamId": 1}]}]
+    assert compute_churn(transactions, weeks=1)[0]["adds"] == 1
+
+
 # ------------------------------------------------------------------------- waiver_spend
 
 
 def test_is_waiver_spend_gate():
     assert is_waiver_spend({"type": "WAIVER", "status": "EXECUTED", "bid": 5})
     assert is_waiver_spend({"type": "WAIVER_ADJUSTMENT", "bid": 1})  # status absent ok
+    assert is_waiver_spend({"type": "waiver", "status": "executed", "bid": 3})  # case-insensitive
     assert not is_waiver_spend({"type": "WAIVER", "bid": 0})  # zero bid
     assert not is_waiver_spend({"type": "FREEAGENT", "bid": 5})  # not a waiver
     assert not is_waiver_spend({"type": "WAIVER", "status": "PENDING", "bid": 5})  # unsettled
@@ -236,6 +244,43 @@ def test_read_all_weeks_missing_season_or_table_returns_empty(tmp_path):
 def test_season_week_count_uses_max_week():
     assert season_week_count([{"week": 1}, {"week": 5}, {"week": 3}]) == 5
     assert season_week_count([]) == 0
+
+
+# ---------------------------------------------------- idempotent weekly partition clear
+
+
+def test_clear_weekly_partitions_removes_only_that_table(tmp_path):
+    root = str(tmp_path)
+    write_table(root, 2024, "waiver_spend", [{"week": 1}], as_of="t", week=1)
+    write_table(root, 2024, "waiver_spend", [{"week": 2}], as_of="t", week=2)
+    write_table(root, 2024, "transactions", [{"week": 1}], as_of="t", week=1)  # shares week=1 dir
+    removed = clear_weekly_partitions(root, 2024, "waiver_spend")
+    assert removed == 2
+    assert read_all_weeks(root, 2024, "waiver_spend") == []
+    assert read_all_weeks(root, 2024, "transactions") == [{"week": 1}]  # other table untouched
+
+
+def test_clear_weekly_partitions_missing_season_is_a_noop(tmp_path):
+    assert clear_weekly_partitions(str(tmp_path), 1999, "waiver_spend") == 0
+
+
+def test_waiver_spend_rerun_prunes_a_week_that_went_empty(tmp_path):
+    # First run: two waiver weeks. Second run: a backfill removed week 2's only bid.
+    root = str(tmp_path)
+    first = [
+        {"type": "WAIVER", "status": "EXECUTED", "teamId": 1, "week": 1, "bid": 20},
+        {"type": "WAIVER", "status": "EXECUTED", "teamId": 1, "week": 2, "bid": 15},
+    ]
+    for week, rows in group_rows_by_week(compute_waiver_spend_by_week(first)).items():
+        write_table(root, 2024, "waiver_spend", rows, as_of="t1", week=week)
+    assert {r["week"] for r in read_all_weeks(root, 2024, "waiver_spend")} == {1, 2}
+
+    second = first[:1]  # week 2's bid is gone
+    clear_weekly_partitions(root, 2024, "waiver_spend")  # the DAG clears before re-writing
+    for week, rows in group_rows_by_week(compute_waiver_spend_by_week(second)).items():
+        write_table(root, 2024, "waiver_spend", rows, as_of="t2", week=week)
+    # Week 2's stale partition is gone; only week 1 survives.
+    assert read_all_weeks(root, 2024, "waiver_spend") == [{"week": 1, "teamId": 1, "spend": 20.0}]
 
 
 # --------------------------------------------------------- end-to-end materialization

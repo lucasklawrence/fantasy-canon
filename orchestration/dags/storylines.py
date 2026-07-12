@@ -56,6 +56,15 @@ def _str(val: Any) -> str:
     return val if isinstance(val, str) else ""
 
 
+def _is_settled(status: Any) -> bool:
+    """True if a transaction status is absent or (case-insensitively) EXECUTED.
+
+    ``normalize`` preserves ESPN's raw status; the bot uppercases before comparing
+    (``isWaiverSpend``), so a lower/mixed-case ``executed`` is normalized to the same check here.
+    """
+    return status is None or _str(status).upper() == "EXECUTED"
+
+
 # ------------------------------------------------------------------ read derived tables
 
 
@@ -85,6 +94,25 @@ def read_all_weeks(root: str, season: int, table: str) -> list[dict]:
     for _, rows in sorted(partitions, key=lambda kv: kv[0]):
         out.extend(rows)
     return out
+
+
+def clear_weekly_partitions(root: str, season: int, table: str) -> int:
+    """Delete every ``week=`` partition file of a per-week table; return how many were removed.
+
+    Weekly tables write only the weeks that have rows, so a rerun in which a week goes *empty*
+    (e.g. a backfill removes the only positive bid that week) would otherwise leave a stale
+    partition behind and break the idempotent-overwrite contract. Clearing the table's week
+    files first makes the per-week write a true overwrite of the whole table. Table-scoped --
+    only ``<table>.json`` is removed, so week dirs shared with other tables are left intact.
+    """
+    season_dir = Path(root) / f"season={season}"
+    if not season_dir.is_dir():
+        return 0
+    removed = 0
+    for partition in season_dir.glob(f"week=*/{table}.json"):
+        partition.unlink()
+        removed += 1
+    return removed
 
 
 def season_week_count(scores: list[dict]) -> int:
@@ -187,8 +215,7 @@ def compute_churn(transactions: list[dict], *, weeks: int) -> list[dict]:
     drops: dict[int, int] = {}
     trades: dict[int, int] = {}
     for tx in transactions:
-        status = tx.get("status")
-        if status is not None and status != "EXECUTED":
+        if not _is_settled(tx.get("status")):
             continue
         for item in tx.get("items") or []:
             if not isinstance(item, dict):
@@ -238,10 +265,7 @@ def is_waiver_spend(tx: dict) -> bool:
         return False
     if _str(tx.get("type")).upper() not in WAIVER_TYPES:
         return False
-    status = tx.get("status")
-    if status is not None and status != "EXECUTED":
-        return False
-    return True
+    return _is_settled(tx.get("status"))
 
 
 def compute_waiver_spend_by_week(transactions: list[dict]) -> list[dict]:
