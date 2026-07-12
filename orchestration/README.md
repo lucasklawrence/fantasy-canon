@@ -56,11 +56,14 @@ orchestration/
     snapshots.py        # airflow-free partitioned/idempotent snapshot storage (unit-tested)
     normalize_dag.py    # transform: snapshots → teams / team_week_scores / transactions (#15)
     normalize.py        # airflow-free transforms + partitioned table storage (unit-tested)
+    storylines_dag.py   # storylines: normalized tables → luck / churn / waiver_spend / rivalries (#16)
+    storylines.py       # airflow-free metric transforms over the derived tables (unit-tested)
   tests/
     test_canon_broadcast.py
     test_espn.py
     test_snapshots.py
     test_normalize.py
+    test_storylines.py
   data/                 # snapshot output (gitignored; mounted into the worker)
 ```
 
@@ -114,6 +117,41 @@ the partition is the audit grain, since a re-run overwrites it whole. Transactio
 
 Run `espn_ingest` first, then trigger `normalize`; derived tables land under
 `orchestration/data/normalized/`.
+
+## `storylines` DAG (issue #16)
+
+The **storylines** step: pure transforms over the normalized derived tables that materialize
+four **storyline tables** (same partitioned, idempotent envelope store as `normalize`). No ESPN
+calls — a clean dependency boundary: it reads only what `normalize` wrote.
+
+| Table | Source | Partition | Row shape |
+|-------|--------|-----------|-----------|
+| `luck` | `team_week_scores` | `season=<yyyy>/luck.json` | `teamId, wins/losses/ties, allPlay{Wins,Losses,Ties,WinPct}, games, expectedWins, luck` |
+| `churn` | `transactions` | `season=<yyyy>/churn.json` | `teamId, adds, drops, trades, moves, weeks, churnPerWeek` |
+| `waiver_spend` | `transactions` | `season=<yyyy>/week=<n>/…` | `week, teamId, spend` (FAAB per week) |
+| `rivalries` | `team_week_scores` | `season=<yyyy>/rivalries.json` | `teamA, teamB, aWins, bWins, aPoints, bPoints` |
+
+- **Luck** = `wins − expectedWins`, where `expectedWins` is the schedule-independent all-play
+  expectation (`allPlayWinPct × games`) — the value the bot's Monte Carlo (`expectedWins.ts`)
+  converges to, computed analytically so it stays deterministic and hand-verifiable.
+- **Churn** counts item-level adds/drops (a trade moves players both ways) per settled
+  transaction; `churnPerWeek = moves / weeks` (season length = max week in `team_week_scores`).
+- **Waiver spend** sums positive, executed waiver bids per `(week, team)` — mirrors the bot's
+  `isWaiverSpend` gate.
+- **Rivalries** builds every head-to-head pairing (`teamA` = lower id), ranked most-lopsided
+  first; ties count toward neither side.
+
+**Config** (Airflow Variables, or env via `.env`):
+
+| Key | Purpose |
+|-----|---------|
+| `INGEST_SEASON` | Season year to compute (required) |
+| `NORMALIZED_ROOT` | Where `normalize` wrote derived tables (default `/opt/airflow/data/normalized`) |
+| `STORYLINES_ROOT` | Output dir for storyline tables (default `/opt/airflow/data/storylines`, mounted to `./data`) |
+
+Run `normalize` first, then trigger `storylines`; storyline tables land under
+`orchestration/data/storylines/`. Pure Python (stdlib only) — no Node, and the transforms
+unit-test without Airflow (`test_storylines.py`).
 
 ## `weekly_broadcast` DAG (issue #51)
 
