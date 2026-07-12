@@ -25,9 +25,7 @@ and is deterministic. ``luck = actualWins - expectedWins``: positive is lucky, n
 
 from __future__ import annotations
 
-import json
 import math
-from pathlib import Path
 from typing import Any, Optional
 
 # --------------------------------------------------------------------------- coercion
@@ -65,54 +63,7 @@ def _is_settled(status: Any) -> bool:
     return status is None or _str(status).upper() == "EXECUTED"
 
 
-# ------------------------------------------------------------------ read derived tables
-
-
-def read_all_weeks(root: str, season: int, table: str) -> list[dict]:
-    """Concatenate the rows of every ``week=`` partition of a per-week derived table.
-
-    ``normalize`` writes weekly tables as ``season=<yyyy>/week=<n>/<table>.json``. Storyline
-    metrics are season-wide, so they need all weeks at once; this globs the partitions, reads
-    each envelope, and returns the rows in ascending week order. Missing season/table -> ``[]``.
-    """
-    season_dir = Path(root) / f"season={season}"
-    if not season_dir.is_dir():
-        return []
-    partitions: list[tuple[int, list]] = []
-    for week_dir in season_dir.glob("week=*"):
-        try:
-            week = int(week_dir.name.split("=", 1)[1])
-        except (ValueError, IndexError):
-            continue
-        table_file = week_dir / f"{table}.json"
-        if not table_file.is_file():
-            continue
-        rows = json.loads(table_file.read_text(encoding="utf-8")).get("rows")
-        if isinstance(rows, list):
-            partitions.append((week, rows))
-    out: list[dict] = []
-    for _, rows in sorted(partitions, key=lambda kv: kv[0]):
-        out.extend(rows)
-    return out
-
-
-def clear_weekly_partitions(root: str, season: int, table: str) -> int:
-    """Delete every ``week=`` partition file of a per-week table; return how many were removed.
-
-    Weekly tables write only the weeks that have rows, so a rerun in which a week goes *empty*
-    (e.g. a backfill removes the only positive bid that week) would otherwise leave a stale
-    partition behind and break the idempotent-overwrite contract. Clearing the table's week
-    files first makes the per-week write a true overwrite of the whole table. Table-scoped --
-    only ``<table>.json`` is removed, so week dirs shared with other tables are left intact.
-    """
-    season_dir = Path(root) / f"season={season}"
-    if not season_dir.is_dir():
-        return 0
-    removed = 0
-    for partition in season_dir.glob(f"week=*/{table}.json"):
-        partition.unlink()
-        removed += 1
-    return removed
+# --------------------------------------------------------------------- season shape
 
 
 def season_week_count(scores: list[dict]) -> int:

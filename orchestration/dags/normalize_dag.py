@@ -12,15 +12,25 @@ Config via Airflow Variables with env fallbacks (see orchestration/README.md):
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from airflow.decorators import dag, task
 from airflow.models import Variable
+from conventions import (
+    check_contiguous_weeks,
+    check_min_rows,
+    check_no_null_fields,
+    pipeline_default_args,
+    run_data_quality,
+)
 from normalize import (
+    clear_weekly_partitions,
     group_rows_by_week,
     normalize_team_week_scores,
     normalize_teams,
     normalize_transactions,
+    read_all_weeks,
+    read_table,
     write_table,
 )
 from snapshots import read_snapshot
@@ -58,7 +68,7 @@ def _write_weekly(ctx: dict, table: str, rows: list) -> list[str]:
     schedule=None,
     start_date=datetime(2025, 1, 1),
     catchup=False,
-    default_args={"retries": 3, "retry_delay": timedelta(minutes=2)},
+    default_args=pipeline_default_args(),
     tags=["fantasy-canon", "normalize"],
 )
 def normalize():
@@ -87,19 +97,48 @@ def normalize():
     def normalize_scores_table(ctx: dict) -> list[str]:
         payload = read_snapshot(ctx["snapshot_root"], ctx["season"], "mScoreboard")
         rows = normalize_team_week_scores(payload)
+        # Clear first so a rerun where a week goes empty doesn't leave a stale partition behind
+        # (weekly tables only write weeks that have rows) -- keeps the overwrite truly idempotent.
+        clear_weekly_partitions(ctx["normalized_root"], ctx["season"], "team_week_scores")
         return _write_weekly(ctx, "team_week_scores", rows)
 
     @task
     def normalize_transactions_table(ctx: dict) -> list[str]:
         payload = read_snapshot(ctx["snapshot_root"], ctx["season"], "mTransactions2")
         rows = normalize_transactions(payload)
+        clear_weekly_partitions(ctx["normalized_root"], ctx["season"], "transactions")
         return _write_weekly(ctx, "transactions", rows)
+
+    @task
+    def quality_gate(ctx: dict, _written: list) -> None:
+        """Fail the DAG if a derived table looks wrong (no teams, null ids, a gap in the weeks).
+
+        Runs after every table is written (``_written`` carries the upstream XComs only to order
+        this task last); re-reads the tables from disk and runs the shared checks so a bad
+        normalize is caught loudly here instead of silently feeding the storylines stage.
+        """
+        teams = read_table(ctx["normalized_root"], ctx["season"], "teams")["rows"]
+        scores = read_all_weeks(ctx["normalized_root"], ctx["season"], "team_week_scores")
+        run_data_quality(
+            # A league has teams and scores; empty here means the snapshot failed to normalize.
+            check_min_rows(teams, table="teams", minimum=2),
+            check_no_null_fields(teams, table="teams", fields=["teamId"]),
+            check_min_rows(scores, table="team_week_scores"),
+            check_no_null_fields(scores, table="team_week_scores", fields=["teamId", "week"]),
+            # A hole in the week sequence means a weekly partition dropped out.
+            check_contiguous_weeks([r.get("week") for r in scores], table="team_week_scores"),
+        )
+        print("data-quality gate passed")
 
     context = resolve_context()
     # The three tables are independent; each fans out from the shared context.
-    normalize_teams_table(context)
-    normalize_scores_table(context)
-    normalize_transactions_table(context)
+    written = [
+        normalize_teams_table(context),
+        normalize_scores_table(context),
+        normalize_transactions_table(context),
+    ]
+    # Gate runs last: passing the three XComs makes it depend on all of them.
+    quality_gate(context, written)
 
 
 normalize()

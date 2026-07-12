@@ -58,12 +58,14 @@ orchestration/
     normalize.py        # airflow-free transforms + partitioned table storage (unit-tested)
     storylines_dag.py   # storylines: normalized tables → luck / churn / waiver_spend / rivalries (#16)
     storylines.py       # airflow-free metric transforms over the derived tables (unit-tested)
+    conventions.py      # airflow-free shared default_args + data-quality gate (#18, unit-tested)
   tests/
     test_canon_broadcast.py
     test_espn.py
     test_snapshots.py
     test_normalize.py
     test_storylines.py
+    test_conventions.py
   data/                 # snapshot output (gitignored; mounted into the worker)
 ```
 
@@ -152,6 +154,43 @@ calls — a clean dependency boundary: it reads only what `normalize` wrote.
 Run `normalize` first, then trigger `storylines`; storyline tables land under
 `orchestration/data/storylines/`. Pure Python (stdlib only) — no Node, and the transforms
 unit-test without Airflow (`test_storylines.py`).
+
+## Pipeline conventions (issue #18)
+
+The three data-pipeline DAGs (`espn_ingest` → `normalize` → `storylines`) share their
+reliability rules through `conventions.py`, so they behave the same way and there's one place
+to change them. Stdlib only, so the validators unit-test without Airflow (`test_conventions.py`).
+
+**Retries / backoff / timeouts.** Every DAG uses `pipeline_default_args()` for its
+`default_args`: 3 retries with **exponential backoff** (2m → 4m → 8m, capped at 30m) so a
+transient blip on ESPN's unofficial endpoints is retried rather than fatal, without hammering
+them, plus a 30-minute per-task `execution_timeout` so a wedged fetch fails loudly instead of
+pinning a worker.
+
+**Idempotent overwrite.** Derived data is *dynamic* — ESPN revises the just-finished week's
+numbers for a day or two — so every load overwrites its `(season[, week])` partition whole,
+last-write-wins (atomic temp-file + `os.replace`, see `write_table`). Weekly tables
+(`team_week_scores`, `transactions`, `waiver_spend`) additionally **clear their week partitions
+before writing** (`clear_weekly_partitions`): since a weekly load only writes the weeks that
+have rows, a rerun where a week goes empty would otherwise leave a stale partition behind.
+Clearing first makes the write a true whole-table overwrite, so a re-run or backfill always
+converges to the same state as a fresh run.
+
+**Data-quality gate.** `normalize` and `storylines` end with a `quality_gate` task that runs
+after all the loads, re-reads the tables, and **fails the DAG** if the output looks wrong — no
+rows where rows are expected, null ids, or a gap in the week sequence (`check_min_rows` /
+`check_no_null_fields` / `check_contiguous_weeks`, aggregated by `run_data_quality` so every
+violation is reported at once). A bad load is caught loudly here instead of silently feeding
+the next stage.
+
+**Schedule passes.** The DAGs stay `schedule=None` (manual/triggered) for local-first, $0 dev,
+but `conventions.py` defines the intended production cadence as constants so enabling them later
+is a one-line change per DAG:
+
+| Constant | Cron | Purpose |
+|----------|------|---------|
+| `SCHEDULE_FINALIZE` | `0 16 * * 2` (Tue 16:00 UTC) | authoritative recompute of the just-finished week, after ESPN's Mon/Tue stat corrections land |
+| `SCHEDULE_REFRESH` | `0 12 * * *` (daily 12:00 UTC) | refresh the in-progress week so mid-week views aren't stale; the finalize pass later supersedes it |
 
 ## `weekly_broadcast` DAG (issue #51)
 

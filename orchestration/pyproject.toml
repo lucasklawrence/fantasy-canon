@@ -26,3 +26,8 @@ line-length = 100
 
 [tool.ruff.lint]
 extend-select = ["I"]  # import sorting
+
+[tool.pytest.ini_options]
+# Only collect the unit tests -- keeps a bare `pytest` from wandering into Airflow's runtime
+# `logs/` dir (whose dangling `scheduler/latest` symlink errors collection on Windows).
+testpaths = ["tests"]
