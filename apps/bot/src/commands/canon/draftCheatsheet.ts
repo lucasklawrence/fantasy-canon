@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { AttachmentBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import {
   bestAvailable,
+  mergeAdpIntoPool,
   mergeRankings,
   normalizeName,
   parseRankingsReport,
@@ -15,6 +16,7 @@ import {
   type Position,
 } from '@fantasy-canon/core';
 import { renderCheatSheetCard, type CheatTone } from '@fantasy-canon/renderer';
+import { fetchFfcAdp } from '../../lib/ffcAdp.js';
 
 /** Starting lineup + bench for our standing 12-team league. Drives replacement baselines. */
 const ROSTER_SLOTS: Record<string, number> = {
@@ -46,7 +48,7 @@ export async function handleDraftCheatsheetSubcommand(
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
-    const { players, fades, latestDate } = loadRankings();
+    const { players, fades, latestDate, adp } = await loadRankings();
     if (players.length === 0) {
       await interaction.editReply({
         content:
@@ -84,7 +86,7 @@ export async function handleDraftCheatsheetSubcommand(
 
     const buffer = await renderCheatSheetCard({
       title: 'Draft Cheat Sheet — Best Available',
-      subtitle: subtitle(teams, slot, picks.length, latestDate),
+      subtitle: subtitle(teams, slot, picks.length, latestDate, adp),
       tiers,
       fades: cardFades,
     });
@@ -100,14 +102,28 @@ export async function handleDraftCheatsheetSubcommand(
   }
 }
 
+/** Provenance for the live ADP overlay, surfaced on the card so stale data is detectable. */
+interface AdpProvenance {
+  asOf: string;
+  sampleSize: number;
+  /** How many ADP-only players deepened the research board. */
+  added: number;
+}
+
 interface LoadedRankings {
   players: PlayerTier[];
   fades: FadeEntry[];
   latestDate: string;
+  adp?: AdpProvenance;
 }
 
-/** Read every research report that carries a draft board and merge them into one pool. */
-function loadRankings(): LoadedRankings {
+/**
+ * Build the draft pool: parse every research report that carries a board, merge them, then
+ * overlay live market ADP (FantasyFootballCalculator) so the board is market-priced and runs
+ * the full draft deep. The ADP fetch is best-effort — on any failure we fall back to the
+ * research-only board rather than failing the command.
+ */
+async function loadRankings(): Promise<LoadedRankings> {
   const dir = resolveResearchDir();
   if (!dir) return { players: [], fades: [], latestDate: '' };
 
@@ -119,14 +135,36 @@ function loadRankings(): LoadedRankings {
     parseRankingsReport(readFileSync(path.join(dir, file), 'utf8'), file),
   );
   const withBoards = parsed.filter((p) => p.players.length > 0);
-  const { players, fades } = mergeRankings(withBoards);
-  const latestDate = withBoards
-    .map((p) => p.meta.date)
-    .filter(Boolean)
-    .sort()
-    .at(-1);
+  const merged = mergeRankings(withBoards);
+  const latestDate =
+    withBoards
+      .map((p) => p.meta.date)
+      .filter(Boolean)
+      .sort()
+      .at(-1) ?? '';
 
-  return { players, fades, latestDate: latestDate ?? '' };
+  let players = merged.players;
+  let adp: AdpProvenance | undefined;
+  try {
+    const feed = await fetchFfcAdp({ season: resolveSeason() });
+    if (feed.rows.length > 0) {
+      const researchCount = players.length;
+      players = mergeAdpIntoPool(players, feed.rows);
+      adp = { asOf: feed.asOf, sampleSize: feed.sampleSize, added: players.length - researchCount };
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[draft cheatsheet] live ADP unavailable, using research board only: ${message}`);
+  }
+
+  return { players, fades: merged.fades, latestDate, adp };
+}
+
+/** NFL season for the ADP feed — the current calendar year, overridable via `FANTASY_SEASON`. */
+function resolveSeason(): number {
+  const override = Number(process.env.FANTASY_SEASON);
+  if (Number.isInteger(override) && override > 2000) return override;
+  return new Date().getFullYear();
 }
 
 /** Locate the repo-root `research/` directory, tolerant of where the bot process was started. */
@@ -240,12 +278,15 @@ function subtitle(
   slot: number | undefined,
   draftedCount: number,
   latestDate: string,
+  adp: AdpProvenance | undefined,
 ): string {
   const parts = [`${teams}-team PPR`];
   if (slot !== undefined) parts.push(`slot ${slot}`);
   parts.push(draftedCount === 0 ? 'pre-draft' : `${draftedCount} picks in`);
   parts.push('🟧 reach · 🟩 value · ⬜ wait');
-  if (latestDate) parts.push(`as of ${latestDate}`);
+  // Prefer the live-ADP provenance (freshest, drives the ranking); fall back to the research date.
+  if (adp) parts.push(`ADP as of ${adp.asOf} · ${adp.sampleSize.toLocaleString('en-US')} mocks`);
+  else if (latestDate) parts.push(`research as of ${latestDate}`);
   return parts.join(' • ');
 }
 
