@@ -110,6 +110,8 @@ function renderSvg(
         width,
         height,
       );
+    } else if (payload.type === 'throwback') {
+      body += renderThrowback(payload as Parameters<typeof renderThrowback>[0], theme, width);
     }
   }
 
@@ -471,6 +473,49 @@ function renderBumpChart(
   });
 
   body += axisLabels(theme, plotArea, 'Week', 'Standings rank');
+
+  return body;
+}
+
+function renderThrowback(
+  payload: {
+    badge?: string;
+    headline: string;
+    stats: Array<{ label: string; value: string }>;
+  },
+  theme: typeof DEFAULT_THEME,
+  width: number,
+): string {
+  const cx = width / 2;
+  let body = '';
+  let y = 240;
+
+  if (payload.badge) {
+    body += `<text x="${cx}" y="${y}" fill="${theme.colors.secondary}" font-family="${theme.fonts.heading}" font-size="34" font-weight="bold" text-anchor="middle">${escape(
+      truncate(payload.badge, 40),
+    )}</text>`;
+    y += 84;
+  }
+
+  body += `<text x="${cx}" y="${y}" fill="${theme.colors.text}" font-family="${theme.fonts.heading}" font-size="56" font-weight="bold" text-anchor="middle">${escape(
+    truncate(payload.headline, 26),
+  )}</text>`;
+  y += 96;
+
+  // Supporting stats as label (left) / value (right) rows with a hairline divider.
+  const left = 140;
+  const right = width - 140;
+  const rowH = 78;
+  payload.stats.forEach((s, i) => {
+    const ry = y + i * rowH;
+    body += `<text x="${left}" y="${ry}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="26" text-anchor="start">${escape(
+      truncate(s.label, 26),
+    )}</text>`;
+    body += `<text x="${right}" y="${ry}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="30" text-anchor="end">${escape(
+      truncate(s.value, 24),
+    )}</text>`;
+    body += `<line x1="${left}" y1="${ry + 20}" x2="${right}" y2="${ry + 20}" stroke="${theme.colors.surface}" stroke-width="1" opacity="0.6" />`;
+  });
 
   return body;
 }

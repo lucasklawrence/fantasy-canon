@@ -258,11 +258,13 @@ often the data refreshes.
 | `CANON_THROWBACK_CMD` | How the worker runs the bot CLI (defaults to the baked-in repo path) |
 | `DISCORD_TOKEN` | Bot token used to post (worker env) |
 
-> **Follow-up before this posts live.** The `post` task calls `pnpm … run throwback` — a bot-side
-> command that doesn't exist yet. This slice ships the orchestration half (selection logic + DAG +
-> command builder, all unit-tested in `test_throwback.py`); the bot's `throwback` renderer/CLI and a
-> live-post verification against a test channel land with the Discord ops work (#95/#97). Until
-> then, leave the DAG paused. Pure Python (stdlib only) — no Node needed to run the tests.
+> **Follow-up before this posts live.** The `post` task calls `pnpm … run throwback`, the bot-side
+> command in `apps/bot/throwback.ts` (`renderThrowback` in `apps/bot/src/lib/throwbackRender.ts`):
+> it resolves `--post-type` + `--ref` back to the row, recomputes it from ESPN snapshots, renders a
+> throwback card, and posts it. What's left is a **live-post verification** against a test channel
+> (Discord ops, #95/#97) — until that's signed off, leave the DAG paused. The orchestration half
+> (selection logic + DAG + command builder) is pure Python (stdlib only), unit-tested in
+> `test_throwback.py`, and needs no Node to run.
 
 ## `weekly_broadcast` DAG (issue #51)
 
