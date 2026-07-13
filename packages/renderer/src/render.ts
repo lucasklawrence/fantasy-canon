@@ -110,6 +110,13 @@ function renderSvg(
         width,
         height,
       );
+    } else if (payload.type === 'cheat-sheet') {
+      body += renderCheatSheet(
+        payload as Parameters<typeof renderCheatSheet>[0],
+        theme,
+        width,
+        height,
+      );
     }
   }
 
@@ -473,6 +480,124 @@ function renderBumpChart(
   body += axisLabels(theme, plotArea, 'Week', 'Standings rank');
 
   return body;
+}
+
+type CheatTone = 'reach' | 'value' | 'wait' | 'fade' | 'neutral';
+
+function renderCheatSheet(
+  payload: {
+    tiers: Array<{
+      label: string;
+      players: Array<{
+        name: string;
+        pos: string;
+        adp?: number;
+        vor?: number;
+        note?: string;
+        tone?: CheatTone;
+      }>;
+    }>;
+    fades?: Array<{ name: string; pos: string; reason: string }>;
+  },
+  theme: typeof DEFAULT_THEME,
+  width: number,
+  height: number,
+): string {
+  const tiers = payload.tiers ?? [];
+  const fades = payload.fades ?? [];
+  if (tiers.length === 0 && fades.length === 0) return '';
+
+  const x = 64;
+  const w = width - 128;
+  const bottom = height - 52;
+  const headerH = 40;
+  const rowH = 30;
+
+  const toneColor = (tone: CheatTone | undefined): string => {
+    switch (tone) {
+      case 'reach':
+        return theme.colors.secondary;
+      case 'value':
+        return theme.colors.accent;
+      case 'fade':
+        return theme.colors.danger;
+      case 'wait':
+        return theme.colors.muted;
+      default:
+        return theme.colors.primary;
+    }
+  };
+
+  const bandHeader = (label: string, y: number): string => {
+    let s = `<rect x="${x}" y="${y}" width="${w}" height="32" rx="8" fill="${theme.colors.surface}" opacity="0.7" />`;
+    s += `<text x="${x + 14}" y="${y + 22}" fill="${theme.colors.secondary}" font-family="${theme.fonts.heading}" font-size="18" font-weight="bold">${escape(
+      label,
+    )}</text>`;
+    return s;
+  };
+
+  const playerRow = (
+    p: { name: string; pos: string; adp?: number; vor?: number; note?: string; tone?: CheatTone },
+    y: number,
+  ): string => {
+    const cy = y + rowH / 2;
+    const color = toneColor(p.tone);
+    let s = `<circle cx="${x + 13}" cy="${cy - 2}" r="5" fill="${color}" />`;
+    s += `<text x="${x + 28}" y="${cy + 4}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="17">${escape(
+      truncate(p.name, 24),
+    )}</text>`;
+    if (p.note) {
+      s += `<text x="${x + 300}" y="${cy + 4}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="13">${escape(
+        truncate(p.note, 34),
+      )}</text>`;
+    }
+    const stats = [
+      p.pos,
+      typeof p.adp === 'number' ? `ADP ${p.adp}` : '',
+      typeof p.vor === 'number' ? `VOR ${signed(p.vor)}` : '',
+    ]
+      .filter(Boolean)
+      .join('  ·  ');
+    s += `<text x="${x + w - 12}" y="${cy + 4}" fill="${color}" font-family="${theme.fonts.body}" font-size="14" text-anchor="end">${escape(
+      stats,
+    )}</text>`;
+    return s;
+  };
+
+  // Reserve room at the bottom for the fades band so tiers never overwrite it.
+  const fadeCount = Math.min(fades.length, 4);
+  const reserve = fades.length ? headerH + fadeCount * rowH + 8 : 0;
+  const tierFloor = bottom - reserve;
+
+  let body = '';
+  let y = 156;
+  for (const tier of tiers) {
+    if (y + headerH + rowH > tierFloor) break;
+    body += bandHeader(tier.label, y);
+    y += headerH;
+    for (const p of tier.players) {
+      if (y + rowH > tierFloor) break;
+      body += playerRow(p, y);
+      y += rowH;
+    }
+    y += 8;
+  }
+
+  if (fades.length) {
+    body += bandHeader('🚫 Fades — priced above their value', y);
+    y += headerH;
+    for (const f of fades.slice(0, fadeCount)) {
+      body += playerRow({ name: f.name, pos: f.pos, note: f.reason, tone: 'fade' }, y);
+      y += rowH;
+    }
+  }
+
+  return body;
+}
+
+/** Format a VOR-style number with an explicit sign, one decimal. */
+function signed(n: number): string {
+  return `${n >= 0 ? '+' : ''}${n.toFixed(1)}`;
 }
 
 function escape(text: string): string {
