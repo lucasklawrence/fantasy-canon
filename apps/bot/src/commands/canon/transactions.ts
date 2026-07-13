@@ -4,6 +4,7 @@ import { resolveLeagueId } from '../../lib/leagueId.js';
 import { ensureSnapshot } from '../../lib/snapshots.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
 import { ensureTransactionsPayload, getTransactionTeamId } from '../../lib/transactions.js';
+import { replyWithPagination } from '../../lib/paginate.js';
 
 interface ParsedTransaction {
   teamId?: number;
@@ -64,10 +65,9 @@ export async function handleTransactionsSubcommand(
       return parts.join(' • ');
     });
 
-    await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • Latest ${parsed.length}`, ...lines].join(
-        '\n',
-      ),
+    await replyWithPagination(interaction, {
+      header: `League ${leagueId} • Season ${season} • Latest ${parsed.length}`,
+      rows: lines,
     });
   } catch (error) {
     console.error('Failed to list transactions', error);

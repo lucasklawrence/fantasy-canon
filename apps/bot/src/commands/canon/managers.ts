@@ -9,6 +9,7 @@ import {
   getManagerId,
   getEmbeddedManagerName,
 } from '../../lib/managerNames.js';
+import { replyWithPagination } from '../../lib/paginate.js';
 
 type TeamLike = {
   id?: unknown;
@@ -158,24 +159,12 @@ export async function handleManagersSubcommand(
       }`;
     });
 
-    const lines = [header, ...body];
-
-    // Respect Discord 2000-char limit by trimming rows if necessary.
-    let dropped = 0;
-    while (lines.join('\n').length > 1900 && lines.length > 1) {
-      lines.pop();
-      dropped += 1;
-    }
-    if (dropped > 0) {
-      lines.push(`... ${dropped} more manager(s) truncated to fit Discord's 2000 character limit.`);
-    }
-    let content = lines.join('\n');
-    if (content.length > 2000) {
-      content = `${content.slice(0, 1990)}...`;
-    }
-
-    await interaction.editReply({
-      content,
+    // Manager rows are long, so use a smaller page size to stay under Discord's 2000-char cap;
+    // the paginator adds Prev/Next buttons instead of the old trim-to-fit truncation.
+    await replyWithPagination(interaction, {
+      header,
+      rows: body,
+      pageSize: 8,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
