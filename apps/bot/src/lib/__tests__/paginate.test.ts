@@ -1,4 +1,6 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
+import type { ButtonInteraction, ChatInputCommandInteraction, Message } from 'discord.js';
 import {
   buildPageContent,
   buildPaginationRow,
@@ -14,6 +16,57 @@ const rows = (n: number): string[] => Array.from({ length: n }, (_, i) => `row $
 /** The button-component fields the tests read; the JSON union also has an SKU variant without them. */
 type ButtonJSON = { custom_id?: string; label?: string; disabled?: boolean };
 const buttons = (row: { components: unknown[] }): ButtonJSON[] => row.components as ButtonJSON[];
+
+/** A captured `editReply`/`update` payload; `components` holds action rows that expose `toJSON`. */
+interface CapturedEdit {
+  content?: string;
+  components?: Array<{ toJSON: () => { components: unknown[] } }>;
+}
+
+/** The button rendered in a captured payload's (single) action row. */
+const rowButtons = (edit: CapturedEdit): ButtonJSON[] =>
+  buttons((edit.components ?? [])[0].toJSON());
+
+/** Let the fire-and-forget collector handlers settle. */
+const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** A button click carrying `customId`, capturing the payload passed to its `update`. */
+function fakeButton(customId: string): { button: ButtonInteraction; updates: CapturedEdit[] } {
+  const updates: CapturedEdit[] = [];
+  const button = {
+    customId,
+    update: (payload: CapturedEdit) => {
+      updates.push(payload);
+      return Promise.resolve();
+    },
+  } as unknown as ButtonInteraction;
+  return { button, updates };
+}
+
+/**
+ * A minimal interaction whose `editReply` returns a fake {@link Message} exposing an
+ * EventEmitter-based `createMessageComponentCollector`, so tests can drive `collect`/`end` events
+ * through {@link replyWithPagination} and assert the interactive navigation and expiry behavior.
+ */
+function collectorHarness(): {
+  interaction: ChatInputCommandInteraction;
+  collector: EventEmitter;
+  editReplies: CapturedEdit[];
+} {
+  const editReplies: CapturedEdit[] = [];
+  const collector = new EventEmitter();
+  const message = {
+    createMessageComponentCollector: () => collector,
+  } as unknown as Message;
+  const interaction = {
+    id: 'int-1',
+    editReply: (payload: CapturedEdit) => {
+      editReplies.push(payload);
+      return Promise.resolve(message);
+    },
+  } as unknown as ChatInputCommandInteraction;
+  return { interaction, collector, editReplies };
+}
 
 describe('pageCount', () => {
   it('rounds up and never returns fewer than one page', () => {
@@ -149,5 +202,46 @@ describe('replyWithPagination', () => {
     const last = replies[replies.length - 1];
     expect(last.content).toContain('Page 1/2');
     expect(last.payload.components).toBeDefined();
+  });
+});
+
+describe('replyWithPagination interactive collector', () => {
+  it('pages forward and back on button clicks, then freezes the buttons on expiry', async () => {
+    const { interaction, collector, editReplies } = collectorHarness();
+    await replyWithPagination(interaction, { header: 'H', rows: rows(25), pageSize: 10 });
+
+    // First render: page 1 of 3.
+    expect(editReplies[0].content).toContain('row 1');
+    expect(editReplies[0].content).toContain('Page 1/3 • 25 total');
+
+    // Next → page 2.
+    const next = fakeButton('pg:int-1:next');
+    collector.emit('collect', next.button);
+    await flush();
+    expect(next.updates[0].content).toContain('row 11');
+    expect(next.updates[0].content).toContain('Page 2/3');
+
+    // Prev → back to page 1.
+    const prev = fakeButton('pg:int-1:prev');
+    collector.emit('collect', prev.button);
+    await flush();
+    expect(prev.updates[0].content).toContain('row 1');
+    expect(prev.updates[0].content).toContain('Page 1/3');
+
+    // Expiry → a follow-up editReply that freezes (disables) every control.
+    collector.emit('end');
+    await flush();
+    const frozen = editReplies[editReplies.length - 1];
+    expect(rowButtons(frozen).every((b) => b.disabled === true)).toBe(true);
+  });
+
+  it('clamps navigation at the ends (Prev on the first page stays put)', async () => {
+    const { interaction, collector } = collectorHarness();
+    await replyWithPagination(interaction, { rows: rows(25), pageSize: 10 });
+
+    const prev = fakeButton('pg:int-1:prev');
+    collector.emit('collect', prev.button);
+    await flush();
+    expect(prev.updates[0].content).toContain('Page 1/3');
   });
 });
