@@ -18,6 +18,13 @@ import { handleBidsSubcommand } from './bids.js';
 import { handleTimelineSubcommand } from './timeline.js';
 import { handleGraphSubcommand } from './graph.js';
 import { handleDraftCheatsheetSubcommand } from './draftCheatsheet.js';
+import {
+  handleDraftStartSubcommand,
+  handleDraftPickSubcommand,
+  handleDraftBestSubcommand,
+  handleDraftStatusSubcommand,
+  handleDraftStopSubcommand,
+} from './draftSession.js';
 import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.js';
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
 import { handleManagersSubcommand } from './managers.js';
@@ -535,6 +542,59 @@ export const canonCommand = new SlashCommandBuilder()
               .setMinValue(2)
               .setMaxValue(20),
           ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('start')
+          .setDescription('Open a live draft session (best-available updates as picks land)')
+          .addIntegerOption((opt) =>
+            opt
+              .setName('pick')
+              .setDescription('Your draft slot (1..teams)')
+              .setRequired(true)
+              .setMinValue(1),
+          )
+          .addIntegerOption((opt) =>
+            opt
+              .setName('teams')
+              .setDescription('League size (default 12)')
+              .setMinValue(2)
+              .setMaxValue(20),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('source')
+              .setDescription('Where picks come from (default manual)')
+              .addChoices(
+                { name: 'manual — you type picks', value: 'manual' },
+                { name: 'espn — auto-capture from your ESPN draft room', value: 'espn' },
+              ),
+          )
+          .addIntegerOption((opt) =>
+            opt
+              .setName('rounds')
+              .setDescription('Total rounds (default: roster size)')
+              .setMinValue(1),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('pick')
+          .setDescription('Record a pick in the live session (comma-separate to add several)')
+          .addStringOption((opt) =>
+            opt.setName('player').setDescription('Player(s) just drafted').setRequired(true),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub.setName('best').setDescription('Show the live best-available board for this session'),
+      )
+      .addSubcommand((sub) =>
+        sub.setName('status').setDescription('Where the live draft session stands'),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('stop')
+          .setDescription('End the live draft session (frees the ESPN capture port)'),
       ),
   )
   // --- /canon config … (per-guild defaults; stays its own group — Discord forbids group nesting) ---
@@ -635,6 +695,16 @@ export async function handleCanonInteraction(
   if (group === 'draft') {
     if (subcommand === 'cheatsheet') {
       await handleDraftCheatsheetSubcommand(interaction);
+    } else if (subcommand === 'start') {
+      await handleDraftStartSubcommand(interaction);
+    } else if (subcommand === 'pick') {
+      await handleDraftPickSubcommand(interaction);
+    } else if (subcommand === 'best') {
+      await handleDraftBestSubcommand(interaction);
+    } else if (subcommand === 'status') {
+      await handleDraftStatusSubcommand(interaction);
+    } else if (subcommand === 'stop') {
+      await handleDraftStopSubcommand(interaction);
     } else {
       await handleNotImplemented(interaction, subcommand);
     }
