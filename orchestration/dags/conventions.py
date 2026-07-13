@@ -53,9 +53,11 @@ def pipeline_default_args(
 
 # ---------------------------------------------------------------------------- schedule passes
 
-# Intended production cadence. The pipeline DAGs stay ``schedule=None`` (manual/triggered) for
-# local-first, $0 dev (see epic #12 and orchestration/README.md); these constants define the
-# passes so enabling them later is a one-line change per DAG.
+# Intended production cadence for the pipeline **head**, ``espn_ingest``. The downstream stages
+# (normalize -> storylines -> throwback) are dataset-triggered and cascade off it (see
+# dags/datasets.py), so scheduling only the head schedules the whole pipeline. The head stays
+# ``schedule=None`` (manual/triggered) for local-first, $0 dev (epic #12, orchestration/README.md);
+# these constants define the passes so enabling them is a one-line change on ``espn_ingest``.
 #
 #   finalize — Tuesday 16:00 UTC: recompute the just-finished week once ESPN's stat corrections
 #              (which settle Mon/Tue) have landed. This is the authoritative pass for a week.

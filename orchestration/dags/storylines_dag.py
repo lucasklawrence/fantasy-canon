@@ -3,8 +3,9 @@
 The storyline stage, downstream of ``normalize``. Reads the derived tables normalize wrote
 (``teams`` / ``team_week_scores`` / ``transactions``) and writes partitioned, idempotent
 storyline tables (via ``write_table``) the bot/renderer can read. No ESPN calls -- a clean
-dependency boundary: pure transforms over the derived tables. Runs as its own DAG so the
-storyline stage is independently triggerable/backfillable.
+dependency boundary: pure transforms over the derived tables. Triggered when ``normalize`` emits
+``NORMALIZED_DATASET`` -- the tail of the data cascade (and still manually triggerable/backfillable);
+see ``dags/datasets.py``. The posting DAGs read these tables on their own weekly schedule.
 
 Config via Airflow Variables with env fallbacks (see orchestration/README.md):
 ``INGEST_SEASON``, ``NORMALIZED_ROOT`` (read source), ``STORYLINES_ROOT`` (write dest).
@@ -23,6 +24,7 @@ from conventions import (
     pipeline_default_args,
     run_data_quality,
 )
+from datasets import NORMALIZED_DATASET
 from normalize import (
     clear_weekly_partitions,
     group_rows_by_week,
@@ -67,8 +69,8 @@ def _write_weekly(ctx: dict, table: str, rows: list) -> list[str]:
 @dag(
     dag_id="storylines",
     description="Compute luck / churn / waiver-spend / rivalry metrics from the normalized tables.",
-    # Manual/triggered for now; wired downstream of normalize with the wider pipeline.
-    schedule=None,
+    # Data-aware: triggered when normalize emits NORMALIZED_DATASET. Still manually triggerable.
+    schedule=[NORMALIZED_DATASET],
     start_date=datetime(2025, 1, 1),
     catchup=False,
     default_args=pipeline_default_args(),

@@ -1,9 +1,10 @@
 """normalize DAG -- snapshots -> teams / team_week_scores / transactions (issue #15).
 
 The transform stage, downstream of ``espn_ingest``. Reads the raw snapshots ingest wrote
-(via ``read_snapshot``) and writes partitioned, idempotent derived tables (via
-``write_table``). It runs as its own DAG so the transform stage is independently
-triggerable/backfillable -- the storylines DAG (issue #16) will consume these tables in turn.
+(via ``read_snapshot``) and writes partitioned, idempotent derived tables (via ``write_table``).
+Triggered when ``espn_ingest`` emits ``SNAPSHOTS_DATASET`` (and still manually triggerable /
+backfillable); its data-quality gate in turn emits ``NORMALIZED_DATASET`` to trigger ``storylines``
+(issue #16), so the pipeline cascades as one flow -- see ``dags/datasets.py``.
 
 Config via Airflow Variables with env fallbacks (see orchestration/README.md):
 ``INGEST_SEASON``, ``SNAPSHOT_ROOT`` (read source), ``NORMALIZED_ROOT`` (write dest).
@@ -23,6 +24,7 @@ from conventions import (
     pipeline_default_args,
     run_data_quality,
 )
+from datasets import NORMALIZED_DATASET, SNAPSHOTS_DATASET
 from normalize import (
     clear_weekly_partitions,
     group_rows_by_week,
@@ -64,8 +66,8 @@ def _write_weekly(ctx: dict, table: str, rows: list) -> list[str]:
 @dag(
     dag_id="normalize",
     description="Normalize raw ESPN snapshots into partitioned, idempotent derived tables.",
-    # Manual/triggered for now; wired downstream of espn_ingest with the wider pipeline.
-    schedule=None,
+    # Data-aware: triggered when espn_ingest emits SNAPSHOTS_DATASET. Still manually triggerable.
+    schedule=[SNAPSHOTS_DATASET],
     start_date=datetime(2025, 1, 1),
     catchup=False,
     default_args=pipeline_default_args(),
@@ -109,13 +111,16 @@ def normalize():
         clear_weekly_partitions(ctx["normalized_root"], ctx["season"], "transactions")
         return _write_weekly(ctx, "transactions", rows)
 
-    @task
+    @task(outlets=[NORMALIZED_DATASET])
     def quality_gate(ctx: dict, _written: list) -> None:
         """Fail the DAG if a derived table looks wrong (no teams, null ids, a gap in the weeks).
 
         Runs after every table is written (``_written`` carries the upstream XComs only to order
         this task last); re-reads the tables from disk and runs the shared checks so a bad
         normalize is caught loudly here instead of silently feeding the storylines stage.
+
+        On success it emits ``NORMALIZED_DATASET``, triggering the ``storylines`` DAG -- so the
+        cascade only advances when the quality checks passed.
         """
         teams = read_table(ctx["normalized_root"], ctx["season"], "teams")["rows"]
         scores = read_all_weeks(ctx["normalized_root"], ctx["season"], "team_week_scores")

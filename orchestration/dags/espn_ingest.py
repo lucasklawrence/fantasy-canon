@@ -18,6 +18,7 @@ from datetime import datetime
 from airflow.decorators import dag, task
 from airflow.models import Variable
 from conventions import pipeline_default_args
+from datasets import SNAPSHOTS_DATASET
 from espn import fetch_view
 from snapshots import write_snapshot
 
@@ -68,8 +69,18 @@ def espn_ingest():
         print(f"Wrote {view} snapshot -> {path}")
         return str(path)
 
-    # One mapped task per view — independent fetch + write, independent retries.
-    ingest_view.expand(view=resolve_views())
+    @task(outlets=[SNAPSHOTS_DATASET])
+    def mark_ready(snapshot_paths: list[str]) -> None:
+        """Emit ``SNAPSHOTS_DATASET`` once every view landed, cascading to the ``normalize`` DAG.
+
+        Runs after the mapped ``ingest_view`` tasks, so the dataset fires (and normalize triggers)
+        only when the whole ingest succeeded -- not per-view, which would trigger normalize N times.
+        """
+        print(f"espn_ingest complete: {len(snapshot_paths)} snapshot(s) -> signalling normalize")
+
+    # One mapped task per view — independent fetch + write, independent retries — then a single
+    # terminal task marks the ingest done and hands off to normalize via the dataset.
+    mark_ready(ingest_view.expand(view=resolve_views()))
 
 
 espn_ingest()
