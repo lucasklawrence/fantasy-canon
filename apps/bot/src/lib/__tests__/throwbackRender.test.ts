@@ -165,6 +165,8 @@ describe('renderThrowback', () => {
     expect(await renderThrowback(makeContext(), '123', 2024, 'rivalry', '1:9')).toBeNull();
     // No waiver spend in week 5.
     expect(await renderThrowback(makeContext(), '123', 2024, 'waiver_legend', '5:1')).toBeNull();
+    // No luck record/team for an unknown team.
+    expect(await renderThrowback(makeContext(), '123', 2024, 'luck', '9')).toBeNull();
     // Unknown team.
     expect(await renderThrowback(makeContext(), '123', 2024, 'churn', '9')).toBeNull();
   });
