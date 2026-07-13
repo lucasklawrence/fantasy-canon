@@ -145,6 +145,20 @@ describe('gradeRoster', () => {
     expect(result.starters.filled).toBe(2);
   });
 
+  it('disambiguates a name duplicated across positions by the pick position', () => {
+    // The ADP merger keys rows by name|position, so the same normalized name can appear at two
+    // positions. An explicitly-positioned pick must grade against the matching row, not whichever
+    // was inserted first.
+    const pool = [wr('Mike Williams', 30), rb('Mike Williams', 80)];
+    const picks: RosterPick[] = [{ overall: 40, playerName: 'Mike Williams', position: 'RB' }];
+    const result = gradeRoster(picks, pool, { rosterSlots: SLOTS });
+
+    expect(result.picks[0].position).toBe('RB');
+    expect(result.picks[0].adp).toBe(80); // the RB row, not the first-inserted WR (30)
+    expect(result.picks[0].value).toBe(-30); // 40 − 80 = −40 → clamped to −30 → reach
+    expect(result.picks[0].verdict).toBe('reach');
+  });
+
   it('gates K and DST slots independently — a tagged K does not unmask an unseen DST', () => {
     const pool = [rb('R1', 10)];
     const picks: RosterPick[] = [
