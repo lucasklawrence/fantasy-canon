@@ -4,8 +4,8 @@ The storyline stage, downstream of ``normalize``. Reads the derived tables norma
 (``teams`` / ``team_week_scores`` / ``transactions``) and writes partitioned, idempotent
 storyline tables (via ``write_table``) the bot/renderer can read. No ESPN calls -- a clean
 dependency boundary: pure transforms over the derived tables. Triggered when ``normalize`` emits
-``NORMALIZED_DATASET`` (and still manually triggerable/backfillable); its data-quality gate emits
-``STORYLINES_DATASET`` to trigger ``weekly_throwback`` -- see ``dags/datasets.py``.
+``NORMALIZED_DATASET`` -- the tail of the data cascade (and still manually triggerable/backfillable);
+see ``dags/datasets.py``. The posting DAGs read these tables on their own weekly schedule.
 
 Config via Airflow Variables with env fallbacks (see orchestration/README.md):
 ``INGEST_SEASON``, ``NORMALIZED_ROOT`` (read source), ``STORYLINES_ROOT`` (write dest).
@@ -24,7 +24,7 @@ from conventions import (
     pipeline_default_args,
     run_data_quality,
 )
-from datasets import NORMALIZED_DATASET, STORYLINES_DATASET
+from datasets import NORMALIZED_DATASET
 from normalize import (
     clear_weekly_partitions,
     group_rows_by_week,
@@ -126,16 +126,13 @@ def storylines():
         print(f"Wrote rivalries table ({len(rows)} rows) -> {path}")
         return str(path)
 
-    @task(outlets=[STORYLINES_DATASET])
+    @task
     def quality_gate(ctx: dict, _written: list) -> None:
         """Fail the DAG if a storyline table looks wrong (no rows, null ids).
 
         Runs after every table is written (``_written`` carries the upstream XComs only to order
         this task last); re-reads the tables from disk and runs the shared checks so a bad load is
         caught loudly here instead of silently feeding the bot/renderer.
-
-        On success it emits ``STORYLINES_DATASET``, triggering the ``weekly_throwback`` DAG -- so
-        the throwback only fires when the storyline tables passed their quality checks.
         """
         luck = read_table(ctx["storylines_root"], ctx["season"], "luck")["rows"]
         churn = read_table(ctx["storylines_root"], ctx["season"], "churn")["rows"]

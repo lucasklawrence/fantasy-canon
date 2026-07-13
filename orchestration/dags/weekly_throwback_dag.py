@@ -1,11 +1,14 @@
 """weekly_throwback DAG -- storyline tables -> 'on this week in history' Discord post (issue #17).
 
-The **throwback** surface of the pipeline -- the tail of the cascade, downstream of ``storylines``.
-Triggered when ``storylines`` emits ``STORYLINES_DATASET`` (and still manually triggerable), it
-reads the storyline tables, picks one post on a rotation of post types, and hands it to the bot to
-post -- the DAG selects *what* to post; the bot renders and posts it (no bot logic here, keeping the
-sidecar boundary clean, per ADR 0002). The rotation still advances by ISO week, so the post type
-varies week to week regardless of what triggered the run.
+The **throwback** surface, downstream of ``storylines``. Once a week it reads the storyline tables
+``storylines`` wrote, picks one post on a rotation of post types, and hands it to the bot to post --
+the DAG selects *what* to post; the bot renders and posts it (no bot logic here, keeping the sidecar
+boundary clean, per ADR 0002). Runs on "Throwback Thursday" (16:00 UTC).
+
+A *time-scheduled consumer* of the storyline tables -- deliberately **not** dataset-triggered off
+the data cascade. Data-triggering a poster would break its once-a-week contract: with the head on a
+daily refresh, every storyline refresh would re-post the same ISO-week throwback. So it reads
+whatever the latest cascade produced on its own weekly cadence instead.
 
 Runtime requirement: the ``post`` task shells out to the bot's Node CLI, so the Airflow worker must
 be able to run it (bake Node + the repo into the image, or run a bot container) and the bot must
@@ -25,7 +28,6 @@ from datetime import datetime, timezone
 from airflow.decorators import dag, task
 from airflow.models import Variable
 from conventions import pipeline_default_args
-from datasets import STORYLINES_DATASET
 from normalize import read_all_weeks, read_table
 from throwback import (
     DEFAULT_THROWBACK_CMD,
@@ -53,11 +55,10 @@ def _season_rows(root: str, season: int, table: str) -> list[dict]:
 @dag(
     dag_id="weekly_throwback",
     description="Post an 'on this week in history' throwback from the storyline tables to Discord.",
-    # Data-aware: triggered when storylines emits STORYLINES_DATASET (the cascade tail). Delivered
-    # paused (Airflow default) -- unpause once the bot's throwback CLI + Discord secrets are wired
-    # up. For a fixed weekly post time (and to skip backfills), swap this for a cron, e.g. the
-    # SCHEDULE_* passes in conventions.py.
-    schedule=[STORYLINES_DATASET],
+    # Throwback Thursday, 16:00 UTC. A time-scheduled consumer of the storyline tables (not
+    # dataset-triggered -- see the module docstring). Delivered paused (Airflow default) -- unpause
+    # once the bot's throwback CLI + Discord secrets are wired up.
+    schedule="0 16 * * 4",
     start_date=datetime(2025, 1, 1),
     catchup=False,
     default_args=pipeline_default_args(),
