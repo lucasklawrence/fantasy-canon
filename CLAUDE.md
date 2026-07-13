@@ -29,18 +29,18 @@ waiver legends, draft regrets), and posts shareable visuals + slash-command outp
 
 ## Commands (run from repo root)
 
-| Task | Command |
-|------|---------|
-| Install | `pnpm install` |
-| Typecheck (whole repo) | `pnpm typecheck` |
-| Lint | `pnpm lint` |
-| Test | `pnpm test` (watch: `pnpm test:watch`) |
-| Format | `pnpm format` |
-| Build everything (flat `dist/` each, must stay green) | `pnpm build` |
-| Run the bot | `pnpm dev` |
-| Run the API stub | `pnpm -C apps/api run dev` |
-| Debug ESPN client | `pnpm debug:espn -- <args>` |
-| Deploy slash commands | `pnpm -C apps/bot run deploy` |
+| Task                                                  | Command                                |
+| ----------------------------------------------------- | -------------------------------------- |
+| Install                                               | `pnpm install`                         |
+| Typecheck (whole repo)                                | `pnpm typecheck`                       |
+| Lint                                                  | `pnpm lint`                            |
+| Test                                                  | `pnpm test` (watch: `pnpm test:watch`) |
+| Format                                                | `pnpm format`                          |
+| Build everything (flat `dist/` each, must stay green) | `pnpm build`                           |
+| Run the bot                                           | `pnpm dev`                             |
+| Run the API stub                                      | `pnpm -C apps/api run dev`             |
+| Debug ESPN client                                     | `pnpm debug:espn -- <args>`            |
+| Deploy slash commands                                 | `pnpm -C apps/bot run deploy`          |
 
 ## Verification rule (important)
 
@@ -62,14 +62,16 @@ committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
 ## Repository map
 
 ### `apps/`
+
 - **`bot`** — discord.js v14 bot; the live application. Entry: `src/index.ts` → `config.ts` (env/context)
-  + `services/discord.ts` (client + interaction handlers). Slash commands live in `src/commands/canon/*`
-  (bids, faabPace, leaderboard, rivalries, storylines, timeline, transactions, …). Shared helpers in
-  `src/lib/` (leagueInfo, teamNames, transactions). Register commands with `run deploy`.
+  - `services/discord.ts` (client + interaction handlers). Slash commands live in `src/commands/canon/*`
+    (bids, faabPace, leaderboard, rivalries, storylines, timeline, transactions, …). Shared helpers in
+    `src/lib/` (leagueInfo, teamNames, transactions). Register commands with `run deploy`.
 - **`api`** — placeholder. `src/index.ts` just logs a stub message; no server wired up yet. Build it
   out here when an HTTP surface is needed.
 
 ### `packages/`
+
 - **`shared`** — cross-cutting types/config (`EnvConfig`, etc.). Depended on by everything.
 - **`core`** — pure domain logic, no I/O. Re-exports `storylines` (incl. `faab`), `metrics` (luck
   index), and `narratives` (templates). Best place for testable business rules.
@@ -82,6 +84,7 @@ committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
   `theme`.
 
 ### Other
+
 - **`docs/`** — product PRDs and architecture (`00`–`13`). Start at `docs/00-product-overview.md` and
   `docs/05-repository-structure.md`. ADRs live in `docs/decisions/` (numbered `000N-title.md`).
 - **`scripts/`** — `debug-espn.ts` and the VS Code workspace.

@@ -10,7 +10,7 @@ updates:
     groups:
       github-actions:
         patterns:
-          - "*"
+          - '*'
 
   # pnpm workspace deps. The single root entry covers the whole workspace —
   # Dependabot traverses every member manifest and regenerates the one root
