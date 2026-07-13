@@ -77,8 +77,11 @@ const REACH_VONA = 18;
 /**
  * Effective ADP (lower = better). Uses the player's ADP; when absent, estimates from tier as a
  * round-midpoint (tier 1 ≈ pick 6, tier 2 ≈ pick 18, …). Unknown players sort to the back.
+ *
+ * Exported so the post-draft grader ({@link gradeRoster}) scores value against the *same* draft-cost
+ * scale the board is built on — one source of truth for the tier fallback.
  */
-function effAdp(p: PlayerTier): number {
+export function effAdp(p: PlayerTier): number {
   if (typeof p.adp === 'number') return p.adp;
   if (typeof p.tier === 'number') return p.tier * 12 - 6;
   return 999;
