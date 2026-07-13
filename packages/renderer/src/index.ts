@@ -1,6 +1,7 @@
 export * from './render.js';
 export * from './cards/leaderboardCard.js';
 export * from './cards/awardsRecapCard.js';
+export * from './cards/throwbackCard.js';
 export * from './cards/cheatSheetCard.js';
 export * from './theme.js';
 export * from './graphs/luckGraph.js';

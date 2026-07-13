@@ -10,7 +10,8 @@
     "build": "tsc -b",
     "lint": "eslint src --ext .ts",
     "deploy": "tsx deploy-commands.ts",
-    "broadcast": "tsx broadcast.ts"
+    "broadcast": "tsx broadcast.ts",
+    "throwback": "tsx throwback.ts"
   },
   "dependencies": {
     "@fantasy-canon/core": "workspace:*",
