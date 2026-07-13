@@ -59,6 +59,7 @@ orchestration/
     storylines_dag.py   # storylines: normalized tables → luck / churn / waiver_spend / rivalries (#16)
     storylines.py       # airflow-free metric transforms over the derived tables (unit-tested)
     conventions.py      # airflow-free shared default_args + data-quality gate (#18, unit-tested)
+    datasets.py         # Airflow Datasets that chain the pipeline (ingest→normalize→storylines→throwback)
     weekly_throwback_dag.py # throwback: storyline tables → 'on this week in history' post (#17)
     throwback.py        # airflow-free throwback selection + bot-command builder (unit-tested)
   tests/
@@ -120,7 +121,8 @@ the partition is the audit grain, since a re-run overwrites it whole. Transactio
 | `SNAPSHOT_ROOT` | Where ingest wrote snapshots (default `/opt/airflow/data/snapshots`) |
 | `NORMALIZED_ROOT` | Output dir for derived tables (default `/opt/airflow/data/normalized`, mounted to `./data`) |
 
-Run `espn_ingest` first, then trigger `normalize`; derived tables land under
+Triggered automatically when `espn_ingest` finishes (via `SNAPSHOTS_DATASET` — see [Pipeline
+chaining](#pipeline-chaining-airflow-datasets)), or trigger it manually; derived tables land under
 `orchestration/data/normalized/`.
 
 ## `storylines` DAG (issue #16)
@@ -154,8 +156,9 @@ calls — a clean dependency boundary: it reads only what `normalize` wrote.
 | `NORMALIZED_ROOT` | Where `normalize` wrote derived tables (default `/opt/airflow/data/normalized`) |
 | `STORYLINES_ROOT` | Output dir for storyline tables (default `/opt/airflow/data/storylines`, mounted to `./data`) |
 
-Run `normalize` first, then trigger `storylines`; storyline tables land under
-`orchestration/data/storylines/`. Pure Python (stdlib only) — no Node, and the transforms
+Triggered automatically when `normalize`'s data-quality gate passes (via `NORMALIZED_DATASET` — see
+[Pipeline chaining](#pipeline-chaining-airflow-datasets)), or trigger it manually; storyline tables
+land under `orchestration/data/storylines/`. Pure Python (stdlib only) — no Node, and the transforms
 unit-test without Airflow (`test_storylines.py`).
 
 ## Pipeline conventions (issue #18)
@@ -195,12 +198,43 @@ is a one-line change per DAG:
 | `SCHEDULE_FINALIZE` | `0 16 * * 2` (Tue 16:00 UTC) | authoritative recompute of the just-finished week, after ESPN's Mon/Tue stat corrections land |
 | `SCHEDULE_REFRESH` | `0 12 * * *` (daily 12:00 UTC) | refresh the in-progress week so mid-week views aren't stale; the finalize pass later supersedes it |
 
+## Pipeline chaining (Airflow Datasets)
+
+The four stages used to need a manual trigger each. They're now wired into **one flow** with
+Airflow's data-aware scheduling (`dags/datasets.py`): a producer stage lists a dataset as a task
+`outlets`, the next stage sets `schedule=[dataset]`, so finishing one stage triggers the next.
+
+```
+espn_ingest ──SNAPSHOTS──▶ normalize ──NORMALIZED──▶ storylines ──STORYLINES──▶ weekly_throwback
+ (manual head)             (DQ gate)                 (DQ gate)                   (cascade tail)
+```
+
+**Trigger `espn_ingest` once and the whole pipeline cascades.** Two properties worth noting:
+
+- **The gate is the producer.** `normalize` and `storylines` emit their dataset from their
+  **data-quality gate** task — so the next stage runs only when the stage passed its checks. A bad
+  load halts the cascade instead of feeding downstream.
+- **Each DAG is still independent.** Every stage remains manually triggerable / backfillable on its
+  own; the datasets only add the automatic hand-off. DAGs must be **unpaused** for dataset triggers
+  to fire.
+
+The **head** (`espn_ingest`) stays `schedule=None` (manual) for local-first dev — scheduling just
+the head schedules the whole pipeline (see the `SCHEDULE_*` passes above). `weekly_broadcast` is
+**not** in this chain: it reads snapshots directly on its own weekly cadence (#51).
+
+> Since the cascade tail (`weekly_throwback`) posts to Discord, note that a **backfill** of an
+> earlier stage would cascade to a post once the bot side is live. If you'd rather the throwback
+> post on a fixed weekly time (and skip backfills), give it a cron instead of the dataset schedule —
+> a one-line change (see its DAG).
+
 ## `weekly_throwback` DAG (issue #17)
 
-The **throwback** surface, downstream of `storylines`: once a week it reads the storyline tables
-and posts an *"on this week in history"* card to Discord. The DAG decides **what** to post; the bot
-**renders and posts** it — no bot logic in the sidecar (ADR 0002). Runs on Throwback Thursday
-(`0 16 * * 4`, delivered paused).
+The **throwback** surface and the **tail of the cascade**, downstream of `storylines`: it reads the
+storyline tables and posts an *"on this week in history"* card to Discord. The DAG decides **what**
+to post; the bot **renders and posts** it — no bot logic in the sidecar (ADR 0002). Triggered when
+`storylines`' data-quality gate passes (via `STORYLINES_DATASET` — see [Pipeline
+chaining](#pipeline-chaining-airflow-datasets)); delivered paused. The rotation still advances by
+ISO week, so the post type varies week to week regardless of what triggered the run.
 
 - **Rotation.** `select_post_type(week)` cycles a fixed list of post types week to week —
   `rivalry → waiver_legend → luck → churn`. `select_throwback` picks the single most-notable row
