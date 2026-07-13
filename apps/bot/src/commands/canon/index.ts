@@ -17,6 +17,7 @@ import { handleFaabPaceSubcommand } from './faabPace.js';
 import { handleBidsSubcommand } from './bids.js';
 import { handleTimelineSubcommand } from './timeline.js';
 import { handleGraphSubcommand } from './graph.js';
+import { handleDraftCheatsheetSubcommand } from './draftCheatsheet.js';
 import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.js';
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
 import { handleManagersSubcommand } from './managers.js';
@@ -505,6 +506,37 @@ export const canonCommand = new SlashCommandBuilder()
           ),
       ),
   )
+  // --- /canon draft … (draft-day tools) ---
+  .addSubcommandGroup((group) =>
+    group
+      .setName('draft')
+      .setDescription('Draft-day tools')
+      .addSubcommand((sub) =>
+        sub
+          .setName('cheatsheet')
+          .setDescription(
+            'Best-available draft board from our research (updates as players are drafted)',
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('drafted')
+              .setDescription('Players already drafted, comma-separated (updates best-available)'),
+          )
+          .addIntegerOption((opt) =>
+            opt
+              .setName('pick')
+              .setDescription('Your draft slot (1..teams) — enables reach/wait timing')
+              .setMinValue(1),
+          )
+          .addIntegerOption((opt) =>
+            opt
+              .setName('teams')
+              .setDescription('League size (default 12)')
+              .setMinValue(2)
+              .setMaxValue(20),
+          ),
+      ),
+  )
   // --- /canon config … (per-guild defaults; stays its own group — Discord forbids group nesting) ---
   .addSubcommandGroup((group) =>
     group
@@ -594,6 +626,15 @@ export async function handleCanonInteraction(
       await handleBidsSubcommand(interaction, context);
     } else if (subcommand === 'transactions') {
       await handleTransactionsSubcommand(interaction, context);
+    } else {
+      await handleNotImplemented(interaction, subcommand);
+    }
+    return;
+  }
+
+  if (group === 'draft') {
+    if (subcommand === 'cheatsheet') {
+      await handleDraftCheatsheetSubcommand(interaction);
     } else {
       await handleNotImplemented(interaction, subcommand);
     }
