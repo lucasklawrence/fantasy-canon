@@ -23,6 +23,7 @@ import {
   handleDraftPickSubcommand,
   handleDraftBestSubcommand,
   handleDraftStatusSubcommand,
+  handleDraftGradeSubcommand,
   handleDraftStopSubcommand,
 } from './draftSession.js';
 import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.js';
@@ -593,6 +594,11 @@ export const canonCommand = new SlashCommandBuilder()
       )
       .addSubcommand((sub) =>
         sub
+          .setName('grade')
+          .setDescription('Grade your roster so far (value-vs-ADP, steals, reaches, starters)'),
+      )
+      .addSubcommand((sub) =>
+        sub
           .setName('stop')
           .setDescription('End the live draft session (frees the ESPN capture port)'),
       ),
@@ -703,6 +709,8 @@ export async function handleCanonInteraction(
       await handleDraftBestSubcommand(interaction);
     } else if (subcommand === 'status') {
       await handleDraftStatusSubcommand(interaction);
+    } else if (subcommand === 'grade') {
+      await handleDraftGradeSubcommand(interaction);
     } else if (subcommand === 'stop') {
       await handleDraftStopSubcommand(interaction);
     } else {

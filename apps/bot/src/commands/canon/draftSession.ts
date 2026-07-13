@@ -1,9 +1,10 @@
 /**
- * `/canon draft start|pick|best|status|stop` — a live draft session. `start` opens a running session
- * for the channel (from the same research + market-ADP pool as `cheatsheet`); picks stream in either
- * manually (`pick`) or automatically from an ESPN draft room via the capture sink + userscript; and
- * `best` re-runs the value-based-drafting engine over whoever's left. The heavy lifting is the pure
- * core reducer (`createDraftSession`/`applyPick`/`toDraftState`) — everything here is glue + display.
+ * `/canon draft start|pick|best|status|grade|stop` — a live draft session. `start` opens a running
+ * session for the channel (from the same research + market-ADP pool as `cheatsheet`); picks stream in
+ * either manually (`pick`) or automatically from an ESPN draft room via the capture sink + userscript;
+ * `best` re-runs the value-based-drafting engine over whoever's left; and `grade` scores your roster
+ * with the reproducible value-vs-ADP grade engine. The heavy lifting is the pure core reducer
+ * (`createDraftSession`/`applyPick`/`toDraftState`, `gradeSession`) — everything here is glue + display.
  */
 
 import { ChatInputCommandInteraction, EmbedBuilder, MessageFlags } from 'discord.js';
@@ -12,10 +13,14 @@ import {
   bestAvailable,
   createDraftSession,
   currentOverall,
+  gradeSession,
   myUpcomingOveralls,
   toDraftState,
   type Candidate,
   type DraftSession,
+  type GradedPick,
+  type PickVerdict,
+  type RosterGrade,
 } from '@fantasy-canon/core';
 import { loadRankings, ROSTER_SLOTS } from '../../lib/draftPool.js';
 import { EspnSinkDraftSource } from '../../lib/draft/espnSinkSource.js';
@@ -221,6 +226,31 @@ export async function handleDraftStatusSubcommand(
   await interaction.reply({ content: lines.join('\n'), flags: MessageFlags.Ephemeral });
 }
 
+export async function handleDraftGradeSubcommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  const key = draftKey(interaction);
+  const draft = getDraft(key);
+  if (!draft) {
+    await interaction.reply({
+      content: 'No active draft session here. Start one with `/canon draft start`.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const grade = gradeSession(draft.session, draft.pool);
+  if (grade.picks.length === 0) {
+    await interaction.reply({
+      content: 'No picks of yours recorded yet — grade once your draft has some picks in.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.reply({ embeds: [renderGrade(draft, grade)], flags: MessageFlags.Ephemeral });
+}
+
 export async function handleDraftStopSubcommand(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -271,6 +301,75 @@ function boardFooter(draft: LiveDraft): string {
   const bits = [`${draft.teams}-team PPR`, `slot ${draft.slot}`, '🟧 reach · 🟩 value · ⬜ wait'];
   if (draft.adp) bits.push(`ADP as of ${draft.adp.asOf}`);
   if (draft.sourceKind === 'espn' && draft.sink?.port) bits.push(`capture :${draft.sink.port}`);
+  return bits.join(' • ');
+}
+
+/** Verdict → tone glyph for the per-pick grade table. Mirrors the board's reach/value tones. */
+const VERDICT_EMOJI: Record<PickVerdict, string> = {
+  steal: '💎',
+  value: '🟩',
+  fair: '⬜',
+  reach: '🟧',
+};
+
+/** `+4` / `-8` / `0` — signed for humans (positive = beat ADP). */
+function signed(n: number): string {
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
+/** One-line headline: letter grade, mean value, penalized score, starters filled. */
+export function gradeHeadline(grade: RosterGrade): string {
+  return (
+    `**${grade.grade}** · value ${signed(grade.valueScore)} · score ${signed(grade.score)} · ` +
+    `starters ${grade.starters.filled}/${grade.starters.required}`
+  );
+}
+
+/** Monospace per-pick table, in draft order: tone, overall, pos, name, ADP, value. */
+export function gradePicksBlock(grade: RosterGrade): string {
+  if (grade.picks.length === 0) return '_No picks yet._';
+  const rows = grade.picks.map((p: GradedPick) => {
+    const pos = (p.position ?? '?').padEnd(3);
+    const name = truncate(p.playerName, 20).padEnd(20);
+    const adp = (p.adp !== undefined ? `adp ${Math.round(p.adp)}` : '—').padEnd(8);
+    const val = (p.value !== undefined ? signed(p.value) : '·').padStart(4);
+    return `${VERDICT_EMOJI[p.verdict]} ${String(p.overall).padStart(3)} ${pos} ${name} ${adp} ${val}`;
+  });
+  return `\`\`\`\n${rows.join('\n')}\n\`\`\``;
+}
+
+/** Build the roster-grade embed for a finished (or in-progress) session. */
+function renderGrade(draft: LiveDraft, grade: RosterGrade): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle(`📋 Draft grade: ${grade.grade}`)
+    .setDescription(`${gradeHeadline(grade)}\n${gradePicksBlock(grade)}`)
+    .setFooter({ text: gradeFooter(draft) });
+
+  if (grade.steals.length) {
+    embed.addFields({
+      name: 'Steals',
+      value: grade.steals.map((p) => `💎 ${p.playerName} (${signed(p.value ?? 0)})`).join('\n'),
+      inline: true,
+    });
+  }
+  if (grade.reaches.length) {
+    embed.addFields({
+      name: 'Reaches',
+      value: grade.reaches.map((p) => `🟧 ${p.playerName} (${signed(p.value ?? 0)})`).join('\n'),
+      inline: true,
+    });
+  }
+  if (grade.starters.missing.length) {
+    embed.addFields({ name: 'Unfilled starters', value: grade.starters.missing.join(', ') });
+  }
+  return embed;
+}
+
+function gradeFooter(draft: LiveDraft): string {
+  const bits = [`${draft.teams}-team PPR`, `slot ${draft.slot}`];
+  if (draft.adp) bits.push(`ADP as of ${draft.adp.asOf}`);
+  bits.push('💎 steal · 🟩 value · ⬜ fair · 🟧 reach');
+  bits.push('grade assumes a completed roster');
   return bits.join(' • ');
 }
 
