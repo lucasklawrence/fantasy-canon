@@ -141,16 +141,25 @@ export function gradeRoster(
   pool: PlayerTier[],
   config: { rosterSlots: Record<string, number> },
 ): RosterGrade {
+  // Two indexes: name-only and name+position. When a pick carries an explicit position we resolve
+  // against name+position first, so a name duplicated across positions (the ADP merger keys rows by
+  // `name|position` and keeps such rows separate) can't grade e.g. a WR against an RB's ADP. Name-only
+  // is the fallback for picks with no position, or a name that's unique on the board.
   const byName = new Map<string, PlayerTier>();
+  const byNamePos = new Map<string, PlayerTier>();
   for (const p of pool) {
-    const key = normalizeName(p.name);
-    if (!byName.has(key)) byName.set(key, p);
+    const name = normalizeName(p.name);
+    if (!byName.has(name)) byName.set(name, p);
+    const namePos = `${name}|${p.position}`;
+    if (!byNamePos.has(namePos)) byNamePos.set(namePos, p);
   }
 
   const picks: GradedPick[] = [...myPicks]
     .sort((a, b) => a.overall - b.overall)
     .map((pick) => {
-      const player = byName.get(normalizeName(pick.playerName));
+      const name = normalizeName(pick.playerName);
+      const player =
+        (pick.position ? byNamePos.get(`${name}|${pick.position}`) : undefined) ?? byName.get(name);
       const position = pick.position ?? player?.position;
       // Only players with a real market signal (ADP or tier) get a value; K/DST and unknowns don't.
       const hasMarket =
