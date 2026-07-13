@@ -165,16 +165,20 @@ export async function renderThrowback(
       };
     }
     case 'churn': {
-      const team = extractTeams(mTeamPayload).find((t) => t.id === parsed.teamId);
-      if (!team) return null;
+      // Recompute moves the same way the DAG selected the team — adds + drops from executed
+      // transaction items (mirroring `compute_churn`) — not `mTeam.transactionCounter`, whose
+      // broader totals can diverge from the storyline row the DAG picked.
+      const txPayload = await ensureTransactionsPayload(context, leagueId, season);
+      const churn = computeTeamChurn(txPayload, parsed.teamId);
+      if (churn.moves === 0) return null;
       const buffer = await renderThrowbackCard({
         ...base,
         badge: '🔄 Most Active Roster',
         headline: teamName(parsed.teamId),
         stats: [
-          { label: 'Roster moves', value: String(team.totalMoves) },
-          { label: 'Acquisitions', value: String(team.acquisitions) },
-          { label: 'Moves to IR', value: String(team.movesToIr) },
+          { label: 'Roster moves', value: String(churn.moves) },
+          { label: 'Adds', value: String(churn.adds) },
+          { label: 'Drops', value: String(churn.drops) },
         ],
       });
       return {
@@ -204,6 +208,39 @@ function sumWeekTeamSpend(
     if (Number.isFinite(bid)) total += bid;
   }
   return total;
+}
+
+/**
+ * Per-team roster churn from executed transaction items, mirroring `compute_churn`
+ * (orchestration/dags/storylines.py): an item's `toTeamId` is an add, its `fromTeamId` a drop,
+ * `moves = adds + drops`. Only settled transactions count (status EXECUTED or absent) — so the
+ * card shows the same number the DAG selected the team on.
+ */
+function computeTeamChurn(
+  txPayload: { transactions?: unknown[] } | undefined,
+  teamId: number,
+): { adds: number; drops: number; moves: number } {
+  let adds = 0;
+  let drops = 0;
+  const txs = txPayload && Array.isArray(txPayload.transactions) ? txPayload.transactions : [];
+  for (const tx of txs) {
+    if (!tx || typeof tx !== 'object') continue;
+    if (!isSettled((tx as { status?: unknown }).status)) continue;
+    const items = (tx as { items?: unknown }).items;
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue;
+      if (Number((item as { toTeamId?: unknown }).toTeamId) === teamId) adds += 1;
+      if (Number((item as { fromTeamId?: unknown }).fromTeamId) === teamId) drops += 1;
+    }
+  }
+  return { adds, drops, moves: adds + drops };
+}
+
+/** A transaction counts toward churn when its status is EXECUTED or absent (mirrors `_is_settled`). */
+function isSettled(status: unknown): boolean {
+  if (status === null || status === undefined) return true;
+  return typeof status === 'string' && status.toUpperCase() === 'EXECUTED';
 }
 
 /** Compact currency: drop trailing zeros (40 → "40", 40.5 → "40.5"), matching the DAG's `:g`. */

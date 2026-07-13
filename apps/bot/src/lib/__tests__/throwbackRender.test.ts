@@ -38,8 +38,27 @@ const mScoreboard = {
 
 const mTransactions2 = {
   transactions: [
-    { id: 't1', type: 'WAIVER', status: 'EXECUTED', bidAmount: 40, scoringPeriodId: 3, teamId: 1 },
-    { id: 't2', type: 'WAIVER', status: 'EXECUTED', bidAmount: 12, scoringPeriodId: 3, teamId: 2 },
+    {
+      id: 't1',
+      type: 'WAIVER',
+      status: 'EXECUTED',
+      bidAmount: 40,
+      scoringPeriodId: 3,
+      teamId: 1,
+      items: [
+        { type: 'WAIVER', toTeamId: 1 },
+        { type: 'WAIVER', fromTeamId: 1 },
+      ],
+    },
+    {
+      id: 't2',
+      type: 'WAIVER',
+      status: 'EXECUTED',
+      bidAmount: 12,
+      scoringPeriodId: 3,
+      teamId: 2,
+      items: [{ type: 'WAIVER', toTeamId: 2 }],
+    },
   ],
 };
 

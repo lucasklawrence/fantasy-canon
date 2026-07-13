@@ -55,6 +55,8 @@ async function main(): Promise<void> {
     `Throwback ${postType} (ref ${ref}) for league ${leagueId} season ${season} → channel ${channelId}`,
   );
 
+  if (!context.env.discordToken) fail('DISCORD_TOKEN is required to post.');
+
   const rendered = await renderThrowback(context, leagueId, season, postType, ref);
   if (!rendered) fail(`No data available to render throwback "${postType}" (ref ${ref}).`);
 

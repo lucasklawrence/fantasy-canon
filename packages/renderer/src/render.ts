@@ -111,7 +111,12 @@ function renderSvg(
         height,
       );
     } else if (payload.type === 'throwback') {
-      body += renderThrowback(payload as Parameters<typeof renderThrowback>[0], theme, width);
+      body += renderThrowback(
+        payload as Parameters<typeof renderThrowback>[0],
+        theme,
+        width,
+        height,
+      );
     }
   }
 
@@ -485,6 +490,7 @@ function renderThrowback(
   },
   theme: typeof DEFAULT_THEME,
   width: number,
+  height: number,
 ): string {
   const cx = width / 2;
   let body = '';
@@ -502,11 +508,14 @@ function renderThrowback(
   )}</text>`;
   y += 96;
 
-  // Supporting stats as label (left) / value (right) rows with a hairline divider.
+  // Supporting stats as label (left) / value (right) rows with a hairline divider. Bound the
+  // rows to the canvas so a long list (or a smaller caller-supplied size) can't overrun the
+  // border and clip against the viewBox.
   const left = 140;
   const right = width - 140;
   const rowH = 78;
-  payload.stats.forEach((s, i) => {
+  const maxRows = Math.max(0, Math.floor((height - 60 - y) / rowH));
+  payload.stats.slice(0, maxRows).forEach((s, i) => {
     const ry = y + i * rowH;
     body += `<text x="${left}" y="${ry}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="26" text-anchor="start">${escape(
       truncate(s.label, 26),

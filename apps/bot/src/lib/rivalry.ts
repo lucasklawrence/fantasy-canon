@@ -22,6 +22,9 @@ export interface RivalryRecord {
 }
 
 function ensureNumber(val: unknown): number | undefined {
+  // Reject nullish/boolean/object up front: Number(null)/Number(false) coerce to 0, which would
+  // let a missing teamId slip through as "Team 0". Scores keep their `?? 0` fallback at the call.
+  if (typeof val !== 'number' && typeof val !== 'string') return undefined;
   const num = Number(val);
   return Number.isFinite(num) ? num : undefined;
 }
