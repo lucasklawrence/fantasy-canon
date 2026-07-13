@@ -9,6 +9,7 @@ import {
   getTransactionTeamId,
   isWaiverSpend,
 } from '../../lib/transactions.js';
+import { replyWithPagination } from '../../lib/paginate.js';
 
 interface TeamWithFaab {
   teamId: number;
@@ -79,8 +80,9 @@ export async function handleLeaderboardSubcommand(
       return `${idx + 1}. ${name} — $${entry.amount.toFixed(2)}${leftText}`;
     });
 
-    await interaction.editReply({
-      content: [`League ${leagueId} • Season ${season} • Metric: FAAB`, ...lines].join('\n'),
+    await replyWithPagination(interaction, {
+      header: `League ${leagueId} • Season ${season} • Metric: FAAB`,
+      rows: lines,
     });
   } catch (error) {
     console.error('Failed to build leaderboard', error);

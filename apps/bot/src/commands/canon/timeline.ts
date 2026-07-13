@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { BotContext } from '../../config.js';
 import { resolveLeagueId } from '../../lib/leagueId.js';
 import { getLeagueInfo } from '../../lib/leagueInfo.js';
+import { replyWithPagination } from '../../lib/paginate.js';
 
 export async function handleTimelineSubcommand(
   interaction: ChatInputCommandInteraction,
@@ -45,8 +46,9 @@ export async function handleTimelineSubcommand(
       return `${ts} • ${e.season} • ${e.type} • ${e.message}`;
     });
 
-    await interaction.editReply({
-      content: [`League ${leagueInfo.name ?? leagueId} • Timeline`, ...lines].join('\n'),
+    await replyWithPagination(interaction, {
+      header: `League ${leagueInfo.name ?? leagueId} • Timeline`,
+      rows: lines,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
