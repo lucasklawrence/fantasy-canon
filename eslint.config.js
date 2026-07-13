@@ -9,7 +9,10 @@ import globals from 'globals';
 export default tseslint.config(
   // Replaces the old `ignorePatterns`. A bare `ignores` key = global ignores.
   {
-    ignores: ['**/dist/**', '**/build/**', '**/node_modules/**'],
+    // Browser userscripts under `assets/` ship to Tampermonkey, not the Node build — they use
+    // browser/GM_* globals the Node lint config doesn't know, so they're linted by the browser, not
+    // here. Prettier still formats them.
+    ignores: ['**/dist/**', '**/build/**', '**/node_modules/**', '**/assets/**'],
   },
   js.configs.recommended,
   // recommendedTypeChecked is a superset of `recommended`; it carries the type-aware rules
