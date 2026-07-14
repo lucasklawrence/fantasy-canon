@@ -1,9 +1,9 @@
 import { gradeRoster, type PlayerTier, type RosterPick } from '@fantasy-canon/core';
 import {
   buildGradeComponents,
+  componentSessionMarker,
   gradeHeadline,
   gradePicksBlock,
-  gradeSessionMarker,
   normalizeGradeView,
   toGradeCardOptions,
 } from '../draftSession.js';
@@ -130,16 +130,18 @@ describe('buildGradeComponents', () => {
   });
 });
 
-describe('gradeSessionMarker', () => {
+describe('componentSessionMarker', () => {
   it('recovers the session marker built into a component customId', () => {
     const [selectRow, buttonRow] = buildGradeComponents('overview', '1720000000000');
     const selectId = (selectRow.toJSON().components[0] as { custom_id: string }).custom_id;
     const buttonId = (buttonRow.toJSON().components[0] as { custom_id: string }).custom_id;
 
     // The marker round-trips from both the select and the button customId...
-    expect(gradeSessionMarker(selectId)).toBe('1720000000000');
-    expect(gradeSessionMarker(buttonId)).toBe('1720000000000');
+    expect(componentSessionMarker(selectId)).toBe('1720000000000');
+    expect(componentSessionMarker(buttonId)).toBe('1720000000000');
     // ...and a different session's marker is distinguishable (the stale-control rejection hinges on this).
-    expect(gradeSessionMarker(selectId)).not.toBe('999');
+    expect(componentSessionMarker(selectId)).not.toBe('999');
+    // The same parser serves the board buttons (`canon:board:<action>:<id>`), same 4th segment.
+    expect(componentSessionMarker('canon:board:refresh:1720000000000')).toBe('1720000000000');
   });
 });

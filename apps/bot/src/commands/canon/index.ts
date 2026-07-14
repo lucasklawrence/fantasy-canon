@@ -26,10 +26,15 @@ import {
   handleDraftStatusSubcommand,
   handleDraftGradeSubcommand,
   handleDraftStopSubcommand,
+  handleDraftBoardSubcommand,
   handleGradeViewSelect,
   handleGradeShare,
+  handleBoardRefresh,
+  handleBoardGrade,
   GRADE_VIEW_ID,
   GRADE_SHARE_ID,
+  BOARD_REFRESH_ID,
+  BOARD_GRADE_ID,
 } from './draftSession.js';
 import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.js';
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
@@ -595,6 +600,11 @@ export const canonCommand = new SlashCommandBuilder()
         sub.setName('best').setDescription('Show the live best-available board for this session'),
       )
       .addSubcommand((sub) =>
+        sub
+          .setName('board')
+          .setDescription('Post a self-updating live board to this channel (ticks as picks land)'),
+      )
+      .addSubcommand((sub) =>
         sub.setName('status').setDescription('Where the live draft session stands'),
       )
       .addSubcommand((sub) =>
@@ -712,6 +722,8 @@ export async function handleCanonInteraction(
       await handleDraftPickSubcommand(interaction);
     } else if (subcommand === 'best') {
       await handleDraftBestSubcommand(interaction);
+    } else if (subcommand === 'board') {
+      await handleDraftBoardSubcommand(interaction);
     } else if (subcommand === 'status') {
       await handleDraftStatusSubcommand(interaction);
     } else if (subcommand === 'grade') {
@@ -801,11 +813,16 @@ export async function handleCanonComponent(
   interaction: MessageComponentInteraction,
 ): Promise<void> {
   const { customId } = interaction;
-  // customIds carry a `:<sessionId>` suffix (see buildGradeComponents), so match by prefix.
+  // customIds carry a `:<sessionId>` suffix (see buildGradeComponents/buildBoardComponents), so
+  // match by prefix.
   if (customId.startsWith(`${GRADE_VIEW_ID}:`) && interaction.isStringSelectMenu()) {
     await handleGradeViewSelect(interaction);
   } else if (customId.startsWith(`${GRADE_SHARE_ID}:`) && interaction.isButton()) {
     await handleGradeShare(interaction);
+  } else if (customId.startsWith(`${BOARD_REFRESH_ID}:`) && interaction.isButton()) {
+    await handleBoardRefresh(interaction);
+  } else if (customId.startsWith(`${BOARD_GRADE_ID}:`) && interaction.isButton()) {
+    await handleBoardGrade(interaction);
   }
   // Unknown/stale component: ignore. (A stale button on an old message just no-ops.)
 }
