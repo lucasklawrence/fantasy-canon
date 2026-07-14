@@ -8,10 +8,16 @@
  */
 
 import {
+  ActionRowBuilder,
   AttachmentBuilder,
+  ButtonBuilder,
+  ButtonInteraction,
+  ButtonStyle,
   ChatInputCommandInteraction,
   EmbedBuilder,
   MessageFlags,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
 } from 'discord.js';
 import {
   applyPick,
@@ -39,8 +45,8 @@ import {
   type LiveDraft,
 } from '../../lib/draft/sessionStore.js';
 
-/** One live draft per channel. */
-function draftKey(interaction: ChatInputCommandInteraction): string {
+/** One live draft per channel. Structural so slash-command and component interactions share it. */
+function draftKey(interaction: { channelId: string | null; user: { id: string } }): string {
   return interaction.channelId ?? `dm:${interaction.user.id}`;
 }
 
@@ -254,26 +260,97 @@ export async function handleDraftGradeSubcommand(
     return;
   }
 
-  // Rendering the PNG can exceed the 3s ACK deadline on a cold start, so defer first.
+  // Rendering the PNG can exceed the 3s ACK deadline on a cold start, so defer first. Ephemeral —
+  // a private preview the user can then explicitly "Post to channel" (ephemeral can't be converted).
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await editGradeView(interaction, draft, grade, 'overview');
+}
 
-  // The card is the shareable hero; the embed carries the full per-pick table it omits. If the
-  // render fails we still ship the embed — it's self-sufficient (headline + every pick).
-  try {
-    const options = toGradeCardOptions(grade, {
-      teams: draft.teams,
-      slot: draft.slot,
-      adpAsOf: draft.adp?.asOf,
+/**
+ * The interactive-grade component seam: routes the view select-menu and the share button off the
+ * ephemeral grade message. State isn't serialized into the customId — we re-fetch the draft for this
+ * channel and re-grade deterministically, so the view always reflects the latest picks.
+ */
+export async function handleGradeViewSelect(
+  interaction: StringSelectMenuInteraction,
+): Promise<void> {
+  const draft = getDraft(draftKey(interaction));
+  if (!draft) {
+    await interaction.update({
+      content: 'This draft session has ended — start a new one with `/canon draft start`.',
+      embeds: [],
+      components: [],
+      files: [],
     });
-    const png = await renderGradeCard(options);
+    return;
+  }
+  const grade = gradeSession(draft.session, draft.pool);
+  const view = normalizeGradeView(interaction.values[0]);
+  await interaction.deferUpdate();
+  await editGradeView(interaction, draft, grade, view);
+}
+
+export async function handleGradeShare(interaction: ButtonInteraction): Promise<void> {
+  const draft = getDraft(draftKey(interaction));
+  if (!draft) {
+    await interaction.reply({
+      content: 'This draft session has ended — nothing to share.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  const channel = interaction.channel;
+  if (!channel?.isSendable()) {
+    await interaction.reply({
+      content: "I can't post in this channel — check my permissions.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const grade = gradeSession(draft.session, draft.pool);
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try {
+    const png = await renderGradeCard(toGradeCardOptions(grade, gradeContext(draft)));
+    const card = new AttachmentBuilder(png, { name: GRADE_CARD_FILE });
+    await channel.send({
+      embeds: [renderGradeShareEmbed(draft, grade, `attachment://${GRADE_CARD_FILE}`)],
+      files: [card],
+    });
+    await interaction.editReply({ content: 'Posted your draft grade to the channel ✅' });
+  } catch (error) {
+    console.warn('[draft grade] share render failed:', error);
+    await interaction.editReply({ content: "Couldn't build the grade card to share — try again." });
+  }
+}
+
+/**
+ * Render the card and edit the (already-deferred) reply to show a view. Re-renders the card on every
+ * switch — identical bytes, but it keeps the `attachment://` reference valid without juggling
+ * attachment retention across edits, and a view switch is a cheap user-paced click. Falls back to an
+ * embed-only message (still self-sufficient) if the render fails.
+ */
+async function editGradeView(
+  interaction: ChatInputCommandInteraction | StringSelectMenuInteraction,
+  draft: LiveDraft,
+  grade: RosterGrade,
+  view: GradeView,
+): Promise<void> {
+  try {
+    const png = await renderGradeCard(toGradeCardOptions(grade, gradeContext(draft)));
     const card = new AttachmentBuilder(png, { name: GRADE_CARD_FILE });
     await interaction.editReply({
-      embeds: [renderGrade(draft, grade).setImage(`attachment://${GRADE_CARD_FILE}`)],
+      embeds: [renderGradeView(draft, grade, view, `attachment://${GRADE_CARD_FILE}`)],
       files: [card],
+      components: buildGradeComponents(view),
     });
   } catch (error) {
     console.warn('[draft grade] card render failed, sending embed only:', error);
-    await interaction.editReply({ embeds: [renderGrade(draft, grade)] });
+    await interaction.editReply({
+      embeds: [renderGradeView(draft, grade, view)],
+      files: [],
+      components: buildGradeComponents(view),
+    });
   }
 }
 
@@ -367,8 +444,13 @@ export function gradePicksBlock(grade: RosterGrade): string {
 /** Attachment filename for the rendered grade card; the embed's image URL must match this. */
 const GRADE_CARD_FILE = 'draft-grade.png';
 
-/** Preferred left-to-right order for the card's per-position bars; unknowns sort last, alphabetically. */
+/** Preferred left-to-right order for per-position bars/rows; unknowns sort last, alphabetically. */
 const POSITION_ORDER = ['RB', 'WR', 'TE', 'QB', 'K', 'DST', 'FLEX'];
+
+function positionRank(pos: string): number {
+  const i = POSITION_ORDER.indexOf(pos);
+  return i === -1 ? POSITION_ORDER.length : i;
+}
 
 /** Session context the card footer/subtitle need — just enough to keep this decoupled from LiveDraft. */
 export interface GradeCardContext {
@@ -378,15 +460,16 @@ export interface GradeCardContext {
   adpAsOf?: string;
 }
 
+/** Pull the card context out of a live draft. */
+function gradeContext(draft: LiveDraft): GradeCardContext {
+  return { teams: draft.teams, slot: draft.slot, adpAsOf: draft.adp?.asOf };
+}
+
 /** Map a RosterGrade + session context onto the renderer's plain card options (renderer stays core-free). */
 export function toGradeCardOptions(grade: RosterGrade, ctx: GradeCardContext): GradeCardOptions {
-  const rank = (pos: string): number => {
-    const i = POSITION_ORDER.indexOf(pos);
-    return i === -1 ? POSITION_ORDER.length : i;
-  };
   const byPosition = Object.entries(grade.byPosition)
     .map(([pos, b]) => ({ pos, count: b.count, avgValue: b.avgValue }))
-    .sort((a, b) => rank(a.pos) - rank(b.pos) || a.pos.localeCompare(b.pos));
+    .sort((a, b) => positionRank(a.pos) - positionRank(b.pos) || a.pos.localeCompare(b.pos));
 
   const toRow = (p: GradedPick) => ({
     playerName: p.playerName,
@@ -413,22 +496,159 @@ export function toGradeCardOptions(grade: RosterGrade, ctx: GradeCardContext): G
   };
 }
 
-/**
- * Build the roster-grade embed for a finished (or in-progress) session. The steals/reaches breakdown
- * lives on the rendered card (see {@link toGradeCardOptions}); the embed carries the full per-pick
- * table the card omits, plus the unfilled-starters note so it stays informative if the card render
- * fails and we ship the embed alone.
- */
-function renderGrade(draft: LiveDraft, grade: RosterGrade): EmbedBuilder {
-  const embed = new EmbedBuilder()
-    .setTitle(`📋 Draft grade: ${grade.grade}`)
-    .setDescription(`${gradeHeadline(grade)}\n${gradePicksBlock(grade)}`)
-    .setFooter({ text: gradeFooter(draft) });
+/** The grade views a user can switch between via the select menu. */
+const GRADE_VIEWS = ['overview', 'picks', 'byPosition', 'steals'] as const;
+export type GradeView = (typeof GRADE_VIEWS)[number];
 
-  if (grade.starters.missing.length) {
-    embed.addFields({ name: 'Unfilled starters', value: grade.starters.missing.join(', ') });
+/** Select-menu metadata per view (label + one-liner shown in the dropdown). */
+const GRADE_VIEW_OPTIONS: ReadonlyArray<{
+  value: GradeView;
+  label: string;
+  description: string;
+  emoji: string;
+}> = [
+  {
+    value: 'overview',
+    label: 'Overview',
+    description: 'Grade, value, and starters at a glance',
+    emoji: '📋',
+  },
+  { value: 'picks', label: 'Picks', description: 'Every pick with ADP and value', emoji: '🧾' },
+  {
+    value: 'byPosition',
+    label: 'By position',
+    description: 'Value gained per position',
+    emoji: '📊',
+  },
+  {
+    value: 'steals',
+    label: 'Steals & reaches',
+    description: 'Best values and biggest reaches',
+    emoji: '💎',
+  },
+];
+
+const GRADE_VIEW_TITLE: Record<GradeView, string> = {
+  overview: '',
+  picks: ' · Picks',
+  byPosition: ' · By position',
+  steals: ' · Steals & reaches',
+};
+
+/** Coerce a select-menu value (or anything) back to a known view, defaulting to overview. */
+export function normalizeGradeView(value: string | undefined): GradeView {
+  return (GRADE_VIEWS as readonly string[]).includes(value ?? '')
+    ? (value as GradeView)
+    : 'overview';
+}
+
+/** The select + share-button rows that ride under the ephemeral grade, with `view` marked selected. */
+export function buildGradeComponents(
+  view: GradeView,
+): [ActionRowBuilder<StringSelectMenuBuilder>, ActionRowBuilder<ButtonBuilder>] {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('canon:grade:view')
+    .setPlaceholder('Switch view')
+    .addOptions(
+      GRADE_VIEW_OPTIONS.map((o) => ({
+        label: o.label,
+        value: o.value,
+        description: o.description,
+        emoji: o.emoji,
+        default: o.value === view,
+      })),
+    );
+  const share = new ButtonBuilder()
+    .setCustomId('canon:grade:share')
+    .setLabel('Post to channel')
+    .setEmoji('📢')
+    .setStyle(ButtonStyle.Primary);
+  return [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(share),
+  ];
+}
+
+/** Per-position value rows for the "By position" view, in RB→WR→TE→QB… order. */
+function gradeByPositionBlock(grade: RosterGrade): string {
+  const rows = Object.entries(grade.byPosition)
+    .map(([pos, b]) => ({ pos, count: b.count, avgValue: b.avgValue }))
+    .sort((a, b) => positionRank(a.pos) - positionRank(b.pos) || a.pos.localeCompare(b.pos))
+    .map((b) => `${b.pos.padEnd(4)} ×${b.count}  ${signed(b.avgValue).padStart(5)}`);
+  return rows.length ? `\`\`\`\n${rows.join('\n')}\n\`\`\`` : '_No graded positions yet._';
+}
+
+/** The Overview one-liner: how many picks graded, plus steal/reach/unfilled counts. */
+function overviewSummary(grade: RosterGrade): string {
+  const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+  const bits = [`${grade.gradedCount}/${grade.picks.length} picks graded`];
+  if (grade.steals.length)
+    bits.push(`💎 ${grade.steals.length} ${plural(grade.steals.length, 'steal', 'steals')}`);
+  if (grade.reaches.length)
+    bits.push(`🟧 ${grade.reaches.length} ${plural(grade.reaches.length, 'reach', 'reaches')}`);
+  if (grade.starters.missing.length)
+    bits.push(
+      `⚠️ ${grade.starters.missing.length} unfilled ${plural(grade.starters.missing.length, 'starter', 'starters')}`,
+    );
+  return `${bits.join(' · ')}\n_Switch views with the menu, or Post to channel to share._`;
+}
+
+/** `💎 Name (+12)` list for the steals/reaches embed fields. */
+function pickList(picks: GradedPick[], glyph: string): string {
+  return picks.map((p) => `${glyph} ${p.playerName} (${signed(p.value ?? 0)})`).join('\n');
+}
+
+/**
+ * Build the grade embed for a given view. All views share the card as the hero image (passed as an
+ * `attachment://` or CDN url); the text section is what changes. `imageUrl` is omitted only on the
+ * embed-only fallback when the card render failed.
+ */
+function renderGradeView(
+  draft: LiveDraft,
+  grade: RosterGrade,
+  view: GradeView,
+  imageUrl?: string,
+): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle(`📋 Draft grade: ${grade.grade}${GRADE_VIEW_TITLE[view]}`)
+    .setFooter({ text: gradeFooter(draft) });
+  if (imageUrl) embed.setImage(imageUrl);
+
+  switch (view) {
+    case 'picks':
+      embed.setDescription(`${gradeHeadline(grade)}\n${gradePicksBlock(grade)}`);
+      break;
+    case 'byPosition':
+      embed.setDescription(`${gradeHeadline(grade)}\n${gradeByPositionBlock(grade)}`);
+      break;
+    case 'steals':
+      embed.setDescription(gradeHeadline(grade));
+      if (grade.steals.length)
+        embed.addFields({ name: 'Steals', value: pickList(grade.steals, '💎'), inline: true });
+      if (grade.reaches.length)
+        embed.addFields({ name: 'Reaches', value: pickList(grade.reaches, '🟧'), inline: true });
+      if (grade.starters.missing.length)
+        embed.addFields({ name: 'Unfilled starters', value: grade.starters.missing.join(', ') });
+      break;
+    case 'overview':
+    default:
+      embed.setDescription(`${gradeHeadline(grade)}\n${overviewSummary(grade)}`);
+      break;
   }
   return embed;
+}
+
+/** The public "Post to channel" artifact — card + headline + the full per-pick table, no components. */
+function renderGradeShareEmbed(
+  draft: LiveDraft,
+  grade: RosterGrade,
+  imageUrl: string,
+): EmbedBuilder {
+  return new EmbedBuilder()
+    .setTitle(`📋 Draft grade: ${grade.grade}`)
+    .setDescription(`${gradeHeadline(grade)}\n${gradePicksBlock(grade)}`)
+    .setImage(imageUrl)
+    .setFooter({ text: gradeFooter(draft) });
 }
 
 function gradeFooter(draft: LiveDraft): string {

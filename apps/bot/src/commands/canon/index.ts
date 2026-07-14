@@ -2,6 +2,7 @@ import {
   AutocompleteInteraction,
   ChannelType,
   ChatInputCommandInteraction,
+  MessageComponentInteraction,
   SlashCommandBuilder,
 } from 'discord.js';
 import { BotContext } from '../../config.js';
@@ -25,6 +26,8 @@ import {
   handleDraftStatusSubcommand,
   handleDraftGradeSubcommand,
   handleDraftStopSubcommand,
+  handleGradeViewSelect,
+  handleGradeShare,
 } from './draftSession.js';
 import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.js';
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
@@ -784,4 +787,22 @@ export async function handleCanonAutocomplete(
     return;
   }
   await interaction.respond([]);
+}
+
+/**
+ * Route `/canon` message-component interactions (buttons, select menus). customIds are namespaced
+ * `canon:<feature>:<action>` so `discord.ts` can hand everything `canon:`-prefixed here; each feature
+ * owns its slice. Today only the interactive draft grade uses it — a reusable seam for future
+ * commands that want buttons/menus.
+ */
+export async function handleCanonComponent(
+  interaction: MessageComponentInteraction,
+): Promise<void> {
+  const { customId } = interaction;
+  if (customId === 'canon:grade:view' && interaction.isStringSelectMenu()) {
+    await handleGradeViewSelect(interaction);
+  } else if (customId === 'canon:grade:share' && interaction.isButton()) {
+    await handleGradeShare(interaction);
+  }
+  // Unknown/stale component: ignore. (A stale button on an old message just no-ops.)
 }

@@ -7,7 +7,11 @@ import {
   Partials,
 } from 'discord.js';
 import { BotContext } from '../config.js';
-import { handleCanonInteraction, handleCanonAutocomplete } from '../commands/canon/index.js';
+import {
+  handleCanonInteraction,
+  handleCanonAutocomplete,
+  handleCanonComponent,
+} from '../commands/canon/index.js';
 
 export function createDiscordClient(): Client {
   return new Client({
@@ -22,6 +26,17 @@ export function registerInteractionHandlers(client: Client, context: BotContext)
       if (interaction.commandName === 'canon') {
         void handleCanonAutocomplete(interaction, context).catch((error) => {
           console.error('Failed to handle /canon autocomplete', error);
+        });
+      }
+      return;
+    }
+
+    // Message components (buttons, select menus). Namespaced customIds let each command own its
+    // slice; today the interactive draft grade is the only consumer.
+    if (interaction.isMessageComponent()) {
+      if (interaction.customId.startsWith('canon:')) {
+        void handleCanonComponent(interaction).catch((error) => {
+          console.error('Failed to handle /canon component interaction', error);
         });
       }
       return;
