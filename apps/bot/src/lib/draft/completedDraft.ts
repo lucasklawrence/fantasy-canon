@@ -55,7 +55,9 @@ export async function fetchCompletedDraft(
 
   const detail = await client.fetchLeague({ leagueId, season, view: 'mDraftDetail' });
   const parsed = parseDraftDetail(detail.payload);
-  if (!parsed.drafted || parsed.picks.length === 0) return EMPTY();
+  // Only short-circuit the "not drafted yet" case; a drafted-but-empty board flows through and is
+  // reported faithfully as `drafted: true` with no picks (rather than masquerading as not-drafted).
+  if (!parsed.drafted) return EMPTY();
 
   // Prefer names already in the draft payload; only pay for an mRoster fetch if some id is unresolved.
   let names = buildPlayerNameMap(detail.payload);
