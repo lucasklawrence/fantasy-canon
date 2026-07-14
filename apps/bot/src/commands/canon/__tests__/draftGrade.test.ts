@@ -1,5 +1,12 @@
 import { gradeRoster, type PlayerTier, type RosterPick } from '@fantasy-canon/core';
-import { gradeHeadline, gradePicksBlock, toGradeCardOptions } from '../draftSession.js';
+import {
+  buildGradeComponents,
+  gradeHeadline,
+  gradePicksBlock,
+  gradeSessionMarker,
+  normalizeGradeView,
+  toGradeCardOptions,
+} from '../draftSession.js';
 
 /** No K/DST slots, so `required` is deterministic (K/DST are only evaluated when tagged). */
 const SLOTS = { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, BENCH: 6 };
@@ -84,5 +91,55 @@ describe('toGradeCardOptions', () => {
     expect(positions).toEqual(['RB', 'WR']);
     // No adpAsOf → footer omits the "ADP as of" segment.
     expect(opts.footer).toBe('12-team PPR • slot 7 • grade assumes a completed roster');
+  });
+});
+
+describe('normalizeGradeView', () => {
+  it('keeps known views and defaults anything else to overview', () => {
+    expect(normalizeGradeView('picks')).toBe('picks');
+    expect(normalizeGradeView('byPosition')).toBe('byPosition');
+    expect(normalizeGradeView('steals')).toBe('steals');
+    expect(normalizeGradeView('overview')).toBe('overview');
+    expect(normalizeGradeView(undefined)).toBe('overview');
+    expect(normalizeGradeView('bogus')).toBe('overview');
+  });
+});
+
+describe('buildGradeComponents', () => {
+  it('emits a session-tagged view select + share button, marking the current view selected', () => {
+    const [selectRow, buttonRow] = buildGradeComponents('picks', '1720000000000');
+
+    const select = selectRow.toJSON().components[0] as {
+      custom_id: string;
+      options: Array<{ value: string; default?: boolean }>;
+    };
+    // customId carries the namespace plus the session marker so stale controls are rejectable.
+    expect(select.custom_id).toBe('canon:grade:view:1720000000000');
+    expect(select.options.map((o) => o.value)).toEqual([
+      'overview',
+      'picks',
+      'byPosition',
+      'steals',
+    ]);
+    // Exactly the current view is pre-selected.
+    expect(select.options.filter((o) => o.default).map((o) => o.value)).toEqual(['picks']);
+
+    const button = buttonRow.toJSON().components[0] as { custom_id: string; label: string };
+    expect(button.custom_id).toBe('canon:grade:share:1720000000000');
+    expect(button.label).toBe('Post to channel');
+  });
+});
+
+describe('gradeSessionMarker', () => {
+  it('recovers the session marker built into a component customId', () => {
+    const [selectRow, buttonRow] = buildGradeComponents('overview', '1720000000000');
+    const selectId = (selectRow.toJSON().components[0] as { custom_id: string }).custom_id;
+    const buttonId = (buttonRow.toJSON().components[0] as { custom_id: string }).custom_id;
+
+    // The marker round-trips from both the select and the button customId...
+    expect(gradeSessionMarker(selectId)).toBe('1720000000000');
+    expect(gradeSessionMarker(buttonId)).toBe('1720000000000');
+    // ...and a different session's marker is distinguishable (the stale-control rejection hinges on this).
+    expect(gradeSessionMarker(selectId)).not.toBe('999');
   });
 });
