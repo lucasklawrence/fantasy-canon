@@ -461,15 +461,22 @@ export async function handleDraftBoardSubcommand(
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   // Retire any prior board for this draft — only the newest message should keep updating.
   draft.liveBoard?.stop();
-  const message = await channel.send(boardMessagePayload(draft));
-  draft.liveBoard = createLiveBoard({
-    message,
-    render: () => boardMessagePayload(draft),
-    onError: (error) => console.warn('[draft board] edit failed:', error),
-  });
-  await interaction.editReply({
-    content: `📋 Live draft board posted — it'll update itself as picks land.\n${message.url}`,
-  });
+  try {
+    const message = await channel.send(boardMessagePayload(draft));
+    draft.liveBoard = createLiveBoard({
+      message,
+      render: () => boardMessagePayload(draft),
+      onError: (error) => console.warn('[draft board] edit failed:', error),
+    });
+    await interaction.editReply({
+      content: `📋 Live draft board posted — it'll update itself as picks land.\n${message.url}`,
+    });
+  } catch (error) {
+    console.warn('[draft board] failed to post board:', error);
+    await interaction.editReply({
+      content: "Couldn't post the live board — check my channel permissions and try again.",
+    });
+  }
 }
 
 /** Refresh button: re-render the board in place. Uses the button's own token (a one-shot click). */
