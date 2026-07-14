@@ -1,3 +1,4 @@
+import type { MessageEditOptions } from 'discord.js';
 import { describe, expect, it, vi } from 'vitest';
 import { createLiveBoard, type EditableMessage } from '../liveBoard.js';
 
@@ -47,23 +48,66 @@ describe('createLiveBoard', () => {
     expect(edit).not.toHaveBeenCalled();
   });
 
-  it('reports an edit failure via onError without throwing, and retries on the next pick', async () => {
+  it('surfaces an edit failure via onError without throwing', async () => {
     const onError = vi.fn();
-    let fail = true;
-    const edit = vi.fn((): Promise<void> =>
-      fail ? Promise.reject(new Error('edit rejected')) : Promise.resolve(),
-    );
-    const board = createLiveBoard({ message: { edit }, render: () => ({ content: 'x' }), onError });
+    const edit = vi.fn((): Promise<void> => Promise.reject(new Error('edit rejected')));
+    const board = createLiveBoard({
+      message: { edit },
+      render: () => ({ content: 'x' }),
+      onError,
+      retryDelayMs: 10_000, // long enough that the retry can't fire during the test
+    });
 
     board.markDirty();
     await settle();
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(edit).toHaveBeenCalledTimes(1);
+    board.stop(); // clear the pending retry timer
+  });
+
+  it('recovers a pick stranded by a failed edit via a delayed retry (no further markDirty)', async () => {
+    let releaseFirst!: () => void;
+    const firstEditInFlight = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const onError = vi.fn();
+    const committed: unknown[] = [];
+    let attempt = 0;
+    let renders = 0;
+    const edit = vi.fn((payload: MessageEditOptions): Promise<void> => {
+      attempt += 1;
+      // First edit stays in flight, then rejects — while a second pick lands behind it.
+      if (attempt === 1) {
+        return firstEditInFlight.then(() => {
+          throw new Error('boom');
+        });
+      }
+      committed.push(payload.content);
+      return Promise.resolve();
+    });
+
+    const board = createLiveBoard({
+      message: { edit },
+      render: () => ({ content: `render ${++renders}` }),
+      onError,
+      retryDelayMs: 10,
+    });
+
+    board.markDirty(); // first edit begins and parks on firstEditInFlight
+    board.markDirty(); // a pick lands while the (doomed) first edit is still in flight
+    releaseFirst();
+    await settle();
+
+    // The failed edit re-armed dirty; nothing else marks the board, so only the retry can recover it.
     expect(onError).toHaveBeenCalledTimes(1);
     expect(edit).toHaveBeenCalledTimes(1);
 
-    // The controller isn't wedged after a failure — a later pick edits again.
-    fail = false;
-    board.markDirty();
-    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    // The retry fired on its own and committed the latest render — the update wasn't stranded.
     expect(edit).toHaveBeenCalledTimes(2);
+    expect(committed).toEqual(['render 2']);
+    board.stop();
   });
 });

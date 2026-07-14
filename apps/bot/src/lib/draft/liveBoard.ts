@@ -9,6 +9,11 @@
  * `Retry-After` before resolving, so the only thing this controller must avoid is firing overlapping
  * edits — hence the `flushing` guard rather than any hard-coded cadence (there is no flat rate ceiling
  * to code against; the real limit is per-route buckets the library handles).
+ *
+ * A failed edit (a genuine 4xx/network error — 429s never surface here) **re-arms the dirty flag and
+ * schedules a delayed retry** rather than dropping the update: a pick that landed mid-flight would
+ * otherwise be stranded on the board until the next pick or a manual refresh. The delay backs off a
+ * persistent failure instead of hot-looping on it.
  */
 
 import type { MessageEditOptions } from 'discord.js';
@@ -25,6 +30,8 @@ export interface LiveBoardOptions {
   render: () => MessageEditOptions;
   /** Fired when an edit rejects (permissions, deleted message, …); the controller stays alive. */
   onError?: (error: unknown) => void;
+  /** Backoff before retrying after a failed edit (default 2s). */
+  retryDelayMs?: number;
 }
 
 export interface LiveBoardHandle {
@@ -40,9 +47,26 @@ export interface LiveBoardHandle {
  * during an in-flight edit just re-arm the flag so the loop renders once more with the newest state.
  */
 export function createLiveBoard(opts: LiveBoardOptions): LiveBoardHandle {
+  const retryDelayMs = opts.retryDelayMs ?? 2000;
   let dirty = false;
   let flushing = false;
   let stopped = false;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function clearRetry(): void {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
+    }
+  }
+
+  function scheduleRetry(): void {
+    if (stopped || retryTimer) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      void flush();
+    }, retryDelayMs);
+  }
 
   async function flush(): Promise<void> {
     if (flushing) return;
@@ -56,14 +80,19 @@ export function createLiveBoard(opts: LiveBoardOptions): LiveBoardHandle {
           await opts.message.edit(opts.render());
         } catch (error) {
           opts.onError?.(error);
-          // A genuine edit failure (429s are handled by the REST layer, so this is 4xx/network).
-          // Leave the loop; the next pick's markDirty() will retry rather than spinning here.
+          // Re-arm so the pick we were rendering (and any that landed mid-flight) isn't stranded,
+          // then leave this pass and retry on a delay. Retrying inline would hot-loop a persistent
+          // failure; 429s don't reach here (the REST layer waits them out), so this is a real error.
+          dirty = true;
           break;
         }
       }
     } finally {
       flushing = false;
     }
+    // Still behind after the pass (an edit failed) → retry later; otherwise drop any pending retry.
+    if (dirty && !stopped) scheduleRetry();
+    else clearRetry();
   }
 
   return {
@@ -74,6 +103,7 @@ export function createLiveBoard(opts: LiveBoardOptions): LiveBoardHandle {
     },
     stop() {
       stopped = true;
+      clearRetry();
     },
   };
 }
