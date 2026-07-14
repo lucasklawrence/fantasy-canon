@@ -3,6 +3,7 @@ import {
   buildGradeComponents,
   gradeHeadline,
   gradePicksBlock,
+  gradeSessionMarker,
   normalizeGradeView,
   toGradeCardOptions,
 } from '../draftSession.js';
@@ -105,14 +106,15 @@ describe('normalizeGradeView', () => {
 });
 
 describe('buildGradeComponents', () => {
-  it('emits a namespaced view select + share button, marking the current view selected', () => {
-    const [selectRow, buttonRow] = buildGradeComponents('picks');
+  it('emits a session-tagged view select + share button, marking the current view selected', () => {
+    const [selectRow, buttonRow] = buildGradeComponents('picks', '1720000000000');
 
     const select = selectRow.toJSON().components[0] as {
       custom_id: string;
       options: Array<{ value: string; default?: boolean }>;
     };
-    expect(select.custom_id).toBe('canon:grade:view');
+    // customId carries the namespace plus the session marker so stale controls are rejectable.
+    expect(select.custom_id).toBe('canon:grade:view:1720000000000');
     expect(select.options.map((o) => o.value)).toEqual([
       'overview',
       'picks',
@@ -123,7 +125,21 @@ describe('buildGradeComponents', () => {
     expect(select.options.filter((o) => o.default).map((o) => o.value)).toEqual(['picks']);
 
     const button = buttonRow.toJSON().components[0] as { custom_id: string; label: string };
-    expect(button.custom_id).toBe('canon:grade:share');
+    expect(button.custom_id).toBe('canon:grade:share:1720000000000');
     expect(button.label).toBe('Post to channel');
+  });
+});
+
+describe('gradeSessionMarker', () => {
+  it('recovers the session marker built into a component customId', () => {
+    const [selectRow, buttonRow] = buildGradeComponents('overview', '1720000000000');
+    const selectId = (selectRow.toJSON().components[0] as { custom_id: string }).custom_id;
+    const buttonId = (buttonRow.toJSON().components[0] as { custom_id: string }).custom_id;
+
+    // The marker round-trips from both the select and the button customId...
+    expect(gradeSessionMarker(selectId)).toBe('1720000000000');
+    expect(gradeSessionMarker(buttonId)).toBe('1720000000000');
+    // ...and a different session's marker is distinguishable (the stale-control rejection hinges on this).
+    expect(gradeSessionMarker(selectId)).not.toBe('999');
   });
 });

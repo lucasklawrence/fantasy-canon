@@ -28,6 +28,8 @@ import {
   handleDraftStopSubcommand,
   handleGradeViewSelect,
   handleGradeShare,
+  GRADE_VIEW_ID,
+  GRADE_SHARE_ID,
 } from './draftSession.js';
 import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.js';
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
@@ -799,9 +801,10 @@ export async function handleCanonComponent(
   interaction: MessageComponentInteraction,
 ): Promise<void> {
   const { customId } = interaction;
-  if (customId === 'canon:grade:view' && interaction.isStringSelectMenu()) {
+  // customIds carry a `:<sessionId>` suffix (see buildGradeComponents), so match by prefix.
+  if (customId.startsWith(`${GRADE_VIEW_ID}:`) && interaction.isStringSelectMenu()) {
     await handleGradeViewSelect(interaction);
-  } else if (customId === 'canon:grade:share' && interaction.isButton()) {
+  } else if (customId.startsWith(`${GRADE_SHARE_ID}:`) && interaction.isButton()) {
     await handleGradeShare(interaction);
   }
   // Unknown/stale component: ignore. (A stale button on an old message just no-ops.)

@@ -284,6 +284,16 @@ export async function handleGradeViewSelect(
     });
     return;
   }
+  if (gradeSessionMarker(interaction.customId) !== String(draft.createdAt)) {
+    await interaction.update({
+      content:
+        'This grade is from an earlier draft — run `/canon draft grade` for the current one.',
+      embeds: [],
+      components: [],
+      files: [],
+    });
+    return;
+  }
   const grade = gradeSession(draft.session, draft.pool);
   const view = normalizeGradeView(interaction.values[0]);
   await interaction.deferUpdate();
@@ -299,6 +309,14 @@ export async function handleGradeShare(interaction: ButtonInteraction): Promise<
     });
     return;
   }
+  if (gradeSessionMarker(interaction.customId) !== String(draft.createdAt)) {
+    await interaction.reply({
+      content:
+        'This grade is from an earlier draft — run `/canon draft grade` for the current one.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
   const channel = interaction.channel;
   if (!channel?.isSendable()) {
     await interaction.reply({
@@ -310,6 +328,9 @@ export async function handleGradeShare(interaction: ButtonInteraction): Promise<
 
   const grade = gradeSession(draft.session, draft.pool);
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  // Track the public post separately from the ephemeral confirmation: if the channel send succeeds
+  // but the confirmation edit fails, we must NOT tell the user to retry (that would double-post).
+  let posted = false;
   try {
     const png = await renderGradeCard(toGradeCardOptions(grade, gradeContext(draft)));
     const card = new AttachmentBuilder(png, { name: GRADE_CARD_FILE });
@@ -317,8 +338,14 @@ export async function handleGradeShare(interaction: ButtonInteraction): Promise<
       embeds: [renderGradeShareEmbed(draft, grade, `attachment://${GRADE_CARD_FILE}`)],
       files: [card],
     });
+    posted = true;
     await interaction.editReply({ content: 'Posted your draft grade to the channel ✅' });
   } catch (error) {
+    if (posted) {
+      // The grade is already in the channel; only the ephemeral ack failed. Nothing to retry.
+      console.warn('[draft grade] shared to channel but failed to confirm to user:', error);
+      return;
+    }
     console.warn('[draft grade] share render failed:', error);
     await interaction.editReply({ content: "Couldn't build the grade card to share — try again." });
   }
@@ -336,20 +363,25 @@ async function editGradeView(
   grade: RosterGrade,
   view: GradeView,
 ): Promise<void> {
+  const sessionId = String(draft.createdAt);
   try {
     const png = await renderGradeCard(toGradeCardOptions(grade, gradeContext(draft)));
     const card = new AttachmentBuilder(png, { name: GRADE_CARD_FILE });
+    // `attachments: []` drops the previously-attached PNG; without it Discord retains prior
+    // attachments across edits, so each view switch would stack another card up to the limit.
     await interaction.editReply({
       embeds: [renderGradeView(draft, grade, view, `attachment://${GRADE_CARD_FILE}`)],
       files: [card],
-      components: buildGradeComponents(view),
+      attachments: [],
+      components: buildGradeComponents(view, sessionId),
     });
   } catch (error) {
     console.warn('[draft grade] card render failed, sending embed only:', error);
     await interaction.editReply({
       embeds: [renderGradeView(draft, grade, view)],
       files: [],
-      components: buildGradeComponents(view),
+      attachments: [],
+      components: buildGradeComponents(view, sessionId),
     });
   }
 }
@@ -542,12 +574,26 @@ export function normalizeGradeView(value: string | undefined): GradeView {
     : 'overview';
 }
 
+/**
+ * customId prefixes for the interactive-grade components. The trailing `:<createdAt>` segment is a
+ * session marker so a control left over from an earlier draft (e.g. after a fresh `/canon draft
+ * start` in the same channel) is recognised and rejected rather than acting on the new session.
+ */
+export const GRADE_VIEW_ID = 'canon:grade:view';
+export const GRADE_SHARE_ID = 'canon:grade:share';
+
+/** The session marker (`draft.createdAt`, stringified) baked into a grade component's customId. */
+export function gradeSessionMarker(customId: string): string {
+  return customId.split(':')[3] ?? '';
+}
+
 /** The select + share-button rows that ride under the ephemeral grade, with `view` marked selected. */
 export function buildGradeComponents(
   view: GradeView,
+  sessionId: string,
 ): [ActionRowBuilder<StringSelectMenuBuilder>, ActionRowBuilder<ButtonBuilder>] {
   const select = new StringSelectMenuBuilder()
-    .setCustomId('canon:grade:view')
+    .setCustomId(`${GRADE_VIEW_ID}:${sessionId}`)
     .setPlaceholder('Switch view')
     .addOptions(
       GRADE_VIEW_OPTIONS.map((o) => ({
@@ -559,7 +605,7 @@ export function buildGradeComponents(
       })),
     );
   const share = new ButtonBuilder()
-    .setCustomId('canon:grade:share')
+    .setCustomId(`${GRADE_SHARE_ID}:${sessionId}`)
     .setLabel('Post to channel')
     .setEmoji('📢')
     .setStyle(ButtonStyle.Primary);
