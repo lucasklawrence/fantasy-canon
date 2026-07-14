@@ -56,6 +56,8 @@ describe('fetchCompletedDraft', () => {
     ]);
     // ESPN-native detail is preserved for display/analysis.
     expect(result.detailPicks[0]).toMatchObject({ round: 1, pickInRound: 1, playerId: 100 });
+    // Every id resolved, so nothing is left unresolved and the replay is full-fidelity.
+    expect(result.unresolved).toEqual([]);
     // The source replays the finished board, flagged complete.
     const snapshot = result.source.poll();
     expect(snapshot.complete).toBe(true);
@@ -89,16 +91,31 @@ describe('fetchCompletedDraft', () => {
     expect(result.source.size).toBe(0);
   });
 
-  it('falls back to a Player <id> placeholder when a name cannot be resolved', async () => {
+  it('surfaces an unresolved pick and keeps it out of the replay instead of faking a name', async () => {
     const { client } = stubClient({
       mDraftDetail: draftDetail([
-        { teamId: 1, playerId: 999, roundId: 1, roundPickNumber: 1, keeper: false },
+        { teamId: 1, playerId: 100, roundId: 1, roundPickNumber: 1, keeper: false },
+        { teamId: 2, playerId: 999, roundId: 1, roundPickNumber: 2, keeper: false }, // dropped since draft
       ]),
-      mRoster: { teams: [] },
+      mRoster: {
+        teams: [
+          {
+            roster: {
+              entries: [{ playerPoolEntry: { player: { id: 100, fullName: 'Bijan Robinson' } } }],
+            },
+          },
+        ],
+      },
     });
 
     const result = await fetchCompletedDraft(client, { leagueId: '1', season: 2025 });
 
-    expect(result.picks[0].playerName).toBe('Player 999');
+    // The resolvable pick replays; the unresolvable one is reported, not injected as a phantom.
+    expect(result.picks).toEqual([{ overall: 1, teamId: 1, playerName: 'Bijan Robinson' }]);
+    expect(result.unresolved).toHaveLength(1);
+    expect(result.unresolved[0]).toMatchObject({ playerId: 999, overall: 2 });
+    // detailPicks keeps the complete ESPN record (both picks); the source carries only resolved picks.
+    expect(result.detailPicks).toHaveLength(2);
+    expect(result.source.size).toBe(1);
   });
 });

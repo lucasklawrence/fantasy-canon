@@ -10,7 +10,8 @@
  *
  * Name resolution is best-effort: every drafted player lands on a roster, so a payload fetched with
  * `mRoster` right after the draft resolves every id. Import a draft weeks later and players since
- * dropped won't be on a current roster — those ids fall through to a `Player <id>` placeholder.
+ * dropped won't be on a current roster — {@link buildPlayerNameMap} simply omits those ids, leaving
+ * the caller to decide what to do with an unresolved pick (the bot glue reports it rather than fakes it).
  */
 
 /** One completed pick, ESPN's raw fields mapped to our names. `overall` is 1-based across the draft. */
