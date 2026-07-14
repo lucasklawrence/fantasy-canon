@@ -37,6 +37,7 @@ import { renderGradeCard, type GradeCardOptions } from '@fantasy-canon/renderer'
 import { loadRankings, ROSTER_SLOTS } from '../../lib/draftPool.js';
 import { EspnSinkDraftSource } from '../../lib/draft/espnSinkSource.js';
 import { runDraftPoller } from '../../lib/draft/poller.js';
+import { createLiveBoard } from '../../lib/draft/liveBoard.js';
 import {
   endDraft,
   getDraft,
@@ -118,6 +119,8 @@ export async function handleDraftStartSubcommand(
             const current = getDraft(key);
             if (current) current.session = next;
           },
+          // Nudge the self-updating board (if one's been posted) whenever a captured pick lands.
+          onPick: () => getDraft(key)?.liveBoard?.markDirty(),
           onError: (error) => console.warn('[draft poller] poll failed:', error),
         });
         howToFeed =
@@ -184,6 +187,7 @@ export async function handleDraftPickSubcommand(
       ? `Recorded ${applied === 1 ? '1 pick' : `${applied} picks`}.`
       : 'Nothing new — those players were already off the board.';
   await interaction.editReply({ content, embeds: [renderBoard(draft)] });
+  if (applied > 0) draft.liveBoard?.markDirty();
 }
 
 export async function handleDraftBestSubcommand(
@@ -284,7 +288,7 @@ export async function handleGradeViewSelect(
     });
     return;
   }
-  if (gradeSessionMarker(interaction.customId) !== String(draft.createdAt)) {
+  if (componentSessionMarker(interaction.customId) !== String(draft.createdAt)) {
     await interaction.update({
       content:
         'This grade is from an earlier draft — run `/canon draft grade` for the current one.',
@@ -309,7 +313,7 @@ export async function handleGradeShare(interaction: ButtonInteraction): Promise<
     });
     return;
   }
-  if (gradeSessionMarker(interaction.customId) !== String(draft.createdAt)) {
+  if (componentSessionMarker(interaction.customId) !== String(draft.createdAt)) {
     await interaction.reply({
       content:
         'This grade is from an earlier draft — run `/canon draft grade` for the current one.',
@@ -358,7 +362,7 @@ export async function handleGradeShare(interaction: ButtonInteraction): Promise<
  * embed-only message (still self-sufficient) if the render fails.
  */
 async function editGradeView(
-  interaction: ChatInputCommandInteraction | StringSelectMenuInteraction,
+  interaction: ChatInputCommandInteraction | StringSelectMenuInteraction | ButtonInteraction,
   draft: LiveDraft,
   grade: RosterGrade,
   view: GradeView,
@@ -395,6 +399,121 @@ export async function handleDraftStopSubcommand(
     content: ended ? 'Draft session ended.' : 'No active draft session here.',
     flags: MessageFlags.Ephemeral,
   });
+}
+
+// --- Live draft board (#149): a self-updating channel message that outlives interaction tokens. ---
+
+/** customId prefixes for the live-board buttons; trailing `:<createdAt>` is the session marker. */
+export const BOARD_REFRESH_ID = 'canon:board:refresh';
+export const BOARD_GRADE_ID = 'canon:board:grade';
+
+/** Refresh + Grade buttons that ride under the live board, tagged with the session marker. */
+export function buildBoardComponents(sessionId: string): ActionRowBuilder<ButtonBuilder>[] {
+  const refresh = new ButtonBuilder()
+    .setCustomId(`${BOARD_REFRESH_ID}:${sessionId}`)
+    .setLabel('Refresh')
+    .setEmoji('🔄')
+    .setStyle(ButtonStyle.Secondary);
+  const grade = new ButtonBuilder()
+    .setCustomId(`${BOARD_GRADE_ID}:${sessionId}`)
+    .setLabel('Grade my roster')
+    .setEmoji('📊')
+    .setStyle(ButtonStyle.Primary);
+  return [new ActionRowBuilder<ButtonBuilder>().addComponents(refresh, grade)];
+}
+
+/** The editable payload for the live board message: the best-available embed + its buttons. */
+function boardMessagePayload(draft: LiveDraft): {
+  embeds: EmbedBuilder[];
+  components: ActionRowBuilder<ButtonBuilder>[];
+} {
+  return {
+    embeds: [renderBoard(draft)],
+    components: buildBoardComponents(String(draft.createdAt)),
+  };
+}
+
+/**
+ * `/canon draft board` — post the live best-available board as a normal channel message and wire it
+ * to auto-update as picks land. Unlike `best`/`status` (bound to a slash interaction that dies at 15
+ * min), this is a bot-token message the poller and `pick` handler edit for the whole draft.
+ */
+export async function handleDraftBoardSubcommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  const draft = getDraft(draftKey(interaction));
+  if (!draft) {
+    await interaction.reply({
+      content: 'No active draft session here. Start one with `/canon draft start`.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  const channel = interaction.channel;
+  if (!channel?.isSendable()) {
+    await interaction.reply({
+      content: "I can't post in this channel — check my permissions.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  // Retire any prior board for this draft — only the newest message should keep updating.
+  draft.liveBoard?.stop();
+  try {
+    const message = await channel.send(boardMessagePayload(draft));
+    draft.liveBoard = createLiveBoard({
+      message,
+      render: () => boardMessagePayload(draft),
+      onError: (error) => console.warn('[draft board] edit failed:', error),
+    });
+    await interaction.editReply({
+      content: `📋 Live draft board posted — it'll update itself as picks land.\n${message.url}`,
+    });
+  } catch (error) {
+    console.warn('[draft board] failed to post board:', error);
+    await interaction.editReply({
+      content: "Couldn't post the live board — check my channel permissions and try again.",
+    });
+  }
+}
+
+/** Refresh button: re-render the board in place. Uses the button's own token (a one-shot click). */
+export async function handleBoardRefresh(interaction: ButtonInteraction): Promise<void> {
+  const draft = getDraft(draftKey(interaction));
+  if (!draft || componentSessionMarker(interaction.customId) !== String(draft.createdAt)) {
+    await interaction.reply({
+      content:
+        'This board is from an earlier draft — run `/canon draft board` for the current one.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  await interaction.update(boardMessagePayload(draft));
+}
+
+/** Grade button: open the interactive grade for the current roster, ephemerally to the clicker. */
+export async function handleBoardGrade(interaction: ButtonInteraction): Promise<void> {
+  const draft = getDraft(draftKey(interaction));
+  if (!draft || componentSessionMarker(interaction.customId) !== String(draft.createdAt)) {
+    await interaction.reply({
+      content:
+        'This board is from an earlier draft — run `/canon draft board` for the current one.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  const grade = gradeSession(draft.session, draft.pool);
+  if (grade.picks.length === 0) {
+    await interaction.reply({
+      content: 'No picks of yours recorded yet — grade once your draft has some picks in.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await editGradeView(interaction, draft, grade, 'overview');
 }
 
 const TONE_EMOJI: Record<Candidate['recommend'], string> = {
@@ -582,8 +701,12 @@ export function normalizeGradeView(value: string | undefined): GradeView {
 export const GRADE_VIEW_ID = 'canon:grade:view';
 export const GRADE_SHARE_ID = 'canon:grade:share';
 
-/** The session marker (`draft.createdAt`, stringified) baked into a grade component's customId. */
-export function gradeSessionMarker(customId: string): string {
+/**
+ * The session marker (`draft.createdAt`, stringified) baked into a `canon:<feature>:<action>:<id>`
+ * component customId — the 4th colon segment. Handlers compare it to the current draft to reject a
+ * control left over from an earlier session. Shared by the grade and board components.
+ */
+export function componentSessionMarker(customId: string): string {
   return customId.split(':')[3] ?? '';
 }
 

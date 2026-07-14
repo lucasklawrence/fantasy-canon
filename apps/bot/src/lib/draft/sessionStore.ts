@@ -11,6 +11,7 @@ import type { DraftSession, FadeEntry, PlayerTier } from '@fantasy-canon/core';
 import type { AdpProvenance } from '../draftPool.js';
 import type { EspnSinkDraftSource } from './espnSinkSource.js';
 import type { DraftPollerHandle } from './poller.js';
+import type { LiveBoardHandle } from './liveBoard.js';
 
 export type DraftSourceKind = 'manual' | 'espn';
 
@@ -25,6 +26,8 @@ export interface LiveDraft {
   /** ESPN capture sink + poller, present only for `source:espn` drafts. */
   sink?: EspnSinkDraftSource;
   poller?: DraftPollerHandle;
+  /** Self-updating channel board (`/canon draft board`), present once posted. Edits past 15-min tokens. */
+  liveBoard?: LiveBoardHandle;
   createdAt: number;
 }
 
@@ -43,6 +46,7 @@ export async function endDraft(key: string): Promise<boolean> {
   const draft = drafts.get(key);
   if (!draft) return false;
   draft.poller?.stop();
+  draft.liveBoard?.stop();
   await draft.sink?.close();
   drafts.delete(key);
   return true;
