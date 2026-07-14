@@ -1,0 +1,53 @@
+import { gradeRoster, type PlayerTier, type RosterPick } from '@fantasy-canon/core';
+import { gradeHeadline, gradePicksBlock } from '../draftSession.js';
+
+/** No K/DST slots, so `required` is deterministic (K/DST are only evaluated when tagged). */
+const SLOTS = { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, BENCH: 6 };
+
+function player(name: string, position: PlayerTier['position'], adp?: number): PlayerTier {
+  return { name, position, adp, source: 'test' };
+}
+
+describe('gradeHeadline', () => {
+  it('summarizes grade, mean value, penalized score, and starters filled', () => {
+    const pool = [player('Steal RB', 'RB', 20), player('Reach WR', 'WR', 30)];
+    const picks: RosterPick[] = [
+      { overall: 10, playerName: 'Reach WR' }, // 10 − 30 = −20 → reach
+      { overall: 40, playerName: 'Steal RB' }, // 40 − 20 = +20 → steal
+    ];
+    const grade = gradeRoster(picks, pool, { rosterSlots: SLOTS });
+    const headline = gradeHeadline(grade);
+
+    // valueScore (−20 + 20)/2 = 0; only 2 of 7 starters fillable → score 0 − 8×5 = −40 → F.
+    expect(headline).toMatch(/^\*\*F\*\*/);
+    expect(headline).toContain('value 0');
+    expect(headline).toContain('score -40');
+    expect(headline).toContain('starters 2/7');
+  });
+});
+
+describe('gradePicksBlock', () => {
+  it('renders a fenced per-pick table with tone glyphs, ADP, and signed value', () => {
+    const pool = [player('Steal RB', 'RB', 20), player('Reach WR', 'WR', 30)];
+    const picks: RosterPick[] = [
+      { overall: 10, playerName: 'Reach WR' },
+      { overall: 40, playerName: 'Steal RB' },
+    ];
+    const block = gradePicksBlock(gradeRoster(picks, pool, { rosterSlots: SLOTS }));
+
+    expect(block.startsWith('```')).toBe(true);
+    expect(block.endsWith('```')).toBe(true);
+    // Draft order: reach first, then steal.
+    expect(block.indexOf('Reach WR')).toBeLessThan(block.indexOf('Steal RB'));
+    expect(block).toContain('🟧'); // reach glyph
+    expect(block).toContain('💎'); // steal glyph
+    expect(block).toContain('adp 30');
+    expect(block).toContain('-20');
+    expect(block).toContain('+20');
+  });
+
+  it('handles an empty roster without throwing', () => {
+    const grade = gradeRoster([], [], { rosterSlots: SLOTS });
+    expect(gradePicksBlock(grade)).toBe('_No picks yet._');
+  });
+});
