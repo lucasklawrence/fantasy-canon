@@ -3,6 +3,7 @@ export * from './cards/leaderboardCard.js';
 export * from './cards/awardsRecapCard.js';
 export * from './cards/throwbackCard.js';
 export * from './cards/cheatSheetCard.js';
+export * from './cards/gradeCard.js';
 export * from './theme.js';
 export * from './graphs/luckGraph.js';
 export * from './graphs/draftProphecyGraph.js';

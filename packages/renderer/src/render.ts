@@ -124,6 +124,8 @@ function renderSvg(
         width,
         height,
       );
+    } else if (payload.type === 'grade') {
+      body += renderGrade(payload as Parameters<typeof renderGrade>[0], theme, width, height);
     }
   }
 
@@ -644,6 +646,154 @@ function renderCheatSheet(
       body += playerRow({ name: f.name, pos: f.pos, note: f.reason, tone: 'fade' }, y);
       y += rowH;
     }
+  }
+
+  return body;
+}
+
+/** Badge color for a letter grade — green A, blue B, amber C, red D/F. */
+function gradeColor(grade: string, theme: typeof DEFAULT_THEME): string {
+  switch ((grade[0] ?? '').toUpperCase()) {
+    case 'A':
+      return theme.colors.accent;
+    case 'B':
+      return theme.colors.primary;
+    case 'C':
+      return theme.colors.secondary;
+    default:
+      return theme.colors.danger;
+  }
+}
+
+/** Green for value gained vs ADP, red for value spent (a reach), muted at par. */
+function valueColor(value: number, theme: typeof DEFAULT_THEME): string {
+  if (value > 0) return theme.colors.accent;
+  if (value < 0) return theme.colors.danger;
+  return theme.colors.muted;
+}
+
+/** A Steals / Reaches column: a header, then up to 3 name · pick · signed-value rows. */
+function gradeColumn(
+  header: string,
+  rows: Array<{ playerName: string; overall: number; value?: number; position?: string }>,
+  x: number,
+  y: number,
+  w: number,
+  theme: typeof DEFAULT_THEME,
+): string {
+  let s = `<text x="${x}" y="${y}" fill="${theme.colors.secondary}" font-family="${theme.fonts.heading}" font-size="20" font-weight="bold">${escape(
+    header,
+  )}</text>`;
+  let ry = y + 36;
+  if (rows.length === 0) {
+    return (
+      s +
+      `<text x="${x}" y="${ry}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="16">—</text>`
+    );
+  }
+  for (const r of rows.slice(0, 3)) {
+    const color = valueColor(r.value ?? 0, theme);
+    s += `<text x="${x}" y="${ry}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="18">${escape(
+      truncate(r.playerName, 18),
+    )}</text>`;
+    if (r.value !== undefined) {
+      s += `<text x="${x + w}" y="${ry}" fill="${color}" font-family="${theme.fonts.body}" font-size="17" text-anchor="end">${escape(
+        signed(r.value),
+      )}</text>`;
+    }
+    s += `<text x="${x}" y="${ry + 18}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="13">${escape(
+      `pick ${r.overall}${r.position ? ` · ${r.position}` : ''}`,
+    )}</text>`;
+    ry += 48;
+  }
+  return s;
+}
+
+function renderGrade(
+  payload: {
+    grade: string;
+    score: number;
+    valueScore: number;
+    starters: { filled: number; required: number; missing: string[] };
+    byPosition: Array<{ pos: string; count: number; avgValue: number }>;
+    steals: Array<{ playerName: string; overall: number; value?: number; position?: string }>;
+    reaches: Array<{ playerName: string; overall: number; value?: number; position?: string }>;
+    footer?: string;
+  },
+  theme: typeof DEFAULT_THEME,
+  width: number,
+  height: number,
+): string {
+  const cx = width / 2;
+  const inner = { x: 72, w: width - 144 };
+  const bottom = height - 48;
+
+  // Hero: a bold grade badge with the value/score/starters headline beneath it.
+  const badgeW = 240;
+  const badgeH = 210;
+  const badgeY = 172;
+  const gColor = gradeColor(payload.grade, theme);
+  let body = `<rect x="${cx - badgeW / 2}" y="${badgeY}" width="${badgeW}" height="${badgeH}" rx="26" fill="${gColor}" />`;
+  body += `<text x="${cx}" y="${badgeY + badgeH / 2 + 48}" fill="${theme.colors.background}" font-family="${theme.fonts.heading}" font-size="132" font-weight="bold" text-anchor="middle">${escape(
+    payload.grade,
+  )}</text>`;
+
+  const headlineY = badgeY + badgeH + 52;
+  const headline = `value ${signed(payload.valueScore)}   ·   score ${signed(payload.score)}   ·   starters ${payload.starters.filled}/${payload.starters.required}`;
+  body += `<text x="${cx}" y="${headlineY}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="27" text-anchor="middle">${escape(
+    headline,
+  )}</text>`;
+
+  let y = headlineY + 40;
+  body += `<line x1="${inner.x}" y1="${y}" x2="${inner.x + inner.w}" y2="${y}" stroke="${theme.colors.surface}" stroke-width="1.5" />`;
+  y += 44;
+
+  // Per-position value bars (bar length ∝ picks drafted, color ∝ mean value).
+  if (payload.byPosition.length) {
+    body += `<text x="${inner.x}" y="${y}" fill="${theme.colors.muted}" font-family="${theme.fonts.heading}" font-size="18" font-weight="bold">By position</text>`;
+    y += 34;
+    const maxCount = Math.max(1, ...payload.byPosition.map((p) => p.count));
+    const labelW = 150;
+    const valW = 110;
+    const barX = inner.x + labelW;
+    const barMaxW = inner.w - labelW - valW;
+    const rowH = 44;
+    const barH = 22;
+    for (const bar of payload.byPosition) {
+      const rowCy = y + rowH / 2;
+      const color = valueColor(bar.avgValue, theme);
+      body += `<text x="${inner.x}" y="${rowCy + 6}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="19">${escape(
+        `${bar.pos} ×${bar.count}`,
+      )}</text>`;
+      body += `<rect x="${barX}" y="${rowCy - barH / 2}" width="${barMaxW}" height="${barH}" rx="6" fill="${theme.colors.surface}" opacity="0.5" />`;
+      const barW = Math.max(3, (bar.count / maxCount) * barMaxW);
+      body += `<rect x="${barX}" y="${rowCy - barH / 2}" width="${barW}" height="${barH}" rx="6" fill="${color}" opacity="0.9" />`;
+      body += `<text x="${inner.x + inner.w}" y="${rowCy + 6}" fill="${color}" font-family="${theme.fonts.body}" font-size="18" text-anchor="end">${escape(
+        signed(bar.avgValue),
+      )}</text>`;
+      y += rowH;
+    }
+    y += 34;
+  }
+
+  // Steals and Reaches, side by side.
+  const colGap = 40;
+  const colW = (inner.w - colGap) / 2;
+  body += gradeColumn('💎 Steals', payload.steals, inner.x, y, colW, theme);
+  body += gradeColumn('🟧 Reaches', payload.reaches, inner.x + colW + colGap, y, colW, theme);
+
+  // Unfilled-starter warning + footer small print, pinned to the bottom.
+  let footY = bottom;
+  if (payload.footer) {
+    body += `<text x="${cx}" y="${footY}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="14" text-anchor="middle">${escape(
+      payload.footer,
+    )}</text>`;
+    footY -= 26;
+  }
+  if (payload.starters.missing.length) {
+    body += `<text x="${cx}" y="${footY}" fill="${theme.colors.danger}" font-family="${theme.fonts.body}" font-size="16" text-anchor="middle">${escape(
+      `Unfilled starters: ${payload.starters.missing.join(', ')}`,
+    )}</text>`;
   }
 
   return body;
