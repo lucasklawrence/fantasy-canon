@@ -7,7 +7,12 @@
  * (`createDraftSession`/`applyPick`/`toDraftState`, `gradeSession`) — everything here is glue + display.
  */
 
-import { ChatInputCommandInteraction, EmbedBuilder, MessageFlags } from 'discord.js';
+import {
+  AttachmentBuilder,
+  ChatInputCommandInteraction,
+  EmbedBuilder,
+  MessageFlags,
+} from 'discord.js';
 import {
   applyPick,
   bestAvailable,
@@ -22,6 +27,7 @@ import {
   type PickVerdict,
   type RosterGrade,
 } from '@fantasy-canon/core';
+import { renderGradeCard, type GradeCardOptions } from '@fantasy-canon/renderer';
 import { loadRankings, ROSTER_SLOTS } from '../../lib/draftPool.js';
 import { EspnSinkDraftSource } from '../../lib/draft/espnSinkSource.js';
 import { runDraftPoller } from '../../lib/draft/poller.js';
@@ -248,7 +254,27 @@ export async function handleDraftGradeSubcommand(
     return;
   }
 
-  await interaction.reply({ embeds: [renderGrade(draft, grade)], flags: MessageFlags.Ephemeral });
+  // Rendering the PNG can exceed the 3s ACK deadline on a cold start, so defer first.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  // The card is the shareable hero; the embed carries the full per-pick table it omits. If the
+  // render fails we still ship the embed — it's self-sufficient (headline + every pick).
+  try {
+    const options = toGradeCardOptions(grade, {
+      teams: draft.teams,
+      slot: draft.slot,
+      adpAsOf: draft.adp?.asOf,
+    });
+    const png = await renderGradeCard(options);
+    const card = new AttachmentBuilder(png, { name: GRADE_CARD_FILE });
+    await interaction.editReply({
+      embeds: [renderGrade(draft, grade).setImage(`attachment://${GRADE_CARD_FILE}`)],
+      files: [card],
+    });
+  } catch (error) {
+    console.warn('[draft grade] card render failed, sending embed only:', error);
+    await interaction.editReply({ embeds: [renderGrade(draft, grade)] });
+  }
 }
 
 export async function handleDraftStopSubcommand(
@@ -338,27 +364,67 @@ export function gradePicksBlock(grade: RosterGrade): string {
   return `\`\`\`\n${rows.join('\n')}\n\`\`\``;
 }
 
-/** Build the roster-grade embed for a finished (or in-progress) session. */
+/** Attachment filename for the rendered grade card; the embed's image URL must match this. */
+const GRADE_CARD_FILE = 'draft-grade.png';
+
+/** Preferred left-to-right order for the card's per-position bars; unknowns sort last, alphabetically. */
+const POSITION_ORDER = ['RB', 'WR', 'TE', 'QB', 'K', 'DST', 'FLEX'];
+
+/** Session context the card footer/subtitle need — just enough to keep this decoupled from LiveDraft. */
+export interface GradeCardContext {
+  teams: number;
+  slot: number;
+  /** The market ADP "as of" date, when the board carried live ADP. */
+  adpAsOf?: string;
+}
+
+/** Map a RosterGrade + session context onto the renderer's plain card options (renderer stays core-free). */
+export function toGradeCardOptions(grade: RosterGrade, ctx: GradeCardContext): GradeCardOptions {
+  const rank = (pos: string): number => {
+    const i = POSITION_ORDER.indexOf(pos);
+    return i === -1 ? POSITION_ORDER.length : i;
+  };
+  const byPosition = Object.entries(grade.byPosition)
+    .map(([pos, b]) => ({ pos, count: b.count, avgValue: b.avgValue }))
+    .sort((a, b) => rank(a.pos) - rank(b.pos) || a.pos.localeCompare(b.pos));
+
+  const toRow = (p: GradedPick) => ({
+    playerName: p.playerName,
+    overall: p.overall,
+    value: p.value,
+    position: p.position,
+  });
+
+  const footerBits = [`${ctx.teams}-team PPR`, `slot ${ctx.slot}`];
+  if (ctx.adpAsOf) footerBits.push(`ADP as of ${ctx.adpAsOf}`);
+  footerBits.push('grade assumes a completed roster');
+
+  return {
+    title: 'Your draft grade',
+    subtitle: `${ctx.teams}-team PPR • ${grade.picks.length} picks • slot ${ctx.slot}`,
+    grade: grade.grade,
+    score: grade.score,
+    valueScore: grade.valueScore,
+    starters: grade.starters,
+    byPosition,
+    steals: grade.steals.map(toRow),
+    reaches: grade.reaches.map(toRow),
+    footer: footerBits.join(' • '),
+  };
+}
+
+/**
+ * Build the roster-grade embed for a finished (or in-progress) session. The steals/reaches breakdown
+ * lives on the rendered card (see {@link toGradeCardOptions}); the embed carries the full per-pick
+ * table the card omits, plus the unfilled-starters note so it stays informative if the card render
+ * fails and we ship the embed alone.
+ */
 function renderGrade(draft: LiveDraft, grade: RosterGrade): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setTitle(`📋 Draft grade: ${grade.grade}`)
     .setDescription(`${gradeHeadline(grade)}\n${gradePicksBlock(grade)}`)
     .setFooter({ text: gradeFooter(draft) });
 
-  if (grade.steals.length) {
-    embed.addFields({
-      name: 'Steals',
-      value: grade.steals.map((p) => `💎 ${p.playerName} (${signed(p.value ?? 0)})`).join('\n'),
-      inline: true,
-    });
-  }
-  if (grade.reaches.length) {
-    embed.addFields({
-      name: 'Reaches',
-      value: grade.reaches.map((p) => `🟧 ${p.playerName} (${signed(p.value ?? 0)})`).join('\n'),
-      inline: true,
-    });
-  }
   if (grade.starters.missing.length) {
     embed.addFields({ name: 'Unfilled starters', value: grade.starters.missing.join(', ') });
   }
