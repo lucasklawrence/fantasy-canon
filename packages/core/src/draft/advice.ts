@@ -1,29 +1,38 @@
 /**
- * Pure projection from a live {@link DraftSession} to the {@link AdviceView} the localhost dashboard
- * renders. Runs the same VBD engine (`bestAvailable`) the `/canon draft` commands use, then shapes
- * the result for a glanceable "you're on the clock — take this" screen: the top recommendation, a
- * few alternatives, the best available at each position you still need, your roster so far, and how
- * many picks until you're up.
+ * Pure projection from a live {@link DraftSession} to the `AdviceView` a draft dashboard renders.
+ * Runs the same VBD engine (`bestAvailable`) the `/canon draft` commands use, then shapes the result
+ * for a glanceable "you're on the clock — take this" screen: the top recommendation, a few
+ * alternatives, the best available at each position you still need, your roster so far, and how many
+ * picks until you're up.
  *
  * No I/O, no clock — it's a function of `(session, pool)`, so it unit-tests against a canned session
- * and the dashboard/runner just re-invoke it after every pick. The runner stamps `updatedAt` when it
- * serves this; keeping time out of here keeps the projection deterministic.
+ * and every surface (the bot's localhost advisor, the `apps/api` Activity backend) re-invokes it
+ * after each pick. Callers stamp their own `updatedAt` when they serve it; keeping time out of here
+ * keeps the projection deterministic. Lives in `core` (not an app) precisely because it is pure and
+ * shared by more than one surface.
  */
 
+import { bestAvailable, type Candidate, type Recommendation } from '../rankings/bestAvailable.js';
+import { normalizeName, type PlayerTier, type Position } from '../rankings/parse.js';
 import {
-  bestAvailable,
   draftOrder,
   myUpcomingOveralls,
-  normalizeName,
   slotOnClock,
   toDraftState,
-  type Candidate,
   type DraftSession,
-  type PlayerTier,
-  type Position,
-  type Recommendation,
-} from '@fantasy-canon/core';
-import type { AdpProvenance } from '../lib/draftPool.js';
+} from './session.js';
+
+/**
+ * Provenance for a live ADP overlay, surfaced to callers so stale market data is detectable. Lives
+ * here (rather than in an app's loader) so both the projection and the loaders that produce it share
+ * one definition.
+ */
+export interface AdpProvenance {
+  asOf: string;
+  sampleSize: number;
+  /** How many ADP-only players deepened the research board. */
+  added: number;
+}
 
 /** One player as shown on the dashboard — engine numbers plus a short human reason. */
 export interface CandidateView {
@@ -51,7 +60,7 @@ export interface RecentPick {
   mine: boolean;
 }
 
-/** Everything the dashboard needs for one render. Plain JSON — serialized straight to `/state`. */
+/** Everything the dashboard needs for one render. Plain JSON — serialized straight to the wire. */
 export interface AdviceView {
   /** Overall pick on the clock right now (1-based). */
   currentOverall: number;

@@ -21,12 +21,12 @@
 import { chromium, type Browser, type Page } from 'playwright-core';
 import {
   applyPicks,
+  buildAdviceView,
   createDraftSession,
   diffNewPicks,
   type DraftSession,
 } from '@fantasy-canon/core';
 import { loadRankings, ROSTER_SLOTS } from '../lib/draftPool.js';
-import { buildAdviceView } from './advice.js';
 import { createPlaywrightReader } from './playwrightReader.js';
 import { PlaywrightEspnDraftSource } from './playwrightSource.js';
 import { startAdviceServer, type ServeState } from './server.js';

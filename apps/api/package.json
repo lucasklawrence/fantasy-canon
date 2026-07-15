@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "dev": "ts-node --esm src/index.ts",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
     "build": "tsc -b",
     "lint": "eslint src --ext .ts"
   },
@@ -15,6 +16,10 @@
     "@fantasy-canon/db": "workspace:*",
     "@fantasy-canon/espn-client": "workspace:*",
     "@fantasy-canon/shared": "workspace:*",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
   }
 }

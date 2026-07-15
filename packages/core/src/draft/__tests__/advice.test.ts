@@ -1,11 +1,7 @@
-import {
-  applyPicks,
-  createDraftSession,
-  type DraftPick,
-  type DraftSession,
-  type PlayerTier,
-} from '@fantasy-canon/core';
 import { describe, expect, it } from 'vitest';
+import { type DraftPick } from '../../rankings/bestAvailable.js';
+import { type PlayerTier } from '../../rankings/parse.js';
+import { applyPicks, createDraftSession, type DraftSession } from '../session.js';
 import { buildAdviceView } from '../advice.js';
 
 function tier(name: string, position: PlayerTier['position'], adp: number): PlayerTier {

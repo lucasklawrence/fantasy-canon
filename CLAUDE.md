@@ -67,8 +67,13 @@ committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
   - `services/discord.ts` (client + interaction handlers). Slash commands live in `src/commands/canon/*`
     (bids, faabPace, leaderboard, rivalries, storylines, timeline, transactions, …). Shared helpers in
     `src/lib/` (leagueInfo, teamNames, transactions). Register commands with `run deploy`.
-- **`api`** — placeholder. `src/index.ts` just logs a stub message; no server wired up yet. Build it
-  out here when an HTTP surface is needed.
+- **`api`** — the real-time web draft dashboard backend (#127), built to run as a **Discord Activity**
+  (this app is the Activity's mapped backend + static host; see `docs/decisions/0005`). `node:http` +
+  a `ws` WebSocket push serve the same `buildAdviceView` projection as the bot's `/canon draft`
+  commands: `hub.ts` (in-memory session), `routes.ts` (pure routing), `board.ts` (self-contained dev
+  page), `server.ts` (http+ws shell), `pool.ts` (ADP-only pool). Run with `pnpm -C apps/api run dev`.
+  Read-only — never submits a pick. The Embedded App SDK client + portal registration are later
+  phases (ADR 0005).
 
 ### `packages/`
 
