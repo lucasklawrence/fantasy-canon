@@ -30,6 +30,28 @@ export interface AdviceServerHandle {
   close(): Promise<void>;
 }
 
+/** What to send for a request — a pure value so routing is testable without a real socket. */
+export interface HttpReply {
+  status: number;
+  contentType: string;
+  body: string;
+}
+
+/**
+ * Route one request URL to its reply. Pure: `/state` serializes the current {@link ServeState},
+ * `/` serves the dashboard page, anything else 404s. This is the whole server minus the transport,
+ * so it's unit-tested directly (no port, no `fetch`, no lingering sockets).
+ */
+export function routeRequest(url: string, getState: () => ServeState): HttpReply {
+  if (url === '/state') {
+    return { status: 200, contentType: 'application/json', body: JSON.stringify(getState()) };
+  }
+  if (url === '/' || url.startsWith('/?') || url === '/index.html') {
+    return { status: 200, contentType: 'text/html; charset=utf-8', body: PAGE_HTML };
+  }
+  return { status: 404, contentType: 'text/plain; charset=utf-8', body: 'not found' };
+}
+
 /**
  * Start the dashboard. `getState` is called fresh on every `/state` request so the page always sees
  * the latest projection. Resolves once bound; binds to 127.0.0.1 (never the network).
@@ -43,22 +65,11 @@ export function startAdviceServer(
 
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
-      const url = req.url ?? '/';
-      if (url === '/state') {
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Cache-Control', 'no-store');
-        res.end(JSON.stringify(getState()));
-        return;
-      }
-      if (url === '/' || url.startsWith('/?') || url === '/index.html') {
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.end(PAGE_HTML);
-        return;
-      }
-      res.statusCode = 404;
-      res.end('not found');
+      const reply = routeRequest(req.url ?? '/', getState);
+      res.statusCode = reply.status;
+      res.setHeader('Content-Type', reply.contentType);
+      res.setHeader('Cache-Control', 'no-store');
+      res.end(reply.body);
     });
 
     server.once('error', reject);
