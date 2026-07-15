@@ -1,111 +1,24 @@
 /**
- * The localhost dashboard for the live draft advisor. A tiny `node:http` server that binds to
- * 127.0.0.1 only and serves two things: the single-page UI at `/` and the current {@link AdviceView}
- * as JSON at `/state`, which the page polls once a second and re-renders. No framework, no build
- * step, no external assets — the page is one inline HTML string so it works offline mid-draft.
+ * The draft dashboard page, served at `/`. One self-contained HTML string — inline CSS + vanilla JS,
+ * no framework, no build step, no external assets — so it works offline and drops straight into the
+ * Discord Activity iframe once the proxy mapping is wired (ADR 0005).
  *
- * Display-only and local by construction: it never talks to ESPN and exposes nothing but the
- * advisor state the runner hands it via `getState`. It is the read-side twin of the read-only
- * capture — together they let you watch "best available" update without touching the ESPN tab.
+ * Transport is **WebSocket** (`/api/ws`), the only push channel that survives the Activity proxy
+ * sandbox; it falls back to polling `/api/state` if the socket drops. A small manual-entry form
+ * (`POST /api/pick`) makes the board usable standalone for mock-draft testing. The client script uses
+ * string concatenation (no backticks / no ${…}) so it lives in this outer template literal cleanly.
+ *
+ * NEXT PHASE (ADR 0005): before this renders inside Discord it needs the Embedded App SDK handshake
+ * (ready → authorize → server-side token exchange → authenticate) and API/WS calls routed through the
+ * `/.proxy` prefix. That adapter is deliberately out of this scaffold; here the board runs in dev
+ * mode against the local backend.
  */
-
-import http from 'node:http';
-import type { AdviceView } from '@fantasy-canon/core';
-
-/** What the runner exposes to the page each tick. */
-export interface ServeState {
-  /** The current projection, or undefined before the first successful read. */
-  view?: AdviceView;
-  /** Human status line, e.g. "watching draft", "waiting for the draft to start", "capture error". */
-  status: string;
-  /** ISO timestamp of the last update (stamped by the runner). */
-  updatedAt: string;
-  /** The ESPN tab URL the capture is attached to, for display/confirmation. */
-  source?: string;
-}
-
-export interface AdviceServerHandle {
-  url: string;
-  port: number;
-  close(): Promise<void>;
-}
-
-/** What to send for a request — a pure value so routing is testable without a real socket. */
-export interface HttpReply {
-  status: number;
-  contentType: string;
-  body: string;
-}
-
-/**
- * Route one request URL to its reply. Pure: `/state` serializes the current {@link ServeState},
- * `/` serves the dashboard page, anything else 404s. This is the whole server minus the transport,
- * so it's unit-tested directly (no port, no `fetch`, no lingering sockets).
- */
-export function routeRequest(url: string, getState: () => ServeState): HttpReply {
-  if (url === '/state') {
-    return { status: 200, contentType: 'application/json', body: JSON.stringify(getState()) };
-  }
-  if (url === '/' || url.startsWith('/?') || url === '/index.html') {
-    return { status: 200, contentType: 'text/html; charset=utf-8', body: PAGE_HTML };
-  }
-  return { status: 404, contentType: 'text/plain; charset=utf-8', body: 'not found' };
-}
-
-/**
- * Start the dashboard. `getState` is called fresh on every `/state` request so the page always sees
- * the latest projection. Resolves once bound; binds to 127.0.0.1 (never the network).
- */
-export function startAdviceServer(
-  getState: () => ServeState,
-  opts: { port?: number; host?: string } = {},
-): Promise<AdviceServerHandle> {
-  const host = opts.host ?? '127.0.0.1';
-  const port = opts.port ?? 4599;
-
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      // Never let a bad tick escape the callback — an uncaught throw here would take the whole
-      // advisor down mid-draft. Any failure becomes a 500 and the dashboard keeps polling.
-      try {
-        const reply = routeRequest(req.url ?? '/', getState);
-        res.statusCode = reply.status;
-        res.setHeader('Content-Type', reply.contentType);
-        res.setHeader('Cache-Control', 'no-store');
-        res.end(reply.body);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        res.statusCode = 500;
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-        res.end(`advisor error: ${message}`);
-      }
-    });
-
-    server.once('error', reject);
-    server.listen(port, host, () => {
-      const address = server.address();
-      const boundPort = address && typeof address === 'object' ? address.port : port;
-      resolve({
-        url: `http://${host}:${boundPort}/`,
-        port: boundPort,
-        close: () =>
-          new Promise<void>((res) => {
-            server.close(() => res());
-          }),
-      });
-    });
-  });
-}
-
-// The dashboard page. One self-contained string: inline CSS + vanilla JS that polls /state. The
-// client script deliberately uses string concatenation (no backticks / no ${…}) so this file can
-// hold it in a template literal without escaping games.
-const PAGE_HTML = `<!doctype html>
+export const BOARD_HTML = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Live Draft Advisor</title>
+<title>Draft Dashboard</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -122,6 +35,12 @@ const PAGE_HTML = `<!doctype html>
   main { max-width: 1100px; margin: 0 auto; padding: 18px 20px 48px; display: grid;
     grid-template-columns: 1fr 300px; gap: 18px; }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .entry { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+  .entry input { flex: 1; min-width: 180px; padding: 9px 12px; border-radius: 9px; border: 1px solid #2a3145;
+    background: #10141d; color: #e7e9ee; font-size: 14px; }
+  .entry button { padding: 9px 14px; border-radius: 9px; border: 1px solid #2a3145; background: #1b2233;
+    color: #cdd4e4; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .entry button.ghost { background: transparent; color: #8b93a9; }
   .turn { grid-column: 1 / -1; padding: 12px 16px; border-radius: 12px; background: #151a24;
     border: 1px solid #222634; font-size: 14px; color: #b9c1d4; }
   .turn.mine { background: #12261b; border-color: #1f5138; color: #d6ffe6; }
@@ -158,11 +77,16 @@ const PAGE_HTML = `<!doctype html>
 </head>
 <body>
 <header>
-  <h1>Live Draft Advisor</h1>
+  <h1>Draft Dashboard</h1>
   <span id="status" class="pill">connecting…</span>
   <div class="clock" id="clock"></div>
 </header>
 <main>
+  <form class="entry" id="entry">
+    <input id="playerName" type="text" placeholder="Enter the next pick — player name…" autocomplete="off" />
+    <button type="submit">Add pick</button>
+    <button type="button" class="ghost" id="reset">Reset</button>
+  </form>
   <div class="turn" id="turn"></div>
   <section class="rec" id="rec-wrap" style="grid-column:1 / -1">
     <h2>Recommended pick</h2>
@@ -217,6 +141,13 @@ const PAGE_HTML = `<!doctype html>
     s.className = "pill" + (kind ? " " + kind : "");
   }
 
+  function fill(id, items, mk, emptyText) {
+    var node = document.getElementById(id);
+    clear(node);
+    if (!items || items.length === 0) { node.appendChild(el("div", "empty", emptyText)); return; }
+    items.forEach(function (it) { node.appendChild(mk(it)); });
+  }
+
   function render(state) {
     var v = state.view;
     if (!v) {
@@ -252,8 +183,7 @@ const PAGE_HTML = `<!doctype html>
       var c = v.recommended;
       var head = el("div");
       head.appendChild(el("span", "pos " + c.position, c.position));
-      var nm = el("span", "name", " " + c.name);
-      head.appendChild(nm);
+      head.appendChild(el("span", "name", " " + c.name));
       head.appendChild(el("span", "tag " + c.recommend, " " + c.recommend));
       rec.appendChild(head);
       rec.appendChild(el("div", "meta", [tierStr(c), adpStr(c), "VONA " + c.vona].filter(Boolean).join(" · ")));
@@ -290,7 +220,7 @@ const PAGE_HTML = `<!doctype html>
     var recent = document.getElementById("recent");
     clear(recent);
     if (!v.recentPicks || v.recentPicks.length === 0) {
-      recent.appendChild(el("div", "empty", "No picks captured yet."));
+      recent.appendChild(el("div", "empty", "No picks entered yet."));
     } else {
       v.recentPicks.forEach(function (p) {
         var r = el("div", "row" + (p.mine ? " mine" : ""));
@@ -304,27 +234,53 @@ const PAGE_HTML = `<!doctype html>
     var meta = document.getElementById("meta");
     var bits = [];
     if (v.adp) bits.push("ADP " + v.adp.asOf + " (" + v.adp.sampleSize + " drafts)");
-    if (state.source) bits.push("source " + state.source);
     bits.push("updated " + new Date(state.updatedAt).toLocaleTimeString());
     meta.textContent = bits.join("  ·  ");
   }
 
-  function fill(id, items, mk, emptyText) {
-    var node = document.getElementById(id);
-    clear(node);
-    if (!items || items.length === 0) { node.appendChild(el("div", "empty", emptyText)); return; }
-    items.forEach(function (it) { node.appendChild(mk(it)); });
-  }
-
-  function tick() {
-    fetch("/state", { cache: "no-store" })
+  // --- transport: WebSocket push, with a polling fallback if the socket drops ---
+  var pollTimer = null;
+  function poll() {
+    fetch("/api/state", { cache: "no-store" })
       .then(function (r) { return r.json(); })
       .then(render)
-      .catch(function () { setStatus("advisor offline", "err"); });
+      .catch(function () { setStatus("backend offline", "err"); });
+  }
+  function startPolling() { if (!pollTimer) { poll(); pollTimer = setInterval(poll, 2000); } }
+  function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+  function connect() {
+    poll(); // paint immediately from the current state, don't wait for the first push
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    var ws;
+    try { ws = new WebSocket(proto + location.host + "/api/ws"); }
+    catch (e) { startPolling(); return; }
+    ws.onopen = function () { stopPolling(); };
+    ws.onmessage = function (ev) {
+      try { render(JSON.parse(ev.data)); } catch (e) { /* ignore malformed frame */ }
+    };
+    ws.onclose = function () { startPolling(); setTimeout(connect, 3000); };
+    ws.onerror = function () { try { ws.close(); } catch (e) {} };
   }
 
-  setInterval(tick, 1200);
-  tick();
+  // --- manual entry (POST /api/pick) — makes the board usable standalone for mock-draft testing ---
+  document.getElementById("entry").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var input = document.getElementById("playerName");
+    var name = input.value.trim();
+    if (!name) return;
+    fetch("/api/pick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ playerName: name })
+    }).then(function () { input.value = ""; input.focus(); poll(); })
+      .catch(function () { setStatus("could not add pick", "err"); });
+  });
+  document.getElementById("reset").addEventListener("click", function () {
+    fetch("/api/reset", { method: "POST" }).then(poll).catch(function () {});
+  });
+
+  connect();
 })();
 </script>
 </body>

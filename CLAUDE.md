@@ -25,7 +25,7 @@ waiver legends, draft regrets), and posts shareable visuals + slash-command outp
   extensions in relative import specifiers even from `.ts` sources, as the code already does).
 - **TypeScript** (strict, see `tsconfig.base.json`), **Vitest** for tests (`vitest.config.ts`),
   **ESLint** (type-aware) + **Prettier**.
-- Apps: discord.js v14 (bot) is the live app; `apps/api` is a placeholder stub.
+- Apps: discord.js v14 (bot) is the live app; `apps/api` is the draft-dashboard backend (#127, ADR 0005).
 
 ## Commands (run from repo root)
 
@@ -38,7 +38,7 @@ waiver legends, draft regrets), and posts shareable visuals + slash-command outp
 | Format                                                | `pnpm format`                          |
 | Build everything (flat `dist/` each, must stay green) | `pnpm build`                           |
 | Run the bot                                           | `pnpm dev`                             |
-| Run the API stub                                      | `pnpm -C apps/api run dev`             |
+| Run the API (draft dashboard)                         | `pnpm -C apps/api run dev`             |
 | Debug ESPN client                                     | `pnpm debug:espn -- <args>`            |
 | Deploy slash commands                                 | `pnpm -C apps/bot run deploy`          |
 
@@ -67,8 +67,14 @@ committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
   - `services/discord.ts` (client + interaction handlers). Slash commands live in `src/commands/canon/*`
     (bids, faabPace, leaderboard, rivalries, storylines, timeline, transactions, …). Shared helpers in
     `src/lib/` (leagueInfo, teamNames, transactions). Register commands with `run deploy`.
-- **`api`** — placeholder. `src/index.ts` just logs a stub message; no server wired up yet. Build it
-  out here when an HTTP surface is needed.
+- **`api`** — the real-time web draft dashboard backend (#127), built to run as a **Discord Activity**
+  (this app is the Activity's mapped backend + static host; see `docs/decisions/0005`). `node:http` +
+  a `ws` WebSocket push serve the same `buildAdviceView` projection as the bot's `/canon draft`
+  commands: `hub.ts` (in-memory session), `routes.ts` (pure routing), `board.ts` (self-contained dev
+  page), `server.ts` (http+ws shell), `pool.ts` (ADP-only pool). Run with `pnpm -C apps/api run dev`.
+  Read-only against ESPN — it never submits a pick to ESPN; manual entry (`POST /api/pick`) only
+  advances the in-memory board. The Embedded App SDK client + portal registration are later phases
+  (ADR 0005).
 
 ### `packages/`
 

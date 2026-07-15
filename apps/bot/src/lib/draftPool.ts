@@ -15,10 +15,15 @@ import {
   mergeAdpIntoPool,
   mergeRankings,
   parseRankingsReport,
+  type AdpProvenance,
   type FadeEntry,
   type PlayerTier,
 } from '@fantasy-canon/core';
 import { fetchFfcAdp } from './ffcAdp.js';
+
+// `AdpProvenance` now lives in `core` (shared by the pure projection and the loaders that produce
+// it). Re-export it here so the `/canon draft` callers that read it off the loader stay unchanged.
+export type { AdpProvenance };
 
 /** Starting lineup + bench for our standing 12-team league. Drives replacement baselines. */
 export const ROSTER_SLOTS: Record<string, number> = {
@@ -32,14 +37,6 @@ export const ROSTER_SLOTS: Record<string, number> = {
   BENCH: 6,
 };
 export const ROSTER_SIZE = Object.values(ROSTER_SLOTS).reduce((a, b) => a + b, 0);
-
-/** Provenance for the live ADP overlay, surfaced to callers so stale data is detectable. */
-export interface AdpProvenance {
-  asOf: string;
-  sampleSize: number;
-  /** How many ADP-only players deepened the research board. */
-  added: number;
-}
 
 export interface LoadedRankings {
   players: PlayerTier[];
