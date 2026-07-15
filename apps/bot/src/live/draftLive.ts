@@ -120,8 +120,7 @@ async function main(): Promise<void> {
       '    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222   (macOS)',
     );
     console.error('  then open your ESPN draft room in that Chrome and re-run.');
-    process.exitCode = 1;
-    return;
+    process.exit(1);
   }
 
   const page = findEspnDraftPage(browser);
@@ -130,8 +129,9 @@ async function main(): Promise<void> {
     console.error(
       '  Open https://fantasy.espn.com/football/draft… in the debugged Chrome, then re-run.',
     );
-    process.exitCode = 1;
-    return;
+    // Explicit exit: once connectOverCDP succeeds its WebSocket keeps the event loop alive, so a
+    // bare `return` here would hang the CLI instead of dropping back to the prompt.
+    process.exit(1);
   }
   console.log(`  attached to: ${page.url()}`);
 
@@ -214,5 +214,6 @@ async function main(): Promise<void> {
 main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   console.error(message);
-  process.exitCode = 1;
+  // Explicit: if we failed after attaching, the CDP socket would otherwise keep the process alive.
+  process.exit(1);
 });

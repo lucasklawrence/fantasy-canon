@@ -93,7 +93,11 @@ export interface BuildAdviceOptions {
   recent?: number;
 }
 
-/** Starting-lineup requirement per drafted position (FLEX handled loosely as a soft need). */
+/**
+ * Positions the advisor tracks as needs. Deliberately the four skill positions the VBD engine
+ * ranks — K and DST are out of scope (no ADP/pool for them, they're last-round throwaways), so
+ * `needs`/`byNeed` never surface them and the "skill starters set" copy is scoped to match.
+ */
 const STARTER_POSITIONS: readonly Position[] = ['RB', 'WR', 'TE', 'QB'];
 
 function reasonFor(c: Candidate, myNextOverall: number | undefined): string {
@@ -131,7 +135,12 @@ export function buildAdviceView(
   const state = toDraftState(session);
   const candidates = bestAvailable(pool, state);
 
-  const currentOverall = session.picks.length + 1;
+  const totalPicks = leagueSize * rounds;
+  const boardComplete = session.picks.length >= totalPicks;
+  const complete = opts.complete ?? boardComplete;
+  // Once every pick is in, picks.length+1 rolls past the board; clamp the clock fields so the
+  // header shows the final pick instead of inventing a nonexistent extra round.
+  const currentOverall = Math.min(session.picks.length + 1, totalPicks);
   const round = Math.ceil(currentOverall / leagueSize);
   const pickInRound = currentOverall - (round - 1) * leagueSize;
   const onTheClockSlot = slotOnClock(currentOverall, leagueSize, order);
@@ -189,7 +198,7 @@ export function buildAdviceView(
     pickInRound,
     onTheClockSlot,
     mySlot: myTeamId,
-    isMyPick: onTheClockSlot === myTeamId,
+    isMyPick: onTheClockSlot === myTeamId && !complete,
     myNextOverall,
     picksUntilMine,
     recommended,
@@ -200,7 +209,7 @@ export function buildAdviceView(
     recentPicks,
     remaining: candidates.length,
     poolSize: pool.length,
-    complete: opts.complete ?? false,
+    complete,
     adp: opts.adp,
   };
 }

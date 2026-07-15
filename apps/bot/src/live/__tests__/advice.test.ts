@@ -92,4 +92,19 @@ describe('buildAdviceView', () => {
     expect(view.alternatives).toEqual([]);
     expect(view.remaining).toBe(0);
   });
+
+  it('clamps the clock and flags complete when the board is full', () => {
+    // 2-team, 1 RB + 1 WR → 2 rounds, 4 total picks. Fill every one.
+    const s = createDraftSession({ leagueSize: 2, myTeamId: 1, rosterSlots: { RB: 1, WR: 1 } });
+    const pool = [tier('A', 'RB', 1), tier('B', 'WR', 2), tier('C', 'RB', 3), tier('D', 'WR', 4)];
+    const full = applyPicks(s, [pick(1, 'A'), pick(2, 'B'), pick(3, 'C'), pick(4, 'D')]);
+    const view = buildAdviceView(full, pool);
+
+    expect(view.complete).toBe(true);
+    expect(view.currentOverall).toBe(4); // clamped to the last pick, not a phantom 5
+    expect(view.round).toBe(2); // not 3
+    expect(view.pickInRound).toBe(2);
+    expect(view.isMyPick).toBe(false); // draft's over, never "your pick"
+    expect(view.recommended).toBeUndefined();
+  });
 });

@@ -65,11 +65,20 @@ export function startAdviceServer(
 
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
-      const reply = routeRequest(req.url ?? '/', getState);
-      res.statusCode = reply.status;
-      res.setHeader('Content-Type', reply.contentType);
-      res.setHeader('Cache-Control', 'no-store');
-      res.end(reply.body);
+      // Never let a bad tick escape the callback — an uncaught throw here would take the whole
+      // advisor down mid-draft. Any failure becomes a 500 and the dashboard keeps polling.
+      try {
+        const reply = routeRequest(req.url ?? '/', getState);
+        res.statusCode = reply.status;
+        res.setHeader('Content-Type', reply.contentType);
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(reply.body);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end(`advisor error: ${message}`);
+      }
     });
 
     server.once('error', reject);
@@ -254,12 +263,12 @@ const PAGE_HTML = `<!doctype html>
     }
 
     fill("alts", v.alternatives, candRow, "No alternatives.");
-    fill("byneed", (v.byNeed || []).map(function (x) { return x.candidate; }), candRow, "Starters filled.");
+    fill("byneed", (v.byNeed || []).map(function (x) { return x.candidate; }), candRow, "Skill starters filled.");
 
     var needs = document.getElementById("needs");
     clear(needs);
     if (!v.needs || v.needs.length === 0) {
-      needs.appendChild(el("span", "need none", "Starters set"));
+      needs.appendChild(el("span", "need none", "Skill starters set"));
     } else {
       v.needs.forEach(function (p) { needs.appendChild(el("span", "need", p)); });
     }
