@@ -49,10 +49,36 @@ export interface LoadedRankings {
 }
 
 /**
- * Build the draft pool: research boards merged, then live ADP overlaid (best-effort). Returns an
- * empty pool (never throws) when no research board is present.
+ * Build the draft pool: research boards merged (when any exist), then live market ADP overlaid
+ * (best-effort). With no research present the pool runs off ADP alone — enough to drive the live
+ * advisor with zero prep. The pool is only empty when *both* research and the ADP feed are
+ * unavailable; this never throws.
  */
 export async function loadRankings(): Promise<LoadedRankings> {
+  const research = loadResearchBoards();
+
+  let players = research.players;
+  let adp: AdpProvenance | undefined;
+  try {
+    const feed = await fetchFfcAdp({ season: resolveSeason() });
+    if (feed.rows.length > 0) {
+      const researchCount = players.length;
+      players = mergeAdpIntoPool(players, feed.rows);
+      adp = { asOf: feed.asOf, sampleSize: feed.sampleSize, added: players.length - researchCount };
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[draft] live ADP unavailable, using research board only: ${message}`);
+  }
+
+  return { players, fades: research.fades, latestDate: research.latestDate, adp };
+}
+
+/**
+ * Parse and merge every archived research board. Returns an empty board (never throws) when there
+ * is no `research/` directory — the ADP overlay in {@link loadRankings} then supplies the pool.
+ */
+function loadResearchBoards(): { players: PlayerTier[]; fades: FadeEntry[]; latestDate: string } {
   const dir = resolveResearchDir();
   if (!dir) return { players: [], fades: [], latestDate: '' };
 
@@ -72,21 +98,7 @@ export async function loadRankings(): Promise<LoadedRankings> {
       .sort()
       .at(-1) ?? '';
 
-  let players = merged.players;
-  let adp: AdpProvenance | undefined;
-  try {
-    const feed = await fetchFfcAdp({ season: resolveSeason() });
-    if (feed.rows.length > 0) {
-      const researchCount = players.length;
-      players = mergeAdpIntoPool(players, feed.rows);
-      adp = { asOf: feed.asOf, sampleSize: feed.sampleSize, added: players.length - researchCount };
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[draft] live ADP unavailable, using research board only: ${message}`);
-  }
-
-  return { players, fades: merged.fades, latestDate, adp };
+  return { players: merged.players, fades: merged.fades, latestDate };
 }
 
 /** NFL season for the ADP feed — the current calendar year, overridable via `FANTASY_SEASON`. */
