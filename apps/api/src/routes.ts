@@ -72,7 +72,7 @@ type ParsedPicks = { picks: DraftPick[] } | { error: string };
  * Parse a `POST /api/pick` body. Accepts either a convenience single pick `{ playerName }` (appended
  * at the next overall) or an explicit `{ picks: [{ overall, playerName, teamId? }] }` board (diffed
  * server-side, so it's idempotent). Pure and guarded — untrusted JSON never reaches the session
- * without a name and a finite overall.
+ * without a name and a 1-based integer overall.
  */
 export function parsePickBody(body: string, nextOverall: () => number): ParsedPicks {
   let data: unknown;
@@ -91,14 +91,23 @@ export function parsePickBody(body: string, nextOverall: () => number): ParsedPi
     const picks: DraftPick[] = [];
     for (const raw of rawList) {
       const pick = toPick(raw);
-      if (!pick) return { error: 'each pick needs a playerName and a numeric overall' };
+      if (!pick) return { error: 'each pick needs a playerName and a positive-integer overall' };
       picks.push(pick);
     }
     return { picks };
   }
 
   if (typeof rec.playerName === 'string' && rec.playerName.trim()) {
-    const overall = typeof rec.overall === 'number' ? rec.overall : nextOverall();
+    // An explicit overall must honour the same 1-based integer contract; otherwise take the next slot.
+    let overall: number;
+    if (typeof rec.overall === 'number') {
+      if (!Number.isInteger(rec.overall) || rec.overall < 1) {
+        return { error: 'overall must be a positive (1-based) integer' };
+      }
+      overall = rec.overall;
+    } else {
+      overall = nextOverall();
+    }
     const teamId = typeof rec.teamId === 'number' ? rec.teamId : 0;
     return { picks: [{ overall, teamId, playerName: rec.playerName.trim() }] };
   }
@@ -110,7 +119,10 @@ function toPick(raw: unknown): DraftPick | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const r = raw as Record<string, unknown>;
   if (typeof r.playerName !== 'string' || !r.playerName.trim()) return undefined;
-  if (typeof r.overall !== 'number' || !Number.isFinite(r.overall)) return undefined;
+  // overall is a 1-based draft slot: reject non-numbers, non-integers, and anything < 1.
+  if (typeof r.overall !== 'number' || !Number.isInteger(r.overall) || r.overall < 1) {
+    return undefined;
+  }
   const teamId = typeof r.teamId === 'number' ? r.teamId : 0;
   return { overall: r.overall, teamId, playerName: r.playerName.trim() };
 }

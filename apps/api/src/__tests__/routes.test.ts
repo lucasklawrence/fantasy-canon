@@ -121,4 +121,22 @@ describe('parsePickBody', () => {
       'error' in parsePickBody(JSON.stringify({ picks: [{ playerName: 'A' }] }), () => 1),
     ).toBe(true);
   });
+
+  it('rejects non-integer / non-positive overalls in an explicit board', () => {
+    for (const overall of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const body = JSON.stringify({ picks: [{ overall, playerName: 'A' }] });
+      expect('error' in parsePickBody(body, () => 1)).toBe(true);
+    }
+  });
+
+  it('rejects an explicit non-integer / non-positive overall on a single pick', () => {
+    for (const overall of [0, -3, 2.5]) {
+      const body = JSON.stringify({ playerName: 'A', overall });
+      expect('error' in parsePickBody(body, () => 1)).toBe(true);
+    }
+    // A bare { playerName } with no overall still takes the next slot.
+    expect(parsePickBody(JSON.stringify({ playerName: 'A' }), () => 7)).toEqual({
+      picks: [{ overall: 7, teamId: 0, playerName: 'A' }],
+    });
+  });
 });

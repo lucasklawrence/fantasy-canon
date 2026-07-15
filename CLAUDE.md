@@ -25,7 +25,7 @@ waiver legends, draft regrets), and posts shareable visuals + slash-command outp
   extensions in relative import specifiers even from `.ts` sources, as the code already does).
 - **TypeScript** (strict, see `tsconfig.base.json`), **Vitest** for tests (`vitest.config.ts`),
   **ESLint** (type-aware) + **Prettier**.
-- Apps: discord.js v14 (bot) is the live app; `apps/api` is a placeholder stub.
+- Apps: discord.js v14 (bot) is the live app; `apps/api` is the draft-dashboard backend (#127, ADR 0005).
 
 ## Commands (run from repo root)
 
@@ -38,7 +38,7 @@ waiver legends, draft regrets), and posts shareable visuals + slash-command outp
 | Format                                                | `pnpm format`                          |
 | Build everything (flat `dist/` each, must stay green) | `pnpm build`                           |
 | Run the bot                                           | `pnpm dev`                             |
-| Run the API stub                                      | `pnpm -C apps/api run dev`             |
+| Run the API (draft dashboard)                         | `pnpm -C apps/api run dev`             |
 | Debug ESPN client                                     | `pnpm debug:espn -- <args>`            |
 | Deploy slash commands                                 | `pnpm -C apps/bot run deploy`          |
 
@@ -72,8 +72,9 @@ committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
   a `ws` WebSocket push serve the same `buildAdviceView` projection as the bot's `/canon draft`
   commands: `hub.ts` (in-memory session), `routes.ts` (pure routing), `board.ts` (self-contained dev
   page), `server.ts` (http+ws shell), `pool.ts` (ADP-only pool). Run with `pnpm -C apps/api run dev`.
-  Read-only — never submits a pick. The Embedded App SDK client + portal registration are later
-  phases (ADR 0005).
+  Read-only against ESPN — it never submits a pick to ESPN; manual entry (`POST /api/pick`) only
+  advances the in-memory board. The Embedded App SDK client + portal registration are later phases
+  (ADR 0005).
 
 ### `packages/`
 

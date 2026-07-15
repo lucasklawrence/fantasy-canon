@@ -6,7 +6,8 @@ for the host decision and the phased plan.
 
 It runs the **same VBD engine** as the Discord `/canon draft` commands (`buildAdviceView` in
 `@fantasy-canon/core`), holds a live draft session, and pushes the best-available projection to the
-board over a WebSocket as picks are entered. It **never submits a pick** (ADR 0004).
+board over a WebSocket as picks are entered. It is **read-only against ESPN** — it never submits a
+pick to ESPN (ADR 0004); manual entry (`POST /api/pick`) only advances the in-memory board.
 
 ## Run it (dev / Phase 1)
 

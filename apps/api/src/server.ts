@@ -13,6 +13,9 @@ import { WebSocketServer } from 'ws';
 import type { DraftHub } from './hub.js';
 import { routeRequest, type Envelope } from './routes.js';
 
+/** Max request body we buffer — a draft board is tiny; this just bounds a hostile/runaway request. */
+const MAX_BODY_BYTES = 1_000_000;
+
 export interface ApiServerHandle {
   url: string;
   port: number;
@@ -39,12 +42,31 @@ export function startApiServer(
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const chunks: Buffer[] = [];
-      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      let size = 0;
+      let aborted = false;
+      req.on('data', (chunk: Buffer) => {
+        if (aborted) return;
+        size += chunk.length;
+        // A draft board is small; cap the body so a runaway/hostile request can't buffer unbounded.
+        if (size > MAX_BODY_BYTES) {
+          aborted = true;
+          chunks.length = 0;
+          res.statusCode = 413;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'request body too large' }));
+          // Drain (don't destroy) the rest of the upload so the 413 flushes cleanly instead of the
+          // client seeing an ECONNRESET.
+          req.resume();
+          return;
+        }
+        chunks.push(chunk);
+      });
       req.on('error', () => {
         res.statusCode = 400;
         res.end();
       });
       req.on('end', () => {
+        if (aborted) return;
         // Never let a bad request take the process down mid-draft — any throw becomes a 500 and the
         // board keeps polling.
         try {
@@ -70,8 +92,10 @@ export function startApiServer(
 
     const wss = new WebSocketServer({ server, path: '/api/ws' });
     wss.on('connection', (socket) => {
+      // A socket-level 'error' with no listener throws and takes the process down; swallow it.
+      socket.on('error', () => {});
       // Send the current state on connect so a late joiner paints immediately.
-      socket.send(JSON.stringify(envelope()));
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(envelope()));
     });
     const unsubscribe = hub.subscribe((snap) => {
       const msg = JSON.stringify({ ...snap, updatedAt: now().toISOString() });

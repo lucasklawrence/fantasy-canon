@@ -119,7 +119,7 @@ Concretely:
 
 - Epic [#118]; issues [#127] (this dashboard), [#156] (local read-only advisor, merged), [#59]
   (embeds-vs-CV2 + share).
-- [ADR 0004] — automation posture (read-only / manual-first; the board never submits a pick).
+- [ADR 0004] — automation posture (read-only / manual-first; the board never submits a pick to ESPN).
 - Discord-surface research `wf_0bd161cf-25d`; `@discord/embedded-app-sdk` (MIT/TS/ESM); the
   [[discord-surface-constraints]] note.
 
