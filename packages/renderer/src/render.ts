@@ -126,6 +126,27 @@ function renderSvg(
       );
     } else if (payload.type === 'grade') {
       body += renderGrade(payload as Parameters<typeof renderGrade>[0], theme, width, height);
+    } else if (payload.type === 'lottery-odds') {
+      body += renderLotteryOdds(
+        payload as Parameters<typeof renderLotteryOdds>[0],
+        theme,
+        width,
+        height,
+      );
+    } else if (payload.type === 'lottery-reveal') {
+      body += renderLotteryReveal(
+        payload as Parameters<typeof renderLotteryReveal>[0],
+        theme,
+        width,
+        height,
+      );
+    } else if (payload.type === 'lottery-board') {
+      body += renderLotteryBoard(
+        payload as Parameters<typeof renderLotteryBoard>[0],
+        theme,
+        width,
+        height,
+      );
     }
   }
 
@@ -797,6 +818,216 @@ function renderGrade(
   }
 
   return body;
+}
+
+function renderLotteryOdds(
+  payload: {
+    rows: Array<{ team: string; balls: number; firstPct: number; top3Pct: number }>;
+  },
+  theme: typeof DEFAULT_THEME,
+  width: number,
+  height: number,
+): string {
+  const rows = payload.rows ?? [];
+  if (rows.length === 0) return '';
+
+  const x = 64;
+  const w = width - 128;
+  const top = 168;
+  const bottom = height - 60;
+  const headerH = 34;
+  const rowH = Math.min(66, (bottom - top - headerH) / rows.length);
+
+  // Right-anchored numeric columns; the ball bar fills the gap between name and numbers.
+  const ballsEnd = x + w - 320;
+  const firstEnd = x + w - 160;
+  const top3End = x + w;
+  const barX = x + Math.min(320, w * 0.32);
+  const barMaxW = ballsEnd - barX - 90;
+  const maxBalls = Math.max(1, ...rows.map((r) => r.balls));
+
+  const headerStyle = `fill="${theme.colors.muted}" font-family="${theme.fonts.heading}" font-size="15" font-weight="bold"`;
+  const hy = top + headerH - 12;
+  let body = '';
+  body += `<text x="${x}" y="${hy}" ${headerStyle}>TEAM</text>`;
+  body += `<text x="${ballsEnd}" y="${hy}" ${headerStyle} text-anchor="end">BALLS</text>`;
+  body += `<text x="${firstEnd}" y="${hy}" ${headerStyle} text-anchor="end">#1 PICK</text>`;
+  body += `<text x="${top3End}" y="${hy}" ${headerStyle} text-anchor="end">TOP 3</text>`;
+
+  rows.forEach((r, idx) => {
+    const rowTop = top + headerH + idx * rowH;
+    const cy = rowTop + rowH / 2;
+    if (idx % 2 === 0) {
+      body += `<rect x="${x - 12}" y="${rowTop}" width="${w + 24}" height="${rowH}" rx="8" fill="${theme.colors.surface}" opacity="0.45" />`;
+    }
+    body += `<text x="${x}" y="${cy + 6}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="20">${escape(
+      truncate(r.team, 22),
+    )}</text>`;
+    const barH = Math.min(16, rowH * 0.35);
+    const barW = Math.max(3, (r.balls / maxBalls) * barMaxW);
+    body += `<rect x="${barX}" y="${cy - barH / 2}" width="${barW}" height="${barH}" rx="4" fill="${theme.colors.primary}" opacity="0.85" />`;
+    body += `<text x="${ballsEnd}" y="${cy + 6}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="19" text-anchor="end">${r.balls}</text>`;
+    body += `<text x="${firstEnd}" y="${cy + 6}" fill="${theme.colors.secondary}" font-family="${theme.fonts.body}" font-size="19" text-anchor="end">${pct(
+      r.firstPct,
+    )}</text>`;
+    body += `<text x="${top3End}" y="${cy + 6}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="19" text-anchor="end">${pct(
+      r.top3Pct,
+    )}</text>`;
+  });
+
+  return body;
+}
+
+/**
+ * Chip strip of the teams still waiting on a pick, pinned above the card's bottom
+ * border. Flow-wraps up to two rows and collapses overflow into a "+N more" chip so any
+ * team count stays inside the frame.
+ */
+function remainingStrip(
+  remaining: string[],
+  theme: typeof DEFAULT_THEME,
+  width: number,
+  height: number,
+): string {
+  if (remaining.length === 0) return '';
+
+  const x = 80;
+  const wContent = width - 160;
+  const chipH = 30;
+  const gap = 10;
+  const rowGap = 8;
+  const maxRows = 2;
+  const labelY = height - 152;
+  const chipTop = height - 138;
+
+  let body = `<text x="${x}" y="${labelY}" fill="${theme.colors.muted}" font-family="${theme.fonts.heading}" font-size="14" font-weight="bold">STILL IN THE HOPPER — ${remaining.length}</text>`;
+
+  const chip = (label: string, cx2: number, cy2: number, chipW: number): string => {
+    let s = `<rect x="${cx2}" y="${cy2}" width="${chipW}" height="${chipH}" rx="15" fill="${theme.colors.surface}" opacity="0.9" />`;
+    s += `<text x="${cx2 + chipW / 2}" y="${cy2 + chipH / 2 + 5}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="14" text-anchor="middle">${escape(
+      label,
+    )}</text>`;
+    return s;
+  };
+  // No text measurement in SVG generation — estimate chip width from character count.
+  const chipWidth = (label: string): number => Math.min(wContent, label.length * 8.5 + 26);
+
+  // Keep room on the final row for a "+N more" chip so it never overlaps placed chips.
+  const moreReserve = chipWidth('+99 more') + gap;
+  let cx = x;
+  let row = 0;
+  for (let i = 0; i < remaining.length; i += 1) {
+    const label = truncate(remaining[i], 16);
+    const cw = chipWidth(label);
+    const lastRow = row === maxRows - 1;
+    const hasMoreAfter = i < remaining.length - 1;
+    const limit = x + wContent - (lastRow && hasMoreAfter ? moreReserve : 0);
+    if (cx + cw > limit) {
+      if (lastRow) {
+        const more = `+${remaining.length - i} more`;
+        body += chip(more, cx, chipTop + row * (chipH + rowGap), chipWidth(more));
+        return body;
+      }
+      row += 1;
+      cx = x;
+    }
+    body += chip(label, cx, chipTop + row * (chipH + rowGap), cw);
+    cx += cw + gap;
+  }
+  return body;
+}
+
+function renderLotteryReveal(
+  payload: {
+    phase: 'beat' | 'reveal';
+    pick: number;
+    remaining: string[];
+    team?: string;
+    balls?: number;
+    oddsPct?: number;
+  },
+  theme: typeof DEFAULT_THEME,
+  width: number,
+  height: number,
+): string {
+  const cx = width / 2;
+  let body = '';
+
+  if (payload.phase === 'beat') {
+    // Drum-roll frame: the pick number looms, no team yet.
+    body += `<text x="${cx}" y="252" fill="${theme.colors.secondary}" font-family="${theme.fonts.heading}" font-size="28" font-weight="bold" text-anchor="middle" letter-spacing="6">REVEALING PICK</text>`;
+    body += `<text x="${cx}" y="408" fill="${theme.colors.text}" font-family="${theme.fonts.heading}" font-size="150" font-weight="bold" text-anchor="middle">#${payload.pick}</text>`;
+    body += `<text x="${cx}" y="466" fill="${theme.colors.muted}" font-family="${theme.fonts.heading}" font-size="34" text-anchor="middle">• • •</text>`;
+  } else {
+    body += `<text x="${cx}" y="240" fill="${theme.colors.secondary}" font-family="${theme.fonts.heading}" font-size="26" font-weight="bold" text-anchor="middle" letter-spacing="6">PICK #${payload.pick} GOES TO</text>`;
+    body += `<text x="${cx}" y="340" fill="${theme.colors.text}" font-family="${theme.fonts.heading}" font-size="68" font-weight="bold" text-anchor="middle">${escape(
+      truncate(payload.team ?? '', 20),
+    )}</text>`;
+    body += `<rect x="${cx - 180}" y="362" width="360" height="5" rx="2.5" fill="${theme.colors.secondary}" />`;
+    const balls = payload.balls ?? 0;
+    const stats = `held ${balls} ${balls === 1 ? 'ball' : 'balls'} · ${pct(payload.oddsPct ?? 0)} odds`;
+    body += `<text x="${cx}" y="420" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="25" text-anchor="middle">${escape(
+      stats,
+    )}</text>`;
+  }
+
+  body += remainingStrip(payload.remaining ?? [], theme, width, height);
+  return body;
+}
+
+function renderLotteryBoard(
+  payload: {
+    entries: Array<{ pick: number; team: string; balls?: number; oddsPct?: number }>;
+  },
+  theme: typeof DEFAULT_THEME,
+  width: number,
+  height: number,
+): string {
+  const entries = payload.entries ?? [];
+  if (entries.length === 0) return '';
+
+  const x = 72;
+  const w = width - 144;
+  const top = 168;
+  const bottom = height - 56;
+  const rowH = Math.min(72, (bottom - top) / entries.length);
+  const r = Math.min(24, rowH * 0.38);
+
+  let body = '';
+  entries.forEach((e, idx) => {
+    const cy = top + idx * rowH + rowH / 2;
+    // Pick 1 gets the gold badge — everyone else the quiet surface chip.
+    const badgeFill = idx === 0 ? theme.colors.secondary : theme.colors.surface;
+    const numColor = idx === 0 ? theme.colors.background : theme.colors.text;
+    body += `<circle cx="${x + r}" cy="${cy}" r="${r}" fill="${badgeFill}" />`;
+    body += `<text x="${x + r}" y="${cy + 7}" fill="${numColor}" font-family="${theme.fonts.heading}" font-size="${Math.round(
+      r * 0.95,
+    )}" font-weight="bold" text-anchor="middle">${e.pick}</text>`;
+    body += `<text x="${x + r * 2 + 18}" y="${cy + 8}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="26"${
+      idx === 0 ? ' font-weight="bold"' : ''
+    }>${escape(truncate(e.team, 24))}</text>`;
+    const note = [
+      typeof e.balls === 'number' ? `${e.balls} ${e.balls === 1 ? 'ball' : 'balls'}` : '',
+      typeof e.oddsPct === 'number' ? `${pct(e.oddsPct)} odds` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    if (note) {
+      body += `<text x="${x + w}" y="${cy + 6}" fill="${theme.colors.muted}" font-family="${theme.fonts.body}" font-size="16" text-anchor="end">${escape(
+        note,
+      )}</text>`;
+    }
+    if (idx < entries.length - 1) {
+      body += `<line x1="${x}" y1="${cy + rowH / 2}" x2="${x + w}" y2="${cy + rowH / 2}" stroke="${theme.colors.surface}" stroke-width="1" opacity="0.6" />`;
+    }
+  });
+
+  return body;
+}
+
+/** Format a percent (0–100) for display, one decimal. */
+function pct(n: number): string {
+  return `${n.toFixed(1)}%`;
 }
 
 /** Format a VOR-style number with an explicit sign, one decimal. */
