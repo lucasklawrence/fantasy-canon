@@ -54,6 +54,25 @@ export function computeCommitment(seed: string, config: LotteryConfig): string {
   return createHash('sha256').update(commitmentPreimage(seed, config), 'utf8').digest('hex');
 }
 
+/**
+ * Seed-grinding hardening (ADR 0006 trust model, #174): compose the draw seed from the committed
+ * secret and a public value that did not exist until after the commitment was posted — the
+ * ceremony uses the commitment post's own Discord message id. The commitment still binds only the
+ * secret (the salt cannot be known at commit time); the salt is readable on the commitment
+ * message itself, and auditors rebuild the draw seed with this exact function before calling
+ * {@link verifyDraw}. The operator cannot grind the secret against a salt Discord has not
+ * assigned yet, and swapping the secret afterwards breaks the commitment.
+ */
+export function composeDrawSeed(secretSeed: string, publicSalt: string): string {
+  if (!secretSeed) {
+    throw new Error('secretSeed must be non-empty');
+  }
+  if (!publicSalt) {
+    throw new Error('publicSalt must be non-empty');
+  }
+  return `${secretSeed}|${publicSalt}`;
+}
+
 /** What {@link verifyDraw} hands back for auditing a completed ceremony. */
 export interface DrawVerification {
   /** Commitment recomputed from the revealed seed + config — must equal the pre-draw post. */
@@ -70,5 +89,29 @@ export function verifyDraw(seed: string, config: LotteryConfig): DrawVerificatio
   return {
     commitment: computeCommitment(seed, config),
     draws: computeDraftOrder({ ...config, seed }),
+  };
+}
+
+/** {@link verifyHardenedDraw} result: the commitment binds the secret; the draws replay from the composed seed. */
+export interface HardenedDrawVerification extends DrawVerification {
+  /** `composeDrawSeed(secretSeed, publicSalt)` — what the draw actually consumed. */
+  drawSeed: string;
+}
+
+/**
+ * Audit a salted ceremony (#174) in one call: the pre-draw post committed to the *secret* seed
+ * (the salt did not exist yet), while the draw ran from {@link composeDrawSeed}. Compare
+ * `commitment` against the pre-draw post and `draws` against the announced order.
+ */
+export function verifyHardenedDraw(
+  secretSeed: string,
+  publicSalt: string,
+  config: LotteryConfig,
+): HardenedDrawVerification {
+  const drawSeed = composeDrawSeed(secretSeed, publicSalt);
+  return {
+    commitment: computeCommitment(secretSeed, config),
+    drawSeed,
+    draws: computeDraftOrder({ ...config, seed: drawSeed }),
   };
 }

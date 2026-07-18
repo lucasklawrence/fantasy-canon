@@ -36,6 +36,12 @@ import {
   BOARD_REFRESH_ID,
   BOARD_GRADE_ID,
 } from './draftSession.js';
+import {
+  handleDraftOrderSetupSubcommand,
+  handleDraftOrderBeginSubcommand,
+  handleDraftOrderStatusSubcommand,
+  handleDraftOrderAbortSubcommand,
+} from './draftOrder.js';
 import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.js';
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
 import { handleManagersSubcommand } from './managers.js';
@@ -618,6 +624,60 @@ export const canonCommand = new SlashCommandBuilder()
           .setDescription('End the live draft session (frees the ESPN capture port)'),
       ),
   )
+  // --- /canon draftorder … (the lottery ceremony — commit-reveal, ADR 0006) ---
+  .addSubcommandGroup((group) =>
+    group
+      .setName('draftorder')
+      .setDescription('Draft-order lottery ceremony (provably fair commit-reveal)')
+      .addSubcommand((sub) =>
+        sub
+          .setName('setup')
+          .setDescription('Freeze the bag and post the public odds preview')
+          .addIntegerOption((opt) =>
+            opt.setName('season').setDescription('Season year (e.g., 2026)').setRequired(true),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('teams')
+              .setDescription('Manual team list "Name[:bonus], …" (default: ESPN league teams)'),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('bonus')
+              .setDescription('Bonus balls by team name, e.g. "Sharks:2, Ducks:1"'),
+          )
+          .addIntegerOption((opt) =>
+            opt
+              .setName('base')
+              .setDescription('Base balls per team (default 1)')
+              .setMinValue(1)
+              .setMaxValue(10),
+          )
+          .addStringOption((opt) =>
+            opt.setName('leagueid').setDescription('Override league ID (defaults to config/env)'),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('begin')
+          .setDescription('Post the commitment and run the worst-to-first reveal')
+          .addIntegerOption((opt) =>
+            opt
+              .setName('delay')
+              .setDescription('Seconds between drum roll and reveal (default 20)')
+              .setMinValue(5)
+              .setMaxValue(120),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub.setName('status').setDescription('Where the lottery ceremony stands'),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('abort')
+          .setDescription('Abort the ceremony (the committed seed is revealed anyway)'),
+      ),
+  )
   // --- /canon config … (per-guild defaults; stays its own group — Discord forbids group nesting) ---
   .addSubcommandGroup((group) =>
     group
@@ -730,6 +790,21 @@ export async function handleCanonInteraction(
       await handleDraftGradeSubcommand(interaction);
     } else if (subcommand === 'stop') {
       await handleDraftStopSubcommand(interaction);
+    } else {
+      await handleNotImplemented(interaction, subcommand);
+    }
+    return;
+  }
+
+  if (group === 'draftorder') {
+    if (subcommand === 'setup') {
+      await handleDraftOrderSetupSubcommand(interaction, context);
+    } else if (subcommand === 'begin') {
+      await handleDraftOrderBeginSubcommand(interaction);
+    } else if (subcommand === 'status') {
+      await handleDraftOrderStatusSubcommand(interaction);
+    } else if (subcommand === 'abort') {
+      await handleDraftOrderAbortSubcommand(interaction);
     } else {
       await handleNotImplemented(interaction, subcommand);
     }
