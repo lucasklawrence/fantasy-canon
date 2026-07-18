@@ -19,10 +19,15 @@ export function mergeEntryPointCommands(
   localCommands: RESTPostAPIApplicationCommandsJSONBody[],
   registeredCommands: APIApplicationCommand[],
 ): (RESTPostAPIApplicationCommandsJSONBody | APIApplicationCommand)[] {
+  // Discord command uniqueness is per (type, name) — a local command of another type may share the
+  // Entry Point's name, so only a local type-4 command with the same name suppresses the carry.
   const carried = registeredCommands.filter(
     (registered) =>
       registered.type === ApplicationCommandType.PrimaryEntryPoint &&
-      !localCommands.some((local) => local.name === registered.name),
+      !localCommands.some(
+        (local) =>
+          local.type === ApplicationCommandType.PrimaryEntryPoint && local.name === registered.name,
+      ),
   );
   return [...localCommands, ...carried];
 }

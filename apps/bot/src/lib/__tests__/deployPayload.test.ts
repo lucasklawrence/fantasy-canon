@@ -69,6 +69,20 @@ describe('mergeEntryPointCommands', () => {
     expect(merged).toEqual([localCanon, localLaunch]);
   });
 
+  it('still carries the Entry Point when a local command of another type shares its name', () => {
+    const localLaunchUserCommand = {
+      name: 'Launch',
+      type: ApplicationCommandType.User,
+    } as RESTPostAPIApplicationCommandsJSONBody;
+
+    const merged = mergeEntryPointCommands(
+      [localCanon, localLaunchUserCommand],
+      [launchEntryPoint],
+    );
+
+    expect(merged).toEqual([localCanon, localLaunchUserCommand, launchEntryPoint]);
+  });
+
   it('handles an empty local payload by carrying only the Entry Point command', () => {
     expect(mergeEntryPointCommands([], [registeredCanon, launchEntryPoint])).toEqual([
       launchEntryPoint,
