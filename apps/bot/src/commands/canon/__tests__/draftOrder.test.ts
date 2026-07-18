@@ -7,6 +7,7 @@ import {
 import { createMockContext } from '../../../lib/__tests__/mockContext.js';
 import { FOUR_TEAMS } from '../../../lib/__tests__/handlerFixtures.js';
 import {
+  clearCeremony,
   getCeremony,
   requestAbort,
   resetCeremoniesForTests,
@@ -60,6 +61,10 @@ describe('parseManualTeams', () => {
   it('rejects malformed entries', () => {
     expect(() => parseManualTeams('Sharks:lots')).toThrow('Sharks:lots');
     expect(() => parseManualTeams(':2')).toThrow(':2');
+  });
+
+  it('caps bonus balls per team', () => {
+    expect(() => parseManualTeams('Sharks:11')).toThrow('capped at 10');
   });
 });
 
@@ -171,6 +176,35 @@ describe('handleDraftOrderBeginSubcommand', () => {
     );
     const last = begin.channelPosts[begin.channelPosts.length - 1];
     expect(last.content).toContain('revealed anyway');
+  });
+});
+
+describe('handleDraftOrderBeginSubcommand — abort race', () => {
+  it('an abort completing during the reply await stops begin before any commitment', async () => {
+    const { context } = createMockContext();
+    const setup = ceremonyInteraction({ options: { season: 2026, teams: 'A, B, C, D' } });
+    await handleDraftOrderSetupSubcommand(setup.interaction, context);
+    const session = getCeremony('guild-1');
+
+    const begin = ceremonyInteraction({ options: { delay: 5 } });
+    const originalReply = begin.interaction.reply.bind(begin.interaction) as (
+      payload: unknown,
+    ) => Promise<unknown>;
+    Object.assign(begin.interaction as object, {
+      reply: (payload: unknown) => {
+        // Simulate `/canon draftorder abort` landing while begin awaits its ephemeral reply.
+        requestAbort(session!);
+        clearCeremony('guild-1');
+        return originalReply(payload);
+      },
+    });
+
+    await handleDraftOrderBeginSubcommand(begin.interaction);
+
+    expect(begin.channelPosts).toHaveLength(0);
+    expect(session?.state).toBe('GAME_OPEN');
+    expect(session?.secretSeed).toBeUndefined();
+    expect(begin.lastContent()).toContain('aborted before it could start');
   });
 });
 

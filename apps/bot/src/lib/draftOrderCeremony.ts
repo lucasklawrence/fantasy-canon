@@ -116,6 +116,14 @@ export function createCeremony(
   names: Map<string, string>,
 ): CeremonySession {
   computePickOdds(config.teams, config.baseBallCount);
+  const seenNames = new Set<string>();
+  for (const name of names.values()) {
+    const key = name.toLowerCase();
+    if (seenNames.has(key)) {
+      throw new Error(`Duplicate team name "${name}" — names must be unique for the ceremony.`);
+    }
+    seenNames.add(key);
+  }
   return {
     guildId,
     title,
@@ -173,7 +181,7 @@ export async function buildPreviewPost(session: CeremonySession): Promise<Ceremo
     kind: 'preview',
     content: [
       `🏈 **${session.title}** — the hopper is set.`,
-      'These odds are frozen the moment the commitment posts. Any change to the bag requires a fresh preview before the draw can start.',
+      'These odds are frozen by this preview — the commitment will bind exactly this bag. Any change requires a fresh preview before the draw can start.',
       'Commissioner: run `/canon draftorder begin` to seal the bag and start the reveal.',
     ].join('\n'),
     image: { name: 'lottery-odds.png', data: image },
@@ -188,17 +196,19 @@ export function markPreviewPosted(session: CeremonySession): void {
 
 function commitmentContent(session: CeremonySession): string {
   const config = session.config;
+  // Each line binds display name ↔ teamId — the hash preimage uses teamIds, so auditors need
+  // this mapping in the public record to tie the replayed order back to the announced names.
   const ballLines = config.teams.map(
     (team) =>
-      `• ${displayName(session, team.teamId)} — ${ballCountForTeam(team, config.baseBallCount ?? 1)} ball(s)`,
+      `• ${displayName(session, team.teamId)} (\`${team.teamId}\`) — ${ballCountForTeam(team, config.baseBallCount ?? 1)} ball(s)`,
   );
   return [
     `🔒 **${session.title} — commitment**`,
-    `Algorithm: \`${DRAW_ALGORITHM}\``,
+    `Algorithm: \`${DRAW_ALGORITHM}\` • Base balls: ${config.baseBallCount ?? 1}`,
     ...ballLines,
     `Commitment: \`${session.commitment}\``,
     'The draw seed is `<secret>|<this message id>` — the id is stamped by Discord only after this post exists, so the seed could not be chosen to rig the draw. The secret is revealed after the last pick; then anyone can replay the whole draw.',
-    'If this ceremony is aborted for any reason, the secret behind this commitment is revealed anyway — a discarded draw is always visible.',
+    'If the commissioner aborts this ceremony, the secret behind this commitment is revealed anyway — a discarded draw is always visible.',
   ].join('\n');
 }
 
@@ -227,11 +237,11 @@ async function revealFrames(
 ): Promise<{ beat: CeremonyPost; reveal: CeremonyPost }> {
   const draw = draws.find((d) => d.pick === pick) as LotteryDraw;
   const oddsByTeam = new Map(odds.map((o) => [o.teamId, o]));
-  const unrevealed = draws
-    .filter((d) => d.pick <= pick)
-    .sort((a, b) => a.pick - b.pick)
+  const unrevealedDraws = draws.filter((d) => d.pick <= pick).sort((a, b) => a.pick - b.pick);
+  const unrevealed = unrevealedDraws.map((d) => displayName(session, d.teamId));
+  const remainingAfter = unrevealedDraws
+    .filter((d) => d.teamId !== draw.teamId)
     .map((d) => displayName(session, d.teamId));
-  const remainingAfter = unrevealed.filter((name) => name !== displayName(session, draw.teamId));
   const team = session.config.teams.find((t) => t.teamId === draw.teamId);
   const balls = team ? ballCountForTeam(team, session.config.baseBallCount ?? 1) : 0;
   const oddsPct = pct(oddsByTeam.get(draw.teamId)?.probabilities[pick - 1] ?? 0);
@@ -325,6 +335,9 @@ export async function runCeremony(
   const sleep = options.sleep ?? defaultSleep;
   const seedSource = options.seedSource ?? (() => randomBytes(16).toString('hex'));
 
+  // An abort that raced `begin` (before anything was committed or posted) exits here — no
+  // transition, no seed, no disclosure owed.
+  throwIfAborted(session);
   assertTransition(session.state, 'LOTTERY_RUNNING');
   session.state = 'LOTTERY_RUNNING';
 
@@ -350,6 +363,9 @@ export async function runCeremony(
       await io.post(frames.reveal);
     }
 
+    // Past this point aborts are deliberately ignored: every pick is already public, so the
+    // only remaining duty is disclosure — and the board + seed-reveal posts disclose *more*
+    // than the abort path would. Finishing is the correct response to a late abort.
     // BOARD
     const boardImage = await renderLotteryBoardCard({
       title: session.title,
@@ -382,7 +398,12 @@ export async function runCeremony(
   } catch (error) {
     if (session.state === 'LOTTERY_RUNNING') {
       session.state = 'CANCELLED';
-      await postAbortDisclosure(session, io);
+      try {
+        await postAbortDisclosure(session, io);
+      } catch (disclosureError) {
+        // Never mask the original failure with a disclosure failure — log and fall through.
+        console.error('[draftorder] failed to post the abort disclosure:', disclosureError);
+      }
     }
     throw error;
   }

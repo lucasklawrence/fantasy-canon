@@ -5,7 +5,9 @@ import {
   CeremonyAborted,
   CeremonyIo,
   CeremonyPost,
+  clearCeremony,
   createCeremony,
+  getCeremony,
   markPreviewPosted,
   oddsRows,
   requestAbort,
@@ -193,9 +195,43 @@ describe('setup surfaces', () => {
     expect(preview.content).toContain('frozen');
   });
 
-  it('sessions are stored per guild', () => {
+  it('the registry stores and isolates sessions per guild', () => {
+    const a = makeSession();
+    setCeremony(a);
+    const b = createCeremony('guild-2', 'Other Lottery', CONFIG, NAMES);
+    setCeremony(b);
+    expect(getCeremony('guild-1')).toBe(a);
+    expect(getCeremony('guild-2')).toBe(b);
+    clearCeremony('guild-1');
+    expect(getCeremony('guild-1')).toBeUndefined();
+    expect(getCeremony('guild-2')).toBe(b);
+  });
+
+  it('rejects duplicate display names case-insensitively', () => {
+    const teams = [
+      { teamId: 'a', displayName: 'Sharks' },
+      { teamId: 'b', displayName: 'sharks' },
+    ];
+    const names = new Map([
+      ['a', 'Sharks'],
+      ['b', 'sharks'],
+    ]);
+    expect(() => createCeremony('guild-1', 'Lottery', { teams }, names)).toThrow(
+      'Duplicate team name',
+    );
+  });
+
+  it('an abort that races begin stops the ceremony before any commitment', async () => {
     const session = makeSession();
-    setCeremony(session);
-    expect(session.guildId).toBe('guild-1');
+    const { io, posts } = collectorIo();
+    requestAbort(session);
+
+    await expect(
+      runCeremony(session, io, { delayMs: 0, sleep: instantSleep, seedSource: () => 's' }),
+    ).rejects.toThrow(CeremonyAborted);
+
+    expect(posts).toHaveLength(0);
+    expect(session.state).toBe('GAME_OPEN');
+    expect(session.secretSeed).toBeUndefined();
   });
 });

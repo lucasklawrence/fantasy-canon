@@ -37,6 +37,9 @@ import {
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
 
+/** Hard cap on bonus balls per team — the bag is materialized ball-by-ball, so unbounded input is a foot-gun. */
+export const MAX_BONUS_BALLS = 10;
+
 interface ParsedTeam {
   name: string;
   bonusBalls: number;
@@ -61,6 +64,9 @@ export function parseManualTeams(input: string): ParsedTeam[] {
     const bonus = Number(bonusRaw);
     if (!name || !Number.isInteger(bonus) || bonus < 0) {
       throw new Error(`Can't parse team entry "${entry}" — use "Name" or "Name:bonusBalls".`);
+    }
+    if (bonus > MAX_BONUS_BALLS) {
+      throw new Error(`"${entry}": bonus balls are capped at ${MAX_BONUS_BALLS} per team.`);
     }
     return { name, bonusBalls: bonus };
   });
@@ -205,6 +211,14 @@ export async function handleDraftOrderSetupSubcommand(
       names,
     );
 
+    // Re-validate after the awaits above (ESPN fetch, card render): if a ceremony started
+    // running meanwhile, replacing it now would orphan a live draw.
+    if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
+      await interaction.editReply({
+        content: 'A ceremony started running while setup was working — abort it first.',
+      });
+      return;
+    }
     const preview = await buildPreviewPost(session);
     await channelIo(channel).post(preview);
     markPreviewPosted(session);
@@ -255,6 +269,16 @@ export async function handleDraftOrderBeginSubcommand(
     content: `Sealing the bag — commitment posts now, first reveal ~${delaySeconds}s after its drum roll. Abort with \`/canon draftorder abort\` (the seed gets revealed either way).`,
     flags: MessageFlags.Ephemeral,
   });
+
+  // Re-validate after the reply await: an abort (or a replacing setup) may have raced us.
+  // runCeremony's own pre-commit abort check is the backstop; this avoids even starting.
+  if (getCeremony(guildId) !== session || session.abort.signal.aborted) {
+    await interaction.followUp({
+      content: 'The ceremony was aborted before it could start — nothing was committed.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   // Fire and forget: the ceremony runs on channel messages and outlives this interaction's
   // 15-minute token. Errors land in the channel via the abort disclosure + the log.
@@ -320,6 +344,9 @@ export async function handleDraftOrderAbortSubcommand(
     return;
   }
 
+  // Flip the signal even for not-yet-running sessions so a raced `begin` cannot start the
+  // ceremony after this abort (its pre-commit check sees the aborted signal).
+  requestAbort(session);
   clearCeremony(guildId);
   const channel = sendableChannel(interaction);
   if (session.state === 'GAME_OPEN' && channel) {
