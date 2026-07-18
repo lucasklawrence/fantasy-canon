@@ -5,11 +5,11 @@
  * a big-endian uint32, and reduces it `% bagSize`. Anyone holding the revealed seed can replay
  * every draw with a few lines of code — that auditability is the point of the scheme.
  *
- * The modulo reduction carries a bias toward low indices of at most `2^32 % bagSize / 2^32` —
- * on the order of 2^-27 for league-scale bag sizes (tens of balls). That is negligible for a
- * once-a-year 12-team lottery and not worth trading away simple, auditable replay math (e.g. for
- * rejection sampling), so we keep the draw semantics exactly as shipped on the `draftOrder`
- * branch.
+ * The modulo reduction carries a bias toward low indices below `bagSize / 2^32` — under 2^-26
+ * for any realistic bag of ≤ 64 balls. ADR 0006 accepts that deliberately: rejection sampling
+ * would be unbiased but makes independent re-implementation harder, and at this magnitude the
+ * bias is unobservable over the league's lifetime. The draw semantics are kept exactly as
+ * shipped on the `draftOrder` branch.
  */
 import { createHash } from 'node:crypto';
 
