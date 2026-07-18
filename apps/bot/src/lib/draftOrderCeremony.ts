@@ -39,7 +39,7 @@ import {
 
 /** One ceremony message. `kind` is semantic metadata for tests/logging; adapters post `content` + `image`. */
 export interface CeremonyPost {
-  kind: 'preview' | 'commitment' | 'beat' | 'reveal' | 'board' | 'seed-reveal' | 'abort';
+  kind: 'preview' | 'commitment' | 'beat' | 'reveal' | 'board' | 'seed-reveal' | 'abort' | 'hype';
   content?: string;
   image?: { name: string; data: Buffer };
 }
@@ -66,6 +66,8 @@ export interface CeremonySession {
   commitMessageId?: string;
   drawSeed?: string;
   draws?: LotteryDraw[];
+  /** How many hype posts have gone out — rotates the copy templates (#165). */
+  hypeCount?: number;
   abort: AbortController;
 }
 
@@ -192,6 +194,71 @@ export async function buildPreviewPost(session: CeremonySession): Promise<Ceremo
 export function markPreviewPosted(session: CeremonySession): void {
   assertTransition(session.state, 'GAME_OPEN');
   session.state = 'GAME_OPEN';
+}
+
+/**
+ * Countdown/hype copy (#165). Each template gets the frozen-bag facts; rotation is by
+ * per-session post count so repeated hype days read fresh without any randomness.
+ */
+const HYPE_TEMPLATES: ((f: {
+  title: string;
+  teamCount: number;
+  totalBalls: number;
+  favorite: string;
+  favoritePct: string;
+  longShot: string;
+  longShotPct: string;
+}) => string)[] = [
+  (f) =>
+    `🎉 **${f.title}** is coming. ${f.teamCount} teams, ${f.totalBalls} balls, one hopper. Odds below — argue accordingly.`,
+  (f) =>
+    `🔮 The hopper doesn't lie: **${f.favorite}** holds the best shot at #1 (${f.favoritePct}%), while **${f.longShot}** needs a miracle (${f.longShotPct}%). Misery pays.`,
+  (f) =>
+    `⏳ Lottery night approaches. ${f.totalBalls} balls are already sealed in the hopper for **${f.title}** — nobody can touch them now.`,
+  (f) =>
+    `🍿 Reminder: **${f.title}** settles it live, worst to first. ${f.teamCount} destinies, one draw, zero do-overs.`,
+];
+
+/**
+ * A commissioner-triggered hype post for a frozen (GAME_OPEN) bag: rotating countdown copy +
+ * the same odds card the preview froze. Never changes the bag — it re-renders the exact
+ * session config the commitment will bind.
+ */
+export async function buildHypePost(
+  session: CeremonySession,
+  note?: string,
+): Promise<CeremonyPost> {
+  const rows = oddsRows(session);
+  const favorite = rows[0];
+  const longShot = rows[rows.length - 1];
+  const index = session.hypeCount ?? 0;
+  session.hypeCount = index + 1;
+
+  const template = HYPE_TEMPLATES[index % HYPE_TEMPLATES.length]({
+    title: session.title,
+    teamCount: session.config.teams.length,
+    totalBalls: totalBalls(session.config),
+    favorite: favorite.team,
+    favoritePct: favorite.firstPct.toFixed(1),
+    longShot: longShot.team,
+    longShotPct: longShot.firstPct.toFixed(1),
+  });
+  const image = await renderLotteryOddsCard({
+    title: session.title,
+    subtitle: `${session.config.teams.length} teams • ${totalBalls(session.config)} balls in the hopper`,
+    rows,
+  });
+  return {
+    kind: 'hype',
+    content: [
+      template,
+      note,
+      'The bag is frozen — these are exactly the odds the commitment will bind.',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    image: { name: 'lottery-hype.png', data: image },
+  };
 }
 
 function commitmentContent(session: CeremonySession): string {
