@@ -1,8 +1,10 @@
 import {
   commitmentPreimage,
+  composeDrawSeed,
   computeCommitment,
   DRAW_ALGORITHM,
   verifyDraw,
+  verifyHardenedDraw,
 } from '../commitReveal.js';
 import { computeDraftOrder } from '../engine.js';
 import {
@@ -71,6 +73,49 @@ describe('computeCommitment', () => {
         baseBallCount: FIXTURE_BASE_BALL_COUNT,
       }),
     ).not.toBe(committed);
+  });
+});
+
+describe('composeDrawSeed', () => {
+  it('joins secret and salt deterministically', () => {
+    expect(composeDrawSeed('secret', '123456789')).toBe('secret|123456789');
+  });
+
+  it('different salts change the draw a committed secret produces', () => {
+    const orderA = computeDraftOrder({
+      seed: composeDrawSeed(FIXTURE_SEED, 'salt-a'),
+      ...FIXTURE_CONFIG,
+    });
+    const orderB = computeDraftOrder({
+      seed: composeDrawSeed(FIXTURE_SEED, 'salt-b'),
+      ...FIXTURE_CONFIG,
+    });
+
+    expect(orderA.map((d) => d.teamId)).not.toEqual(orderB.map((d) => d.teamId));
+  });
+
+  it('round-trips through verifyDraw: composed seed replays the announced order', () => {
+    const drawSeed = composeDrawSeed(FIXTURE_SEED, 'commit-message-id');
+    const announced = computeDraftOrder({ seed: drawSeed, ...FIXTURE_CONFIG });
+
+    expect(verifyDraw(drawSeed, FIXTURE_CONFIG).draws).toEqual(announced);
+  });
+
+  it('rejects empty inputs', () => {
+    expect(() => composeDrawSeed('', 'salt')).toThrow('secretSeed');
+    expect(() => composeDrawSeed('secret', '')).toThrow('publicSalt');
+  });
+});
+
+describe('verifyHardenedDraw', () => {
+  it('binds the commitment to the secret while replaying from the composed seed', () => {
+    const verification = verifyHardenedDraw(FIXTURE_SEED, 'commit-msg-id', FIXTURE_CONFIG);
+
+    expect(verification.commitment).toBe(computeCommitment(FIXTURE_SEED, FIXTURE_CONFIG));
+    expect(verification.drawSeed).toBe(composeDrawSeed(FIXTURE_SEED, 'commit-msg-id'));
+    expect(verification.draws).toEqual(
+      computeDraftOrder({ seed: verification.drawSeed, ...FIXTURE_CONFIG }),
+    );
   });
 });
 
