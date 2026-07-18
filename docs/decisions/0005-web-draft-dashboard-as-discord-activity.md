@@ -37,9 +37,14 @@ where the league already is rather than as one more URL to host and share.
 - Authentication is a **server-side OAuth2** flow: the client runs `ready → authorize` to get a code,
   the **backend** exchanges it for a token using the `client_secret` (which never touches the
   browser), then the client `authenticate`s.
-- **Verification only gates servers with >25 members.** A single private league (<25) can run an
-  **unverified** Activity with the dev team + ≤50 testers — so this is viable for our league without
-  Discord app review.
+- **Distribution requires App Tester enrollment** _(corrected 2026-07-18 — see
+  [ADR 0006](./0006-draft-order-lottery-fairness-and-surfaces.md))_. This ADR originally claimed
+  verification only gates servers with >25 members; the 2026-07-17 research **refuted** that
+  reading. An unverified Activity is playable only by the dev team and explicitly invited App
+  Testers (each must accept an email invite and enable Application Test Mode), and the
+  <25-member-server rule is an _additional_ restriction on top — so every league member needs
+  tester enrollment before the dashboard is usable in-server (tracked as the go/no-go in #168,
+  shared with the lottery Activity #169).
 
 ## Decision
 
