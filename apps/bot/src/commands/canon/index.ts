@@ -38,6 +38,7 @@ import {
 } from './draftSession.js';
 import {
   handleDraftOrderSetupSubcommand,
+  handleDraftOrderMinigameSubcommand,
   handleDraftOrderBeginSubcommand,
   handleDraftOrderStatusSubcommand,
   handleDraftOrderAbortSubcommand,
@@ -659,6 +660,18 @@ export const canonCommand = new SlashCommandBuilder()
       )
       .addSubcommand((sub) =>
         sub
+          .setName('minigame')
+          .setDescription('Reaction round for bonus balls (runs before begin seals the bag)')
+          .addIntegerOption((opt) =>
+            opt
+              .setName('window')
+              .setDescription('Click window in seconds after GO (default 15)')
+              .setMinValue(5)
+              .setMaxValue(60),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
           .setName('begin')
           .setDescription('Post the commitment and run the worst-to-first reveal')
           .addIntegerOption((opt) =>
@@ -799,6 +812,8 @@ export async function handleCanonInteraction(
   if (group === 'draftorder') {
     if (subcommand === 'setup') {
       await handleDraftOrderSetupSubcommand(interaction, context);
+    } else if (subcommand === 'minigame') {
+      await handleDraftOrderMinigameSubcommand(interaction);
     } else if (subcommand === 'begin') {
       await handleDraftOrderBeginSubcommand(interaction);
     } else if (subcommand === 'status') {
