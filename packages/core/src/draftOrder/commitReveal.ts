@@ -15,7 +15,7 @@
  * MVP; ADR 0006 records the trust model and a cheap hardening if the league ever wants one.
  */
 import { createHash } from 'node:crypto';
-import { ballCountForTeam, computeDraftOrder } from './engine.js';
+import { assertValidTeamIds, ballCountForTeam, computeDraftOrder } from './engine.js';
 import type { LotteryDraw, LotteryInput } from './types.js';
 
 /** The public lottery configuration — everything except the secret seed. */
@@ -34,6 +34,7 @@ export const DRAW_ALGORITHM = 'fantasy-canon-draft-order-v1';
  * redacted, alongside the commitment; auditors rebuild it after the reveal and hash it.
  */
 export function commitmentPreimage(seed: string, config: LotteryConfig): string {
+  assertValidTeamIds(config.teams);
   const baseBallCount = config.baseBallCount ?? 1;
   return JSON.stringify({
     algorithm: DRAW_ALGORITHM,

@@ -14,12 +14,17 @@ export function encodeBallId(teamId: string, ballNumber: number): string {
 
 /**
  * Total balls `team` puts in the bag: its `baseBalls` (or the lottery-wide `baseBallCount`)
- * plus any `bonusBalls`. Throws if the total isn't positive — a team with no balls could never
- * be drawn. Shared with the odds math (`odds.ts`) so both always agree on weights.
+ * plus any `bonusBalls`. Ball counts must be non-negative integers — a fractional count would
+ * silently desynchronize the bag (which floors it) from the odds math and the commitment
+ * preimage (which don't) — and the total must be positive, since a team with no balls could
+ * never be drawn. Shared with `odds.ts` and `commitReveal.ts` so all three agree on weights.
  */
 export function ballCountForTeam(team: DraftOrderTeamInput, baseBallCount = 1): number {
   const base = team.baseBalls ?? baseBallCount;
   const bonus = team.bonusBalls ?? 0;
+  if (!Number.isInteger(base) || base < 0 || !Number.isInteger(bonus) || bonus < 0) {
+    throw new Error(`Team ${team.teamId} ball counts must be non-negative integers`);
+  }
   const total = base + bonus;
   if (total <= 0) {
     throw new Error(`Team ${team.teamId} must have at least one ball`);
@@ -27,7 +32,8 @@ export function ballCountForTeam(team: DraftOrderTeamInput, baseBallCount = 1): 
   return total;
 }
 
-function assertValidTeamIds(teams: DraftOrderTeamInput[]): void {
+/** Shared by the bag builder and the commitment preimage — both must reject the same configs. */
+export function assertValidTeamIds(teams: DraftOrderTeamInput[]): void {
   const seen = new Set<string>();
   for (const team of teams) {
     if (team.teamId.length === 0 || team.teamId.includes(':')) {

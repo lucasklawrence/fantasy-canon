@@ -29,6 +29,14 @@ describe('buildBallBag', () => {
   it('rejects teams with no balls', () => {
     expect(() => buildBallBag([{ teamId: 'a', baseBalls: 0 }])).toThrow('at least one ball');
   });
+
+  it('rejects fractional and negative ball counts — bag, odds, and commitment must agree', () => {
+    expect(() => buildBallBag([{ teamId: 'a', baseBalls: 2.5 }])).toThrow('non-negative integers');
+    expect(() => buildBallBag([{ teamId: 'a', bonusBalls: 0.5 }])).toThrow('non-negative integers');
+    expect(() => buildBallBag([{ teamId: 'a', baseBalls: -1, bonusBalls: 3 }])).toThrow(
+      'non-negative integers',
+    );
+  });
 });
 
 describe('computeDraftOrder', () => {

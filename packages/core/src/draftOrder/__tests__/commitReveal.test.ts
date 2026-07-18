@@ -53,6 +53,12 @@ describe('computeCommitment', () => {
     expect(computeCommitment('seed-a', config)).not.toBe(computeCommitment('seed-b', config));
   });
 
+  it('refuses to commit to a config the engine would reject', () => {
+    expect(() => computeCommitment('seed', { teams: [{ teamId: 'a' }, { teamId: 'a' }] })).toThrow(
+      'Duplicate teamId',
+    );
+  });
+
   it('changes when the bag changes — the commitment binds the config, not just the seed', () => {
     const committed = computeCommitment(FIXTURE_SEED, FIXTURE_CONFIG);
     const tamperedTeams = FIXTURE_TEAMS.map((team) =>
