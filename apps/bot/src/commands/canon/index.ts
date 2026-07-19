@@ -755,6 +755,88 @@ export const canonCommand = new SlashCommandBuilder()
       ),
   );
 
+/**
+ * A `/canon` subcommand handler. Every handler accepts `(interaction, context)`; handlers that
+ * don't need `context` (e.g. the draft-session commands, which read module-level state) simply
+ * declare the one parameter — TypeScript still accepts them here, since a lower-arity function is
+ * assignable to a higher-arity type.
+ */
+type CanonSubcommandHandler = (
+  interaction: ChatInputCommandInteraction,
+  context: BotContext,
+) => Promise<void>;
+
+/**
+ * Build the dispatch key for a subcommand: `"group:sub"` when the subcommand lives in a group,
+ * or just `"sub"` for a top-level subcommand. Discord forbids a group and a top-level subcommand
+ * sharing a name at the same level, so this is unambiguous. Used by both the router and the
+ * routing test, so the two never drift.
+ */
+export function canonRouteKey(group: string | null, subcommand: string): string {
+  return group ? `${group}:${subcommand}` : subcommand;
+}
+
+/**
+ * Table-driven `/canon` router: `"group:sub"` (or `"sub"` for top-level) → handler. Replaces the
+ * former nested `if/else` chains. `canonRouter.test.ts` asserts this table and `canonCommand`'s
+ * registered subcommands are in exact bijection, so a new subcommand can't be registered without a
+ * route (or vice versa). The `config` group has no per-sub branching — both `set` and `show` route
+ * to `handleConfigSubcommand`, which reads the subcommand itself.
+ */
+export const CANON_ROUTES: Record<string, CanonSubcommandHandler> = {
+  // config
+  'config:set': handleConfigSubcommand,
+  'config:show': handleConfigSubcommand,
+  // legacy
+  'legacy:season': handleLegacySubcommand,
+  'legacy:history': handleLegacyHistorySubcommand,
+  'legacy:champ': handleChampSubcommand,
+  'legacy:champs': handleChampsSubcommand,
+  'legacy:managers': handleManagersSubcommand,
+  // faab
+  'faab:leaderboard': handleLeaderboardSubcommand,
+  'faab:faabpace': handleFaabPaceSubcommand,
+  'faab:bids': handleBidsSubcommand,
+  'faab:transactions': handleTransactionsSubcommand,
+  // draft
+  'draft:cheatsheet': handleDraftCheatsheetSubcommand,
+  'draft:start': handleDraftStartSubcommand,
+  'draft:pick': handleDraftPickSubcommand,
+  'draft:best': handleDraftBestSubcommand,
+  'draft:board': handleDraftBoardSubcommand,
+  'draft:status': handleDraftStatusSubcommand,
+  'draft:grade': handleDraftGradeSubcommand,
+  'draft:stop': handleDraftStopSubcommand,
+  // draftorder
+  'draftorder:setup': handleDraftOrderSetupSubcommand,
+  'draftorder:minigame': handleDraftOrderMinigameSubcommand,
+  'draftorder:begin': handleDraftOrderBeginSubcommand,
+  'draftorder:hype': handleDraftOrderHypeSubcommand,
+  'draftorder:status': handleDraftOrderStatusSubcommand,
+  'draftorder:abort': handleDraftOrderAbortSubcommand,
+  // admin
+  'admin:status': handleStatusSubcommand,
+  'admin:ping': handlePingSubcommand,
+  'admin:teams': handleTeamsSubcommand,
+  'admin:inspect': handleInspectSubcommand,
+  'admin:ingest': handleIngestSubcommand,
+  'admin:timeline': handleTimelineSubcommand,
+  'admin:graph': handleGraphSubcommand,
+  // top-level analytics & fun (no subcommand group)
+  luck: handleLuckSubcommand,
+  allplay: handleAllPlaySubcommand,
+  lineup: handleLineupSubcommand,
+  trophies: handleTrophiesSubcommand,
+  'draft-prophecy': handleDraftProphecySubcommand,
+  streaks: handleStreaksSubcommand,
+  homeaway: handleHomeAwaySubcommand,
+  'manager-archetypes': handleManagerArchetypesSubcommand,
+  tradeblock: handleTradeBlockSubcommand,
+  rivalry: handleRivalrySubcommand,
+  rivalries: handleRivalriesSubcommand,
+  scout: handleScoutSubcommand,
+};
+
 async function handleNotImplemented(
   interaction: ChatInputCommandInteraction,
   subcommand: string,
@@ -769,175 +851,78 @@ export async function handleCanonInteraction(
   interaction: ChatInputCommandInteraction,
   context: BotContext,
 ): Promise<void> {
-  const group = interaction.options.getSubcommandGroup(false);
   const subcommand = interaction.options.getSubcommand();
-
-  if (group === 'config') {
-    await handleConfigSubcommand(interaction, context);
-    return;
-  }
-
-  if (group === 'legacy') {
-    if (subcommand === 'season') {
-      await handleLegacySubcommand(interaction, context);
-    } else if (subcommand === 'history') {
-      await handleLegacyHistorySubcommand(interaction, context);
-    } else if (subcommand === 'champ') {
-      await handleChampSubcommand(interaction, context);
-    } else if (subcommand === 'champs') {
-      await handleChampsSubcommand(interaction, context);
-    } else if (subcommand === 'managers') {
-      await handleManagersSubcommand(interaction, context);
-    } else {
-      await handleNotImplemented(interaction, subcommand);
-    }
-    return;
-  }
-
-  if (group === 'faab') {
-    if (subcommand === 'leaderboard') {
-      await handleLeaderboardSubcommand(interaction, context);
-    } else if (subcommand === 'faabpace') {
-      await handleFaabPaceSubcommand(interaction, context);
-    } else if (subcommand === 'bids') {
-      await handleBidsSubcommand(interaction, context);
-    } else if (subcommand === 'transactions') {
-      await handleTransactionsSubcommand(interaction, context);
-    } else {
-      await handleNotImplemented(interaction, subcommand);
-    }
-    return;
-  }
-
-  if (group === 'draft') {
-    if (subcommand === 'cheatsheet') {
-      await handleDraftCheatsheetSubcommand(interaction);
-    } else if (subcommand === 'start') {
-      await handleDraftStartSubcommand(interaction);
-    } else if (subcommand === 'pick') {
-      await handleDraftPickSubcommand(interaction);
-    } else if (subcommand === 'best') {
-      await handleDraftBestSubcommand(interaction);
-    } else if (subcommand === 'board') {
-      await handleDraftBoardSubcommand(interaction);
-    } else if (subcommand === 'status') {
-      await handleDraftStatusSubcommand(interaction);
-    } else if (subcommand === 'grade') {
-      await handleDraftGradeSubcommand(interaction);
-    } else if (subcommand === 'stop') {
-      await handleDraftStopSubcommand(interaction);
-    } else {
-      await handleNotImplemented(interaction, subcommand);
-    }
-    return;
-  }
-
-  if (group === 'draftorder') {
-    if (subcommand === 'setup') {
-      await handleDraftOrderSetupSubcommand(interaction, context);
-    } else if (subcommand === 'minigame') {
-      await handleDraftOrderMinigameSubcommand(interaction);
-    } else if (subcommand === 'begin') {
-      await handleDraftOrderBeginSubcommand(interaction);
-    } else if (subcommand === 'hype') {
-      await handleDraftOrderHypeSubcommand(interaction);
-    } else if (subcommand === 'status') {
-      await handleDraftOrderStatusSubcommand(interaction);
-    } else if (subcommand === 'abort') {
-      await handleDraftOrderAbortSubcommand(interaction);
-    } else {
-      await handleNotImplemented(interaction, subcommand);
-    }
-    return;
-  }
-
-  if (group === 'admin') {
-    if (subcommand === 'status') {
-      await handleStatusSubcommand(interaction, context);
-    } else if (subcommand === 'ping') {
-      await handlePingSubcommand(interaction);
-    } else if (subcommand === 'teams') {
-      await handleTeamsSubcommand(interaction, context);
-    } else if (subcommand === 'inspect') {
-      await handleInspectSubcommand(interaction, context);
-    } else if (subcommand === 'ingest') {
-      await handleIngestSubcommand(interaction, context);
-    } else if (subcommand === 'timeline') {
-      await handleTimelineSubcommand(interaction, context);
-    } else if (subcommand === 'graph') {
-      await handleGraphSubcommand(interaction, context);
-    } else {
-      await handleNotImplemented(interaction, subcommand);
-    }
-    return;
-  }
-
-  // Top-level analytics & fun (no subcommand group).
-  if (subcommand === 'luck') {
-    await handleLuckSubcommand(interaction, context);
-  } else if (subcommand === 'allplay') {
-    await handleAllPlaySubcommand(interaction, context);
-  } else if (subcommand === 'lineup') {
-    await handleLineupSubcommand(interaction, context);
-  } else if (subcommand === 'trophies') {
-    await handleTrophiesSubcommand(interaction, context);
-  } else if (subcommand === 'draft-prophecy') {
-    await handleDraftProphecySubcommand(interaction, context);
-  } else if (subcommand === 'streaks') {
-    await handleStreaksSubcommand(interaction, context);
-  } else if (subcommand === 'homeaway') {
-    await handleHomeAwaySubcommand(interaction, context);
-  } else if (subcommand === 'manager-archetypes') {
-    await handleManagerArchetypesSubcommand(interaction, context);
-  } else if (subcommand === 'tradeblock') {
-    await handleTradeBlockSubcommand(interaction, context);
-  } else if (subcommand === 'rivalry') {
-    await handleRivalrySubcommand(interaction, context);
-  } else if (subcommand === 'rivalries') {
-    await handleRivalriesSubcommand(interaction, context);
-  } else if (subcommand === 'scout') {
-    await handleScoutSubcommand(interaction, context);
-  } else {
+  const key = canonRouteKey(interaction.options.getSubcommandGroup(false), subcommand);
+  const handler = CANON_ROUTES[key];
+  if (!handler) {
     await handleNotImplemented(interaction, subcommand);
+    return;
   }
+  await handler(interaction, context);
 }
 
 /**
- * Route `/canon` autocomplete interactions. Only `scout` exposes an autocomplete option today;
- * any other focused field gets an empty menu.
+ * Table of `/canon` autocomplete handlers, keyed like {@link CANON_ROUTES}. Only `scout` exposes
+ * an autocomplete option today; any other focused field falls through to an empty menu.
+ */
+export const CANON_AUTOCOMPLETE_ROUTES: Record<
+  string,
+  (interaction: AutocompleteInteraction, context: BotContext) => Promise<void>
+> = {
+  scout: handleScoutAutocomplete,
+};
+
+/**
+ * Route `/canon` autocomplete interactions via {@link CANON_AUTOCOMPLETE_ROUTES}.
  */
 export async function handleCanonAutocomplete(
   interaction: AutocompleteInteraction,
   context: BotContext,
 ): Promise<void> {
   const subcommand = interaction.options.getSubcommand(false);
-  if (subcommand === 'scout') {
-    await handleScoutAutocomplete(interaction, context);
+  const handler = subcommand
+    ? CANON_AUTOCOMPLETE_ROUTES[
+        canonRouteKey(interaction.options.getSubcommandGroup(false), subcommand)
+      ]
+    : undefined;
+  if (handler) {
+    await handler(interaction, context);
     return;
   }
   await interaction.respond([]);
 }
 
 /**
- * Route `/canon` message-component interactions (buttons, select menus). customIds are namespaced
- * `canon:<feature>:<action>` so `discord.ts` can hand everything `canon:`-prefixed here; each feature
- * owns its slice. Today only the interactive draft grade uses it — a reusable seam for future
- * commands that want buttons/menus.
+ * Table of `/canon` message-component routes: a customId prefix → guarded handler. customIds are
+ * namespaced `canon:<feature>:<action>` (with a trailing `:<sessionId>`, see
+ * buildGradeComponents/buildBoardComponents), so `discord.ts` hands everything `canon:`-prefixed
+ * here and we match by prefix. Each entry re-checks the component type: a customId whose component
+ * kind doesn't match (a spoofed or malformed interaction) no-ops rather than mis-dispatching.
+ */
+const CANON_COMPONENT_ROUTES: {
+  prefix: string;
+  handle: (interaction: MessageComponentInteraction) => Promise<void> | undefined;
+}[] = [
+  {
+    prefix: `${GRADE_VIEW_ID}:`,
+    handle: (i) => (i.isStringSelectMenu() ? handleGradeViewSelect(i) : undefined),
+  },
+  { prefix: `${GRADE_SHARE_ID}:`, handle: (i) => (i.isButton() ? handleGradeShare(i) : undefined) },
+  {
+    prefix: `${BOARD_REFRESH_ID}:`,
+    handle: (i) => (i.isButton() ? handleBoardRefresh(i) : undefined),
+  },
+  { prefix: `${BOARD_GRADE_ID}:`, handle: (i) => (i.isButton() ? handleBoardGrade(i) : undefined) },
+];
+
+/**
+ * Route `/canon` message-component interactions (buttons, select menus). Today only the
+ * interactive draft grade and live board use it — a reusable seam for future commands that want
+ * buttons/menus. Unknown/stale components are ignored (a leftover button on an old message no-ops).
  */
 export async function handleCanonComponent(
   interaction: MessageComponentInteraction,
 ): Promise<void> {
-  const { customId } = interaction;
-  // customIds carry a `:<sessionId>` suffix (see buildGradeComponents/buildBoardComponents), so
-  // match by prefix.
-  if (customId.startsWith(`${GRADE_VIEW_ID}:`) && interaction.isStringSelectMenu()) {
-    await handleGradeViewSelect(interaction);
-  } else if (customId.startsWith(`${GRADE_SHARE_ID}:`) && interaction.isButton()) {
-    await handleGradeShare(interaction);
-  } else if (customId.startsWith(`${BOARD_REFRESH_ID}:`) && interaction.isButton()) {
-    await handleBoardRefresh(interaction);
-  } else if (customId.startsWith(`${BOARD_GRADE_ID}:`) && interaction.isButton()) {
-    await handleBoardGrade(interaction);
-  }
-  // Unknown/stale component: ignore. (A stale button on an old message just no-ops.)
+  const route = CANON_COMPONENT_ROUTES.find((r) => interaction.customId.startsWith(r.prefix));
+  await route?.handle(interaction);
 }
