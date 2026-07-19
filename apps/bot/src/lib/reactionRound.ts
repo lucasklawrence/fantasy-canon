@@ -81,23 +81,39 @@ export function buildTeamButtonRows(
 export type ClickOutcome =
   | { kind: 'recorded'; status: 'valid'; reactionMs: number }
   | { kind: 'recorded'; status: 'early' }
+  | { kind: 'recorded'; status: 'invalid' }
   | { kind: 'team-locked' }
   | { kind: 'user-spent' };
 
 /**
  * Click-recording state machine for one round: first click per team, one click per person,
- * clicks before {@link markGo} are false starts. Pure bookkeeping — timestamps come in as
- * arguments — so the round rules are unit-testable without discord.js.
+ * clicks before {@link markGo} are false starts, clicks past the window are late (`invalid`).
+ * Pure bookkeeping — timestamps come in as arguments — so the round rules are unit-testable
+ * without discord.js. The window is enforced here by timestamp (not just by stopping the
+ * collector) because the collector deliberately outlives the window by a few seconds of
+ * slack for in-flight events.
  */
 export class ReactionRecorder {
   private goAt: number | undefined;
+  private readonly windowMs: number | undefined;
   private readonly attempts: ReactionAttempt[] = [];
   private readonly clickedUsers = new Set<string>();
   private readonly clickers = new Map<string, string>();
 
+  constructor(windowMs?: number) {
+    this.windowMs = windowMs;
+  }
+
   /** GO is stamped just before the message flips, so edit latency never turns a fair click into a false start. */
   markGo(at: number): void {
     this.goAt = at;
+  }
+
+  /** `early` before GO, `invalid` past the window, `valid` in between — relative to `goAt`. */
+  private classify(at: number): ReactionAttempt['status'] {
+    if (this.goAt === undefined || at < this.goAt) return 'early';
+    if (this.windowMs !== undefined && at > this.goAt + this.windowMs) return 'invalid';
+    return 'valid';
   }
 
   record(teamId: string, userId: string, userLabel: string, at: number): ClickOutcome {
@@ -105,13 +121,14 @@ export class ReactionRecorder {
     if (this.clickedUsers.has(userId)) return { kind: 'user-spent' };
     this.clickedUsers.add(userId);
     this.clickers.set(teamId, userLabel);
-    if (this.goAt === undefined || at < this.goAt) {
-      this.attempts.push({ teamId, status: 'early', attemptAt: new Date(at) });
-      return { kind: 'recorded', status: 'early' };
+    const status = this.classify(at);
+    if (status !== 'valid') {
+      this.attempts.push({ teamId, status, attemptAt: new Date(at) });
+      return { kind: 'recorded', status };
     }
-    const reactionMs = at - this.goAt;
-    this.attempts.push({ teamId, status: 'valid', reactionMs, attemptAt: new Date(at) });
-    return { kind: 'recorded', status: 'valid', reactionMs };
+    const reactionMs = at - (this.goAt as number);
+    this.attempts.push({ teamId, status, reactionMs, attemptAt: new Date(at) });
+    return { kind: 'recorded', status, reactionMs };
   }
 
   /**
@@ -128,15 +145,16 @@ export class ReactionRecorder {
     for (let i = 0; i < this.attempts.length; i += 1) {
       const attempt = this.attempts[i];
       const at = attempt.attemptAt.getTime();
+      const status = this.classify(at);
       this.attempts[i] =
-        at < serverAt
-          ? { teamId: attempt.teamId, status: 'early', attemptAt: attempt.attemptAt }
-          : {
+        status === 'valid'
+          ? {
               teamId: attempt.teamId,
-              status: 'valid',
+              status,
               reactionMs: at - serverAt,
               attemptAt: attempt.attemptAt,
-            };
+            }
+          : { teamId: attempt.teamId, status, attemptAt: attempt.attemptAt };
     }
   }
 
@@ -177,6 +195,14 @@ export function formatRoundResults(
   if (falseStarts.length > 0) {
     lines.push(
       `🚨 False starts (attempt burned): ${falseStarts
+        .map((a) => `${nameOf(a.teamId)}${by(a.teamId)}`)
+        .join(', ')}`,
+    );
+  }
+  const lateClicks = attempts.filter((a) => a.status === 'invalid');
+  if (lateClicks.length > 0) {
+    lines.push(
+      `⌛ Too late (window closed): ${lateClicks
         .map((a) => `${nameOf(a.teamId)}${by(a.teamId)}`)
         .join(', ')}`,
     );
@@ -276,7 +302,9 @@ function ackContent(outcome: ClickOutcome, teamName: string): string {
     case 'recorded':
       return outcome.status === 'valid'
         ? `⏱️ ${outcome.reactionMs} ms for **${teamName}** — locked in.`
-        : `🚨 False start — **${teamName}**’s attempt is burned.`;
+        : outcome.status === 'early'
+          ? `🚨 False start — **${teamName}**’s attempt is burned.`
+          : `⌛ Too slow — the window had already closed on **${teamName}**’s click.`;
     case 'team-locked':
       return `**${teamName}** already has its click.`;
     case 'user-spent':
@@ -323,7 +351,7 @@ export async function runReactionRound(
     name: session.names.get(team.teamId) ?? team.teamId,
   }));
   const idPrefix = `rr:${now().toString(36)}`;
-  const recorder = new ReactionRecorder();
+  const recorder = new ReactionRecorder(windowMs);
 
   const armDelay = armDelayMs();
   const message = await channel.send({

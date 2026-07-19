@@ -132,6 +132,27 @@ describe('ReactionRecorder', () => {
       { teamId: 't3', status: 'valid', reactionMs: 100 },
     ]);
   });
+
+  it('rejects clicks past the window as invalid — the collector outlives the window by design', () => {
+    const recorder = new ReactionRecorder(5000);
+    recorder.markGo(1000);
+    // The boundary click is in; one past it is out, and refinement re-derives the boundary.
+    expect(recorder.record('t1', 'u1', 'alice', 6000)).toEqual({
+      kind: 'recorded',
+      status: 'valid',
+      reactionMs: 5000,
+    });
+    expect(recorder.record('t2', 'u2', 'bob', 6001)).toEqual({
+      kind: 'recorded',
+      status: 'invalid',
+    });
+    recorder.refineGo(1001);
+    expect(recorder.getAttempts()).toMatchObject([
+      { teamId: 't1', status: 'valid', reactionMs: 4999 },
+      { teamId: 't2', status: 'valid', reactionMs: 5000 },
+    ]);
+    expect(scoreReactionGame(recorder.getAttempts()).bonusByTeam).toEqual({ t1: 2, t2: 1 });
+  });
 });
 
 describe('buildTeamButtonRows', () => {
@@ -170,6 +191,22 @@ describe('formatRoundResults', () => {
     expect(content).toContain('🥈 Team 2 — 200 ms → **+1 ball**');
     expect(content).toContain('🚨 False starts (attempt burned): Team 3');
     expect(content).toContain('😴 Never clicked: Team 4');
+  });
+
+  it('lists late clicks separately from false starts and no-shows', () => {
+    const attempts: ReactionAttempt[] = [
+      { teamId: 't1', status: 'valid', reactionMs: 120, attemptAt: new Date(1) },
+      { teamId: 't2', status: 'invalid', attemptAt: new Date(9) },
+    ];
+    const content = formatRoundResults(
+      scoreReactionGame(attempts),
+      attempts,
+      TEAMS,
+      () => undefined,
+    );
+    expect(content).toContain('⌛ Too late (window closed): Team 2');
+    expect(content).toContain('😴 Never clicked: Team 3, Team 4');
+    expect(content).not.toContain('False starts');
   });
 
   it('reports a scoreless round without claiming the bag is untouched (a re-run may have cleared awards)', () => {
