@@ -39,7 +39,16 @@ import {
 
 /** One ceremony message. `kind` is semantic metadata for tests/logging; adapters post `content` + `image`. */
 export interface CeremonyPost {
-  kind: 'preview' | 'commitment' | 'beat' | 'reveal' | 'board' | 'seed-reveal' | 'abort' | 'hype';
+  kind:
+    | 'preview'
+    | 'commitment'
+    | 'beat'
+    | 'reveal'
+    | 'board'
+    | 'seed-reveal'
+    | 'abort'
+    | 'minigame'
+    | 'hype';
   content?: string;
   image?: { name: string; data: Buffer };
 }
@@ -66,6 +75,10 @@ export interface CeremonySession {
   commitMessageId?: string;
   drawSeed?: string;
   draws?: LotteryDraw[];
+  /** The mini-game's current contribution per team — subtracted before re-applying so a re-run never stacks on itself or clobbers setup-granted bonuses (#166). */
+  miniGameBonuses?: Record<string, number>;
+  /** True while a reaction round is collecting clicks — `begin` must wait (the bag is in flux). */
+  miniGameActive?: boolean;
   /** How many hype posts have gone out — rotates the copy templates (#165). */
   hypeCount?: number;
   abort: AbortController;
@@ -194,6 +207,29 @@ export async function buildPreviewPost(session: CeremonySession): Promise<Ceremo
 export function markPreviewPosted(session: CeremonySession): void {
   assertTransition(session.state, 'GAME_OPEN');
   session.state = 'GAME_OPEN';
+}
+
+/**
+ * Apply a scored reaction round onto the session's bag (#166): each team's bonus becomes its
+ * setup-granted bonus plus its mini-game award. The previous round's contribution is subtracted
+ * first, so re-running the round replaces only the mini-game's share and never erodes what the
+ * commissioner granted at setup. Only legal while the bag is still mutable (`GAME_OPEN` —
+ * before the commitment binds it). Re-validates the new bag eagerly, like `createCeremony`.
+ */
+export function applyMiniGameBonuses(
+  session: CeremonySession,
+  bonusByTeam: Record<string, number>,
+): void {
+  if (session.state !== 'GAME_OPEN') {
+    throw new Error(`Mini-game bonuses can only be applied in GAME_OPEN (state: ${session.state})`);
+  }
+  const previous = session.miniGameBonuses ?? {};
+  for (const team of session.config.teams) {
+    const setupBonus = (team.bonusBalls ?? 0) - (previous[team.teamId] ?? 0);
+    team.bonusBalls = setupBonus + (bonusByTeam[team.teamId] ?? 0);
+  }
+  session.miniGameBonuses = { ...bonusByTeam };
+  computePickOdds(session.config.teams, session.config.baseBallCount);
 }
 
 /**

@@ -4,7 +4,9 @@
  * Two-step flow: `setup` posts the public odds preview and freezes the bag; `begin` posts the
  * commitment and runs the paced worst-to-first reveal on regular channel messages (never
  * interaction responses — the ceremony outlives any interaction token). `abort` follows the
- * ADR 0006 disclosure policy; `status` is an ephemeral peek.
+ * ADR 0006 disclosure policy; `status` is an ephemeral peek. Between them, the optional
+ * `minigame` (#166) runs the reaction round while the bag is still mutable — its results and
+ * a fresh odds preview always post publicly before `begin` can seal the bag.
  *
  * Teams default to the ESPN league's `mTeam` roster; a manual `teams` option overrides for
  * dry-runs and leagues without ESPN access. All orchestration lives in
@@ -16,7 +18,7 @@ import {
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
-import { DraftOrderTeamInput } from '@fantasy-canon/core';
+import { DraftOrderState, DraftOrderTeamInput } from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
 import { resolveLeagueId } from '../../lib/leagueId.js';
 import { ensureSnapshot } from '../../lib/snapshots.js';
@@ -36,6 +38,7 @@ import {
   runCeremony,
   setCeremony,
 } from '../../lib/draftOrderCeremony.js';
+import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
 
@@ -348,6 +351,14 @@ export async function handleDraftOrderBeginSubcommand(
     });
     return;
   }
+  if (session.miniGameActive) {
+    await interaction.reply({
+      content:
+        'A reaction round is still collecting clicks — the bag is in flux. Wait for its results post, then `begin`.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   const channel = sendableChannel(interaction);
   if (!channel) {
@@ -367,11 +378,24 @@ export async function handleDraftOrderBeginSubcommand(
 
   // Re-validate after the reply await: an abort (or a replacing setup) may have raced us.
   // runCeremony's own pre-commit abort check is the backstop; this avoids even starting.
-  if (getCeremony(guildId) !== session || session.abort.signal.aborted) {
-    await interaction.followUp({
-      content: 'The ceremony was aborted before it could start — nothing was committed.',
-      flags: MessageFlags.Ephemeral,
-    });
+  // A reaction round that armed while we awaited the reply also stops us — sealing the bag
+  // would just doom that round to a public discard — and a concurrent `begin` that already
+  // moved the state gets a clean refusal instead of an assertTransition error in the log.
+  // Widened via assertion: another handler can mutate the state across the await above, which
+  // TS's narrowing (still "GAME_OPEN" from the top guard, even through a const alias) can't see.
+  const stateNow = session.state as DraftOrderState;
+  if (
+    getCeremony(guildId) !== session ||
+    session.abort.signal.aborted ||
+    session.miniGameActive ||
+    stateNow !== 'GAME_OPEN'
+  ) {
+    const content = session.miniGameActive
+      ? 'A reaction round armed just now — wait for its results post, then `begin`.'
+      : stateNow === 'LOTTERY_RUNNING'
+        ? 'The ceremony is already running.'
+        : 'The ceremony was aborted before it could start — nothing was committed.';
+    await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -382,6 +406,77 @@ export async function handleDraftOrderBeginSubcommand(
       console.error('[draftorder] ceremony failed:', error);
     }
   });
+}
+
+export const DEFAULT_MINIGAME_WINDOW_SECONDS = DEFAULT_WINDOW_MS / 1000;
+
+export async function handleDraftOrderMinigameSubcommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  if (!(await denyUnlessCommissioner(interaction))) return;
+  const guildId = interaction.guildId as string;
+
+  const session = getCeremony(guildId);
+  if (!session || session.state !== 'GAME_OPEN') {
+    await interaction.reply({
+      content:
+        session?.state === 'LOTTERY_RUNNING'
+          ? 'The bag is already sealed — the mini-game has to run before `begin`.'
+          : 'No ceremony is set up — run `/canon draftorder setup` first, then the mini-game, then `begin`.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (session.miniGameActive) {
+    await interaction.reply({
+      content: 'A reaction round is already in progress.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const channel = sendableChannel(interaction);
+  if (!channel) {
+    await interaction.reply({
+      content: "I can't post in this channel — check my permissions.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const windowSeconds = interaction.options.getInteger('window') ?? DEFAULT_MINIGAME_WINDOW_SECONDS;
+
+  await interaction.reply({
+    content: `Reaction round armed — GO flips after a surprise delay, then a ${windowSeconds}s click window. Results and a fresh odds preview post when it closes.`,
+    flags: MessageFlags.Ephemeral,
+  });
+
+  // Re-validate after the reply await: an abort, a replacing setup, or another round may have
+  // raced us. finishReactionRound re-checks at scoring time; this avoids even arming.
+  if (getCeremony(guildId) !== session || session.state !== 'GAME_OPEN' || session.miniGameActive) {
+    await interaction.followUp({
+      content: 'The ceremony changed before the round could arm — nothing was posted.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  session.miniGameActive = true;
+  try {
+    // Awaited on purpose (unlike `begin`): the round lasts well under a minute, and holding
+    // `miniGameActive` for its whole life is what lets `begin` refuse to seal a bag in flux.
+    await runReactionRound(session, channel, channelIo(channel), {
+      windowMs: windowSeconds * 1000,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[minigame] reaction round failed:', error);
+    await interaction
+      .followUp({ content: `Reaction round failed: ${message}`, flags: MessageFlags.Ephemeral })
+      .catch(() => undefined);
+  } finally {
+    session.miniGameActive = false;
+  }
 }
 
 export async function handleDraftOrderStatusSubcommand(
