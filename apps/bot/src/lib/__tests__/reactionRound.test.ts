@@ -146,9 +146,9 @@ describe('formatRoundResults', () => {
     expect(content).toContain('😴 Never clicked: Team 4');
   });
 
-  it('says the bag is unchanged when nobody scored', () => {
+  it('reports a scoreless round without claiming the bag is untouched (a re-run may have cleared awards)', () => {
     const content = formatRoundResults(scoreReactionGame([]), [], TEAMS, () => undefined);
-    expect(content).toContain('Nobody scored — the bag is unchanged.');
+    expect(content).toContain('Nobody scored this round.');
     expect(content).toContain('😴 Never clicked: Team 1, Team 2, Team 3, Team 4');
   });
 });

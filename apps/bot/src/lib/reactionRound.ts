@@ -161,10 +161,12 @@ export function formatRoundResults(
     lines.push(`😴 Never clicked: ${noShows.map((t) => t.name).join(', ')}`);
   }
   if (result.ranking.length === 0) {
-    lines.push('Nobody scored — the bag is unchanged.');
+    // No claim about the bag here: a scoreless re-run after a scoring round still clears the
+    // earlier awards — the fresh preview below is the authoritative record either way.
+    lines.push('Nobody scored this round.');
   }
   lines.push(
-    'Bonus balls are in the bag — fresh odds preview below. `/canon draftorder begin` seals it.',
+    'The current bag is in the fresh odds preview below. `/canon draftorder begin` seals it.',
   );
   return lines.join('\n');
 }

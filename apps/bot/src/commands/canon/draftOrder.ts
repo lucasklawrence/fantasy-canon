@@ -283,9 +283,13 @@ export async function handleDraftOrderBeginSubcommand(
 
   // Re-validate after the reply await: an abort (or a replacing setup) may have raced us.
   // runCeremony's own pre-commit abort check is the backstop; this avoids even starting.
-  if (getCeremony(guildId) !== session || session.abort.signal.aborted) {
+  // A reaction round that armed while we awaited the reply also stops us — sealing the bag
+  // would just doom that round to a public discard.
+  if (getCeremony(guildId) !== session || session.abort.signal.aborted || session.miniGameActive) {
     await interaction.followUp({
-      content: 'The ceremony was aborted before it could start — nothing was committed.',
+      content: session?.miniGameActive
+        ? 'A reaction round armed just now — wait for its results post, then `begin`.'
+        : 'The ceremony was aborted before it could start — nothing was committed.',
       flags: MessageFlags.Ephemeral,
     });
     return;
