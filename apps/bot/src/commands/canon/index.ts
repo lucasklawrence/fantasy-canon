@@ -42,6 +42,7 @@ import {
   handleDraftOrderBeginSubcommand,
   handleDraftOrderStatusSubcommand,
   handleDraftOrderAbortSubcommand,
+  handleDraftOrderHypeSubcommand,
 } from './draftOrder.js';
 import { handleRivalrySubcommand, handleRivalriesSubcommand } from './rivalries.js';
 import { handleLegacySubcommand, handleLegacyHistorySubcommand } from './legacy.js';
@@ -644,13 +645,27 @@ export const canonCommand = new SlashCommandBuilder()
           )
           .addStringOption((opt) =>
             opt
+              .setName('weights')
+              .setDescription("Ball weights (default: last season's standings for ESPN teams)")
+              .addChoices(
+                { name: 'standings — worst finish gets most balls', value: 'standings' },
+                { name: 'equal — every team gets the same base', value: 'equal' },
+              ),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('balls')
+              .setDescription('Set base balls by team name, e.g. "Sharks:5, Ducks:2"'),
+          )
+          .addStringOption((opt) =>
+            opt
               .setName('bonus')
               .setDescription('Bonus balls by team name, e.g. "Sharks:2, Ducks:1"'),
           )
           .addIntegerOption((opt) =>
             opt
               .setName('base')
-              .setDescription('Base balls per team (default 1)')
+              .setDescription('Base balls per team under equal weights (default 1)')
               .setMinValue(1)
               .setMaxValue(10),
           )
@@ -668,6 +683,14 @@ export const canonCommand = new SlashCommandBuilder()
               .setDescription('Click window in seconds after GO (default 15)')
               .setMinValue(5)
               .setMaxValue(60),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('hype')
+          .setDescription('Post a countdown hype message with the frozen odds card')
+          .addStringOption((opt) =>
+            opt.setName('note').setDescription('Extra line to append to the hype post'),
           ),
       )
       .addSubcommand((sub) =>
@@ -816,6 +839,8 @@ export async function handleCanonInteraction(
       await handleDraftOrderMinigameSubcommand(interaction);
     } else if (subcommand === 'begin') {
       await handleDraftOrderBeginSubcommand(interaction);
+    } else if (subcommand === 'hype') {
+      await handleDraftOrderHypeSubcommand(interaction);
     } else if (subcommand === 'status') {
       await handleDraftOrderStatusSubcommand(interaction);
     } else if (subcommand === 'abort') {
