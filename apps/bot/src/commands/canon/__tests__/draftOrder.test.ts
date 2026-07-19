@@ -5,17 +5,23 @@ import {
   MockInteractionOptions,
 } from '../../../lib/__tests__/mockInteraction.js';
 import { createMockContext } from '../../../lib/__tests__/mockContext.js';
-import { FOUR_TEAMS } from '../../../lib/__tests__/handlerFixtures.js';
+import { FOUR_TEAMS, RICH_TEAMS } from '../../../lib/__tests__/handlerFixtures.js';
+import { ballCountForTeam } from '@fantasy-canon/core';
 import {
   clearCeremony,
+  createCeremony,
   getCeremony,
+  oddsRows,
   requestAbort,
   resetCeremoniesForTests,
+  setCeremony,
 } from '../../../lib/draftOrderCeremony.js';
 import {
+  applyBallsOverrides,
   applyBonusOverrides,
   handleDraftOrderAbortSubcommand,
   handleDraftOrderBeginSubcommand,
+  handleDraftOrderHypeSubcommand,
   handleDraftOrderSetupSubcommand,
   handleDraftOrderStatusSubcommand,
   parseManualTeams,
@@ -77,6 +83,31 @@ describe('applyBonusOverrides', () => {
     applyBonusOverrides(teams, 'sharks:2');
     expect(teams[0].bonusBalls).toBe(2);
     expect(() => applyBonusOverrides(teams, 'Goats:1')).toThrow('No team named "Goats"');
+  });
+});
+
+describe('applyBallsOverrides', () => {
+  it('sets base balls by case-insensitive name — lowering as well as raising', () => {
+    const teams = [
+      { teamId: 't1', name: 'Sharks', bonusBalls: 0, baseBalls: 8 },
+      { teamId: 't2', name: 'Ducks', bonusBalls: 0, baseBalls: 3 },
+    ];
+    applyBallsOverrides(teams, 'sharks:2, Ducks:5');
+    expect(teams[0].baseBalls).toBe(2);
+    expect(teams[1].baseBalls).toBe(5);
+  });
+
+  it('requires the Name:count form with count >= 1 and rejects unknown teams', () => {
+    const teams = [{ teamId: 't1', name: 'Sharks', bonusBalls: 0 }];
+    expect(() => applyBallsOverrides(teams, 'Sharks')).toThrow('Name:count');
+    expect(() => applyBallsOverrides(teams, 'Sharks:0')).toThrow('Name:count');
+    expect(() => applyBallsOverrides(teams, 'Sharks:2.5')).toThrow('Name:count');
+    expect(() => applyBallsOverrides(teams, 'Goats:2')).toThrow('No team named "Goats"');
+  });
+
+  it('caps base balls per team', () => {
+    const teams = [{ teamId: 't1', name: 'Sharks', bonusBalls: 0 }];
+    expect(() => applyBallsOverrides(teams, 'Sharks:31')).toThrow('capped at 30');
   });
 });
 
@@ -230,5 +261,239 @@ describe('status + abort', () => {
     expect(getCeremony('guild-1')).toBeUndefined();
     expect(abort.channelPosts[0]?.content).toContain('before any commitment');
     expect(abort.lastContent()).toContain('cancelled');
+  });
+});
+
+describe('standings-derived weights (#165)', () => {
+  const lastSeasonSnapshot = (payload: unknown) => ({
+    leagueId: 'league-1',
+    season: 2025,
+    view: 'mTeam',
+    fetchedAt: new Date(),
+    payload,
+  });
+
+  it('defaults ESPN setups to last-season standings (worst finish → most balls)', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      snapshots: [lastSeasonSnapshot(RICH_TEAMS)],
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const { interaction, lastContent } = ceremonyInteraction({ options: { season: 2026 } });
+
+    await handleDraftOrderSetupSubcommand(interaction, context);
+
+    const session = getCeremony('guild-1');
+    expect(session?.config.teams.map((t) => t.baseBalls)).toEqual([1, 2, 3, 4]);
+    expect(lastContent()).toContain('2025 final standings');
+  });
+
+  it('weights:equal keeps the flat #164 behavior', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      snapshots: [lastSeasonSnapshot(RICH_TEAMS)],
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const { interaction, lastContent } = ceremonyInteraction({
+      options: { season: 2026, weights: 'equal' },
+    });
+
+    await handleDraftOrderSetupSubcommand(interaction, context);
+
+    const session = getCeremony('guild-1');
+    expect(session?.config.teams.every((t) => t.baseBalls === undefined)).toBe(true);
+    expect(lastContent()).not.toContain('standings');
+  });
+
+  it('balls sets a team base directly; bonus still adds on top', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      snapshots: [lastSeasonSnapshot(RICH_TEAMS)],
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const { interaction } = ceremonyInteraction({
+      options: { season: 2026, balls: 'Alpha Aces:6', bonus: 'Beta Bears:2' },
+    });
+
+    await handleDraftOrderSetupSubcommand(interaction, context);
+
+    const teams = getCeremony('guild-1')?.config.teams ?? [];
+    expect(teams[0]).toMatchObject({ teamId: '1', baseBalls: 6 });
+    expect(teams[1]).toMatchObject({ teamId: '2', baseBalls: 2, bonusBalls: 2 });
+  });
+
+  it('a failed standings fetch degrades to equal weights with a note — setup still succeeds', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      // Roster season is a cache hit; the 2025 standings fetch is a miss and throws.
+      snapshots: [{ ...lastSeasonSnapshot(RICH_TEAMS), season: 2026 }],
+      fetchThrows: ['mTeam'],
+    });
+    const { interaction, lastContent, channelPosts } = ceremonyInteraction({
+      options: { season: 2026 },
+    });
+
+    await handleDraftOrderSetupSubcommand(interaction, context);
+
+    const session = getCeremony('guild-1');
+    expect(session?.state).toBe('GAME_OPEN');
+    expect(session?.config.teams.every((t) => t.baseBalls === undefined)).toBe(true);
+    expect(channelPosts).toHaveLength(1);
+    expect(lastContent()).toContain('using equal weights');
+  });
+
+  it('roster teams missing from last season get mid-pack balls and are flagged', async () => {
+    const threeRanked = { teams: (RICH_TEAMS as { teams: unknown[] }).teams.slice(0, 3) };
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      snapshots: [lastSeasonSnapshot(threeRanked)],
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const { interaction, lastContent } = ceremonyInteraction({ options: { season: 2026 } });
+
+    await handleDraftOrderSetupSubcommand(interaction, context);
+
+    const teams = getCeremony('guild-1')?.config.teams ?? [];
+    expect(teams.map((t) => t.baseBalls)).toEqual([1, 2, 3, 2]);
+    expect(lastContent()).toContain('Delta Ducks');
+    expect(lastContent()).toContain('mid-pack');
+  });
+});
+
+describe('hype subcommand (#165)', () => {
+  it('requires a frozen bag and commissioner permissions', async () => {
+    const none = ceremonyInteraction({ options: {} });
+    await handleDraftOrderHypeSubcommand(none.interaction);
+    expect(none.lastContent()).toContain('setup');
+
+    const { context } = createMockContext();
+    const setup = ceremonyInteraction({ options: { season: 2026, teams: 'A, B' } });
+    await handleDraftOrderSetupSubcommand(setup.interaction, context);
+    const denied = ceremonyInteraction({ options: {}, commissioner: false });
+    await handleDraftOrderHypeSubcommand(denied.interaction);
+    expect(denied.lastContent()).toContain('commissioner');
+    expect(denied.channelPosts).toHaveLength(0);
+  });
+
+  it('posts rotating hype copy with the frozen odds card, appending the note', async () => {
+    const { context } = createMockContext();
+    const setup = ceremonyInteraction({
+      options: { season: 2026, teams: 'Sharks:2, Vipers, Ducks, Goats' },
+    });
+    await handleDraftOrderSetupSubcommand(setup.interaction, context);
+
+    const first = ceremonyInteraction({ options: { note: 'Draft night is Aug 30.' } });
+    await handleDraftOrderHypeSubcommand(first.interaction);
+    const second = ceremonyInteraction({ options: {} });
+    await handleDraftOrderHypeSubcommand(second.interaction);
+
+    expect(first.channelPosts).toHaveLength(1);
+    expect(first.channelPosts[0].files).toHaveLength(1);
+    expect(first.channelPosts[0].content).toContain('Draft night is Aug 30.');
+    expect(first.channelPosts[0].content).toContain('frozen');
+    expect(second.channelPosts).toHaveLength(1);
+    expect(second.channelPosts[0].content).not.toBe(first.channelPosts[0].content);
+    expect(getCeremony('guild-1')?.state).toBe('GAME_OPEN');
+  });
+
+  it('posts nothing when the ceremony changes while the card renders', async () => {
+    const { context } = createMockContext();
+    const setup = ceremonyInteraction({ options: { season: 2026, teams: 'A, B' } });
+    await handleDraftOrderSetupSubcommand(setup.interaction, context);
+    const session = getCeremony('guild-1');
+
+    const hype = ceremonyInteraction({ options: {} });
+    Object.assign(hype.interaction as object, {
+      deferReply: () => {
+        // Simulate an abort (or replacing setup) landing while hype awaits its defer/render.
+        requestAbort(session!);
+        clearCeremony('guild-1');
+        return Promise.resolve({});
+      },
+    });
+
+    await handleDraftOrderHypeSubcommand(hype.interaction);
+
+    expect(hype.channelPosts).toHaveLength(0);
+    expect(hype.lastContent()).toContain('nothing was posted');
+  });
+});
+
+describe('preview ≡ commitment consistency (#165)', () => {
+  it('the commitment binds exactly the previewed standings-weighted bag', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      snapshots: [
+        {
+          leagueId: 'league-1',
+          season: 2025,
+          view: 'mTeam',
+          fetchedAt: new Date(),
+          payload: RICH_TEAMS,
+        },
+      ],
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const setup = ceremonyInteraction({ options: { season: 2026 } });
+    await handleDraftOrderSetupSubcommand(setup.interaction, context);
+    expect(setup.channelPosts).toHaveLength(1);
+    expect(setup.channelPosts[0].files).toHaveLength(1);
+    const session = getCeremony('guild-1');
+    // What the public preview card renders: `oddsRows` is the odds-card's exact input.
+    const previewedRows = oddsRows(session!);
+    expect(previewedRows.map((row) => row.balls).sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
+    expect(
+      session!.config.teams.map((team) =>
+        ballCountForTeam(team, session!.config.baseBallCount ?? 1),
+      ),
+    ).toEqual([1, 2, 3, 4]);
+
+    const begin = ceremonyInteraction({ options: { delay: 5 } });
+    await handleDraftOrderBeginSubcommand(begin.interaction);
+    await vi.waitFor(
+      () => {
+        expect(begin.channelPosts.some((p) => p.content?.includes('commitment'))).toBe(true);
+      },
+      { timeout: 5000 },
+    );
+
+    // The public commitment post lists, per team name, the exact ball counts the preview card
+    // rendered — the published odds and the committed bag are the same data.
+    const commitment = begin.channelPosts.find((p) => p.content?.includes('commitment'))!.content!;
+    for (const row of previewedRows) {
+      expect(commitment).toMatch(
+        new RegExp(`• ${row.team} \\(\`\\d+\`\\) — ${row.balls} ball\\(s\\)`),
+      );
+    }
+
+    requestAbort(session!);
+    await vi.waitFor(
+      () => {
+        expect(session?.state).toBe('CANCELLED');
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it('a bag that never had a public preview cannot commit', async () => {
+    // Changing the bag means a new session via setup; until its preview posts (CREATED →
+    // GAME_OPEN), begin refuses — enforcing "no commit without a fresh public preview".
+    const session = createCeremony(
+      'guild-1',
+      'Backdoor Lottery',
+      { teams: [{ teamId: 'a' }, { teamId: 'b' }] },
+      new Map([
+        ['a', 'A'],
+        ['b', 'B'],
+      ]),
+    );
+    setCeremony(session);
+
+    const begin = ceremonyInteraction({ options: {} });
+    await handleDraftOrderBeginSubcommand(begin.interaction);
+
+    expect(begin.channelPosts).toHaveLength(0);
+    expect(session.state).toBe('CREATED');
+    expect(begin.lastContent()).toContain('setup');
   });
 });

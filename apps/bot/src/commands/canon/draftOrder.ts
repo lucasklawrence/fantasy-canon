@@ -21,7 +21,9 @@ import { BotContext } from '../../config.js';
 import { resolveLeagueId } from '../../lib/leagueId.js';
 import { ensureSnapshot } from '../../lib/snapshots.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
+import { deriveStandingsBaseBalls, extractFinalRanks } from '../../lib/finalStandings.js';
 import {
+  buildHypePost,
   buildPreviewPost,
   CeremonyAborted,
   CeremonyIo,
@@ -40,9 +42,20 @@ export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
 /** Hard cap on bonus balls per team — the bag is materialized ball-by-ball, so unbounded input is a foot-gun. */
 export const MAX_BONUS_BALLS = 10;
 
+/** Cap for the `balls` set-override — above any sane standings weight, below bag-size foot-guns. */
+export const MAX_BASE_BALLS = 30;
+
 interface ParsedTeam {
   name: string;
   bonusBalls: number;
+}
+
+interface SetupTeam {
+  teamId: string;
+  name: string;
+  bonusBalls: number;
+  /** Set by standings weighting or the `balls` override; absent = the flat `base` option. */
+  baseBalls?: number;
 }
 
 /**
@@ -72,23 +85,48 @@ export function parseManualTeams(input: string): ParsedTeam[] {
   });
 }
 
+function matchTeamByName<T extends { name: string }>(teams: T[], name: string): T {
+  const team = teams.find((t) => t.name.toLowerCase() === name.toLowerCase());
+  if (!team) {
+    const known = teams.map((t) => t.name).join(', ');
+    throw new Error(`No team named "${name}". Teams: ${known}`);
+  }
+  return team;
+}
+
 /**
  * Parse the `bonus` option (`"Sharks:2, Ducks:1"`) and apply it onto the team list by
  * case-insensitive display-name match. Throws when a name matches no team.
  */
-export function applyBonusOverrides(
-  teams: { teamId: string; name: string; bonusBalls: number }[],
-  bonusInput: string | undefined,
-): void {
+export function applyBonusOverrides(teams: SetupTeam[], bonusInput: string | undefined): void {
   if (!bonusInput) return;
-  const byName = new Map(teams.map((team) => [team.name.toLowerCase(), team]));
   for (const parsed of parseManualTeams(bonusInput)) {
-    const team = byName.get(parsed.name.toLowerCase());
-    if (!team) {
-      const known = teams.map((t) => t.name).join(', ');
-      throw new Error(`No team named "${parsed.name}". Teams: ${known}`);
+    matchTeamByName(teams, parsed.name).bonusBalls = parsed.bonusBalls;
+  }
+}
+
+/**
+ * Parse the `balls` option (`"Sharks:5, Ducks:2"`) and *set* each named team's base balls —
+ * the commissioner's override for standings-derived weights, able to lower as well as raise
+ * (unlike `bonus`, which only adds on top). Every entry requires the `Name:count` form.
+ */
+export function applyBallsOverrides(teams: SetupTeam[], ballsInput: string | undefined): void {
+  if (!ballsInput) return;
+  const entries = ballsInput
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  for (const entry of entries) {
+    const splitAt = entry.lastIndexOf(':');
+    const name = splitAt === -1 ? '' : entry.slice(0, splitAt).trim();
+    const count = splitAt === -1 ? NaN : Number(entry.slice(splitAt + 1).trim());
+    if (!name || !Number.isInteger(count) || count < 1) {
+      throw new Error(`Can't parse balls entry "${entry}" — use "Name:count" with count >= 1.`);
     }
-    team.bonusBalls = parsed.bonusBalls;
+    if (count > MAX_BASE_BALLS) {
+      throw new Error(`"${entry}": base balls are capped at ${MAX_BASE_BALLS} per team.`);
+    }
+    matchTeamByName(teams, name).baseBalls = count;
   }
 }
 
@@ -137,16 +175,10 @@ function channelIo(channel: SendableChannel): CeremonyIo {
 }
 
 async function resolveEspnTeams(
-  interaction: ChatInputCommandInteraction,
   context: BotContext,
+  leagueId: string,
   season: number,
-): Promise<{ teamId: string; name: string; bonusBalls: number }[]> {
-  const leagueId = await resolveLeagueId(interaction, context);
-  if (!leagueId) {
-    throw new Error(
-      'League ID is required — set it via /canon config set, ESPN_LEAGUE_ID, or pass a manual `teams` list.',
-    );
-  }
+): Promise<SetupTeam[]> {
   const payload = await ensureSnapshot(context, leagueId, season, 'mTeam');
   const nameMap = buildTeamNameMap(payload);
   if (nameMap.size === 0) {
@@ -155,6 +187,49 @@ async function resolveEspnTeams(
   return [...nameMap.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([teamId, name]) => ({ teamId: String(teamId), name, bonusBalls: 0 }));
+}
+
+/**
+ * Derive per-team base balls from last season's final standings (worst finish → most balls,
+ * #165) and stamp them onto the roster. Returns human-readable notes for the setup reply; on
+ * any ESPN failure it leaves the roster untouched (equal weights) and says so — the ceremony
+ * must never be blocked by a standings fetch.
+ */
+async function applyStandingsWeights(
+  context: BotContext,
+  leagueId: string,
+  season: number,
+  teams: SetupTeam[],
+): Promise<string[]> {
+  const lastSeason = season - 1;
+  try {
+    const payload = await ensureSnapshot(context, leagueId, lastSeason, 'mTeam');
+    const ranks = extractFinalRanks(payload);
+    if (ranks.size === 0) {
+      throw new Error(`no final standings in the ${lastSeason} snapshot`);
+    }
+    const { baseBallsByTeam, missingRank } = deriveStandingsBaseBalls(
+      teams.map((team) => team.teamId),
+      ranks,
+    );
+    for (const team of teams) {
+      team.baseBalls = baseBallsByTeam.get(team.teamId);
+    }
+    const notes = [`Weights: ${lastSeason} final standings — worst finish gets the most balls.`];
+    if (missingRank.length > 0) {
+      const flagged = teams
+        .filter((team) => missingRank.includes(team.teamId))
+        .map((team) => team.name)
+        .join(', ');
+      notes.push(
+        `No ${lastSeason} finish for ${flagged} — defaulted to mid-pack ${Math.ceil(teams.length / 2)} ball(s); adjust with the \`balls\` option if needed.`,
+      );
+    }
+    return notes;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return [`Couldn't derive ${lastSeason} standings weights (${message}) — using equal weights.`];
+  }
 }
 
 export async function handleDraftOrderSetupSubcommand(
@@ -176,6 +251,8 @@ export async function handleDraftOrderSetupSubcommand(
   const season = interaction.options.getInteger('season', true);
   const manualTeams = interaction.options.getString('teams') ?? undefined;
   const bonusInput = interaction.options.getString('bonus') ?? undefined;
+  const ballsInput = interaction.options.getString('balls') ?? undefined;
+  const weightsMode = interaction.options.getString('weights') ?? 'standings';
   const baseBallCount = interaction.options.getInteger('base') ?? 1;
 
   const channel = sendableChannel(interaction);
@@ -189,18 +266,33 @@ export async function handleDraftOrderSetupSubcommand(
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
-    const teams = manualTeams
-      ? parseManualTeams(manualTeams).map((team, index) => ({
-          teamId: `team-${index + 1}`,
-          name: team.name,
-          bonusBalls: team.bonusBalls,
-        }))
-      : await resolveEspnTeams(interaction, context, season);
+    const notes: string[] = [];
+    let teams: SetupTeam[];
+    if (manualTeams) {
+      teams = parseManualTeams(manualTeams).map((team, index) => ({
+        teamId: `team-${index + 1}`,
+        name: team.name,
+        bonusBalls: team.bonusBalls,
+      }));
+    } else {
+      const leagueId = await resolveLeagueId(interaction, context);
+      if (!leagueId) {
+        throw new Error(
+          'League ID is required — set it via /canon config set, ESPN_LEAGUE_ID, or pass a manual `teams` list.',
+        );
+      }
+      teams = await resolveEspnTeams(context, leagueId, season);
+      if (weightsMode === 'standings') {
+        notes.push(...(await applyStandingsWeights(context, leagueId, season, teams)));
+      }
+    }
+    applyBallsOverrides(teams, ballsInput);
     applyBonusOverrides(teams, bonusInput);
 
     const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
       teamId: team.teamId,
       displayName: team.name,
+      baseBalls: team.baseBalls,
       bonusBalls: team.bonusBalls,
     }));
     const names = new Map(teams.map((team) => [team.teamId, team.name]));
@@ -225,10 +317,13 @@ export async function handleDraftOrderSetupSubcommand(
     setCeremony(session);
 
     await interaction.editReply({
-      content:
+      content: [
         `Odds preview posted — the bag is frozen at ${teams.length} teams. ` +
-        'Run `/canon draftorder begin` to post the commitment and start the reveal. ' +
-        'Changing teams/balls means re-running setup (fresh public preview) first.',
+          'Run `/canon draftorder begin` to post the commitment and start the reveal. ' +
+          'Changing teams/balls means re-running setup (fresh public preview) first. ' +
+          'Build the countdown with `/canon draftorder hype`.',
+        ...notes,
+      ].join('\n'),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -356,4 +451,56 @@ export async function handleDraftOrderAbortSubcommand(
     });
   }
   await interaction.reply({ content: 'Ceremony cancelled.', flags: MessageFlags.Ephemeral });
+}
+
+/**
+ * `/canon draftorder hype` — commissioner-triggered countdown post (#165): rotating copy + the
+ * frozen odds card, as a regular channel message. Requires a frozen (GAME_OPEN) bag so the
+ * published odds are always exactly what the commitment will bind.
+ */
+export async function handleDraftOrderHypeSubcommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  if (!(await denyUnlessCommissioner(interaction))) return;
+  const guildId = interaction.guildId as string;
+
+  const session = getCeremony(guildId);
+  if (!session || session.state !== 'GAME_OPEN') {
+    await interaction.reply({
+      content:
+        session?.state === 'LOTTERY_RUNNING'
+          ? 'The ceremony is already running — hype time is over, reveal time is now.'
+          : 'No frozen bag to hype — run `/canon draftorder setup` first (it posts the odds preview).',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const channel = sendableChannel(interaction);
+  if (!channel) {
+    await interaction.reply({
+      content: "I can't post in this channel — check my permissions.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const note = interaction.options.getString('note') ?? undefined;
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const hype = await buildHypePost(session, note);
+
+  // Re-validate after the awaits (defer, card render): a begin/abort/replacing setup may have
+  // raced us — never advertise a stale bag as "frozen" next to a fresher public record.
+  if (
+    getCeremony(guildId) !== session ||
+    session.state !== 'GAME_OPEN' ||
+    session.abort.signal.aborted
+  ) {
+    await interaction.editReply({
+      content: 'The ceremony changed while the hype card was rendering — nothing was posted.',
+    });
+    return;
+  }
+  await channelIo(channel).post(hype);
+  await interaction.editReply({ content: 'Hype posted. The hopper thanks you.' });
 }
