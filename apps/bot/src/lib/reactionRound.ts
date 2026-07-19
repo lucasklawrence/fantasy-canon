@@ -114,6 +114,32 @@ export class ReactionRecorder {
     return { kind: 'recorded', status: 'valid', reactionMs };
   }
 
+  /**
+   * Replace the provisional local-clock GO with the GO edit's own Discord-server timestamp and
+   * reclassify every recorded attempt against it. Clicks are server-stamped
+   * (`createdTimestamp`), so this puts both sides of every comparison on one clock — host
+   * clock skew can no longer misfile a fair click as a false start. An ack sent in the tiny
+   * pre-refinement window may disagree with the final classification; the results post is
+   * authoritative.
+   */
+  refineGo(serverAt: number | null | undefined): void {
+    if (serverAt === null || serverAt === undefined) return;
+    this.goAt = serverAt;
+    for (let i = 0; i < this.attempts.length; i += 1) {
+      const attempt = this.attempts[i];
+      const at = attempt.attemptAt.getTime();
+      this.attempts[i] =
+        at < serverAt
+          ? { teamId: attempt.teamId, status: 'early', attemptAt: attempt.attemptAt }
+          : {
+              teamId: attempt.teamId,
+              status: 'valid',
+              reactionMs: at - serverAt,
+              attemptAt: attempt.attemptAt,
+            };
+    }
+  }
+
   getAttempts(): ReactionAttempt[] {
     return [...this.attempts];
   }
@@ -193,16 +219,25 @@ export async function finishReactionRound(
     return undefined;
   }
   const result = scoreReactionGame(attempts);
+  const previousBonuses = session.miniGameBonuses ?? {};
   applyMiniGameBonuses(session, result.bonusByTeam);
   const teams: RoundTeam[] = session.config.teams.map((team) => ({
     teamId: team.teamId,
     name: session.names.get(team.teamId) ?? team.teamId,
   }));
-  await io.post({
-    kind: 'minigame',
-    content: formatRoundResults(result, attempts, teams, clickerFor),
-  });
-  await io.post(await buildPreviewPost(session));
+  try {
+    await io.post({
+      kind: 'minigame',
+      content: formatRoundResults(result, attempts, teams, clickerFor),
+    });
+    await io.post(await buildPreviewPost(session));
+  } catch (error) {
+    // Never leave the bag mutated without full public disclosure: if either post failed,
+    // restore the last publicly-previewed composition so `begin` can't seal an unexplained
+    // bag. The stacking bookkeeping makes this an exact rollback; re-run the round to retry.
+    applyMiniGameBonuses(session, previousBonuses);
+    throw error;
+  }
   return result;
 }
 
@@ -319,12 +354,14 @@ export async function runReactionRound(
   });
 
   await sleep(armDelay);
-  // GO is stamped before the edit so API latency can't misfile a legitimate click as early.
+  // Provisional GO from the local clock (so clicks landing mid-edit still classify), then
+  // refined to the edit's Discord-server timestamp — the same clock that stamps the clicks.
   recorder.markGo(now());
-  await message.edit({
+  const goMessage = (await message.edit({
     content: GO_CONTENT,
     components: buildTeamButtonRows(teams, idPrefix, { go: true }),
-  });
+  })) as { editedTimestamp?: number | null } | undefined;
+  recorder.refineGo(goMessage?.editedTimestamp);
 
   await sleep(windowMs);
   collector.stop('window-closed');

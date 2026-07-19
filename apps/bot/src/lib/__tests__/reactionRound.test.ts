@@ -106,6 +106,32 @@ describe('ReactionRecorder', () => {
     const result = scoreReactionGame(recorder.getAttempts());
     expect(result.bonusByTeam).toEqual({});
   });
+
+  it('refineGo reclassifies recorded attempts against the server GO timestamp', () => {
+    const recorder = new ReactionRecorder();
+    recorder.markGo(1000); // provisional, local clock
+    recorder.record('t1', 'u1', 'alice', 1040);
+    recorder.record('t2', 'u2', 'bob', 1010);
+    recorder.refineGo(1030); // the GO edit's Discord-server timestamp
+
+    // t1's click lands after the server GO (valid, re-timed); t2's turns out to be pre-GO.
+    expect(recorder.getAttempts()).toMatchObject([
+      { teamId: 't1', status: 'valid', reactionMs: 10 },
+      { teamId: 't2', status: 'early' },
+    ]);
+    // Later clicks measure against the refined GO; null/undefined refinement is a no-op.
+    expect(recorder.record('t3', 'u3', 'cleo', 1130)).toEqual({
+      kind: 'recorded',
+      status: 'valid',
+      reactionMs: 100,
+    });
+    recorder.refineGo(null);
+    expect(recorder.getAttempts()).toMatchObject([
+      { teamId: 't1', status: 'valid', reactionMs: 10 },
+      { teamId: 't2', status: 'early' },
+      { teamId: 't3', status: 'valid', reactionMs: 100 },
+    ]);
+  });
 });
 
 describe('buildTeamButtonRows', () => {
@@ -224,6 +250,37 @@ describe('finishReactionRound', () => {
     expect(posts).toHaveLength(1);
     expect(posts[0].content).toContain('discarded');
     expect(session.config.teams.every((t) => (t.bonusBalls ?? 0) === 0)).toBe(true);
+  });
+
+  it('rolls the bag back to the last previewed composition when a disclosure post fails', async () => {
+    const session = makeSession({ t4: 2 });
+    const { io: goodIo } = collectorIo();
+    await finishReactionRound(
+      session,
+      goodIo,
+      [{ teamId: 't3', status: 'valid', reactionMs: 300, attemptAt: new Date(1) }],
+      () => undefined,
+    );
+
+    const failingIo: CeremonyIo = {
+      post(post) {
+        return post.kind === 'preview'
+          ? Promise.reject(new Error('discord down'))
+          : Promise.resolve({ id: 'msg' });
+      },
+    };
+    await expect(
+      finishReactionRound(session, failingIo, ATTEMPTS, () => undefined),
+    ).rejects.toThrow('discord down');
+
+    const byTeam = new Map(session.config.teams.map((t) => [t.teamId, t.bonusBalls]));
+    // Restored to the last publicly previewed bag: the earlier round's t3 award and the
+    // commissioner's setup grant — not the failed round's t1/t2 awards.
+    expect(byTeam.get('t1')).toBe(0);
+    expect(byTeam.get('t2')).toBe(0);
+    expect(byTeam.get('t3')).toBe(2);
+    expect(byTeam.get('t4')).toBe(2);
+    expect(session.miniGameBonuses).toEqual({ t3: 2 });
   });
 });
 
