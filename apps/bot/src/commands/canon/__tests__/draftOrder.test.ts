@@ -11,6 +11,7 @@ import {
   clearCeremony,
   createCeremony,
   getCeremony,
+  oddsRows,
   requestAbort,
   resetCeremoniesForTests,
   setCeremony,
@@ -394,6 +395,28 @@ describe('hype subcommand (#165)', () => {
     expect(second.channelPosts[0].content).not.toBe(first.channelPosts[0].content);
     expect(getCeremony('guild-1')?.state).toBe('GAME_OPEN');
   });
+
+  it('posts nothing when the ceremony changes while the card renders', async () => {
+    const { context } = createMockContext();
+    const setup = ceremonyInteraction({ options: { season: 2026, teams: 'A, B' } });
+    await handleDraftOrderSetupSubcommand(setup.interaction, context);
+    const session = getCeremony('guild-1');
+
+    const hype = ceremonyInteraction({ options: {} });
+    Object.assign(hype.interaction as object, {
+      deferReply: () => {
+        // Simulate an abort (or replacing setup) landing while hype awaits its defer/render.
+        requestAbort(session!);
+        clearCeremony('guild-1');
+        return Promise.resolve({});
+      },
+    });
+
+    await handleDraftOrderHypeSubcommand(hype.interaction);
+
+    expect(hype.channelPosts).toHaveLength(0);
+    expect(hype.lastContent()).toContain('nothing was posted');
+  });
 });
 
 describe('preview ≡ commitment consistency (#165)', () => {
@@ -413,11 +436,17 @@ describe('preview ≡ commitment consistency (#165)', () => {
     });
     const setup = ceremonyInteraction({ options: { season: 2026 } });
     await handleDraftOrderSetupSubcommand(setup.interaction, context);
+    expect(setup.channelPosts).toHaveLength(1);
+    expect(setup.channelPosts[0].files).toHaveLength(1);
     const session = getCeremony('guild-1');
-    const previewedBalls = session!.config.teams.map((team) =>
-      ballCountForTeam(team, session!.config.baseBallCount ?? 1),
-    );
-    expect(previewedBalls).toEqual([1, 2, 3, 4]);
+    // What the public preview card renders: `oddsRows` is the odds-card's exact input.
+    const previewedRows = oddsRows(session!);
+    expect(previewedRows.map((row) => row.balls).sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
+    expect(
+      session!.config.teams.map((team) =>
+        ballCountForTeam(team, session!.config.baseBallCount ?? 1),
+      ),
+    ).toEqual([1, 2, 3, 4]);
 
     const begin = ceremonyInteraction({ options: { delay: 5 } });
     await handleDraftOrderBeginSubcommand(begin.interaction);
@@ -428,11 +457,14 @@ describe('preview ≡ commitment consistency (#165)', () => {
       { timeout: 5000 },
     );
 
-    // The public commitment post lists the exact previewed per-team ball counts.
+    // The public commitment post lists, per team name, the exact ball counts the preview card
+    // rendered — the published odds and the committed bag are the same data.
     const commitment = begin.channelPosts.find((p) => p.content?.includes('commitment'))!.content!;
-    session!.config.teams.forEach((team, i) => {
-      expect(commitment).toContain(`(\`${team.teamId}\`) — ${previewedBalls[i]} ball(s)`);
-    });
+    for (const row of previewedRows) {
+      expect(commitment).toMatch(
+        new RegExp(`• ${row.team} \\(\`\\d+\`\\) — ${row.balls} ball\\(s\\)`),
+      );
+    }
 
     requestAbort(session!);
     await vi.waitFor(

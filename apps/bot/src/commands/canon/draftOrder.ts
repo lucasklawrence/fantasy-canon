@@ -488,6 +488,19 @@ export async function handleDraftOrderHypeSubcommand(
   const note = interaction.options.getString('note') ?? undefined;
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const hype = await buildHypePost(session, note);
+
+  // Re-validate after the awaits (defer, card render): a begin/abort/replacing setup may have
+  // raced us — never advertise a stale bag as "frozen" next to a fresher public record.
+  if (
+    getCeremony(guildId) !== session ||
+    session.state !== 'GAME_OPEN' ||
+    session.abort.signal.aborted
+  ) {
+    await interaction.editReply({
+      content: 'The ceremony changed while the hype card was rendering — nothing was posted.',
+    });
+    return;
+  }
   await channelIo(channel).post(hype);
   await interaction.editReply({ content: 'Hype posted. The hopper thanks you.' });
 }
