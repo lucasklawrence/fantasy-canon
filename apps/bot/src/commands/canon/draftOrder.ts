@@ -18,7 +18,7 @@ import {
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
-import { DraftOrderTeamInput } from '@fantasy-canon/core';
+import { DraftOrderState, DraftOrderTeamInput } from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
 import { resolveLeagueId } from '../../lib/leagueId.js';
 import { ensureSnapshot } from '../../lib/snapshots.js';
@@ -284,14 +284,23 @@ export async function handleDraftOrderBeginSubcommand(
   // Re-validate after the reply await: an abort (or a replacing setup) may have raced us.
   // runCeremony's own pre-commit abort check is the backstop; this avoids even starting.
   // A reaction round that armed while we awaited the reply also stops us — sealing the bag
-  // would just doom that round to a public discard.
-  if (getCeremony(guildId) !== session || session.abort.signal.aborted || session.miniGameActive) {
-    await interaction.followUp({
-      content: session?.miniGameActive
-        ? 'A reaction round armed just now — wait for its results post, then `begin`.'
-        : 'The ceremony was aborted before it could start — nothing was committed.',
-      flags: MessageFlags.Ephemeral,
-    });
+  // would just doom that round to a public discard — and a concurrent `begin` that already
+  // moved the state gets a clean refusal instead of an assertTransition error in the log.
+  // Widened via assertion: another handler can mutate the state across the await above, which
+  // TS's narrowing (still "GAME_OPEN" from the top guard, even through a const alias) can't see.
+  const stateNow = session.state as DraftOrderState;
+  if (
+    getCeremony(guildId) !== session ||
+    session.abort.signal.aborted ||
+    session.miniGameActive ||
+    stateNow !== 'GAME_OPEN'
+  ) {
+    const content = session.miniGameActive
+      ? 'A reaction round armed just now — wait for its results post, then `begin`.'
+      : stateNow === 'LOTTERY_RUNNING'
+        ? 'The ceremony is already running.'
+        : 'The ceremony was aborted before it could start — nothing was committed.';
+    await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
     return;
   }
 
