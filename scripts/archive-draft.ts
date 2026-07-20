@@ -121,11 +121,15 @@ function runAdd(flags: Record<string, string>): void {
     fail(`--date must be YYYY-MM-DD (got "${flags.date}")`);
   const source = flags.source as DraftSourceLabel;
   if (!SOURCES.includes(source)) fail(`--source must be one of ${SOURCES.join(' | ')}`);
-  const slot = Number(flags.slot);
   const size = Number(flags.size ?? '12');
   const season = Number(flags.season ?? '2026');
+  const slot = Number(flags.slot);
+  if (!Number.isInteger(size) || size < 2)
+    fail(`--size must be an integer ≥ 2 (got "${flags.size}")`);
+  if (!Number.isInteger(season) || season < 2000)
+    fail(`--season must be a 4-digit year (got "${flags.season}")`);
   if (!Number.isInteger(slot) || slot < 1 || slot > size)
-    fail(`--slot ${flags.slot} out of range for ${size} teams`);
+    fail(`--slot ${flags.slot} out of range for a ${size}-team league`);
 
   const { players, latestDate } = loadResearchPool();
   if (players.length === 0)

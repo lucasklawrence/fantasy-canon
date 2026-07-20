@@ -23,7 +23,7 @@ Compare all archived drafts:
 
 # <Team> — <YYYY-MM-DD> draft
 
-### <size>-team snake · full-PPR · slot <n> · <source>
+_<size>-team snake · full-PPR · slot <n> · <source>_
 
 ## Grade
 

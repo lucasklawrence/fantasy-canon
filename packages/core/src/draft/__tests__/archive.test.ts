@@ -71,6 +71,25 @@ describe('buildDraftArchiveMarkdown', () => {
     expect(parsed?.positions.WR).toBe(2);
     expect(parsed?.grade).toBe(sampleGrade().grade);
   });
+
+  it('uses an h1 title then an emphasized subtitle (no heading-level skip)', () => {
+    expect(md).toContain("# Lucas's Loud Team — 2026-07-12 draft");
+    expect(md).not.toContain('### 12-team');
+    expect(md).toContain('_12-team snake · full-PPR · slot 7 · espn-autopick_');
+  });
+
+  it('escapes pipes in player names so a stray "|" cannot break the table', () => {
+    const grade = gradeRoster(
+      [{ overall: 7, playerName: 'A | B', position: 'WR' }],
+      [{ name: 'A | B', position: 'WR', adp: 5, source: 't' }],
+      { rosterSlots: { WR: 1, BENCH: 1 } },
+    );
+    const out = buildDraftArchiveMarkdown(META, grade);
+    expect(out).toContain('A \\| B');
+    // Every roster data row still has exactly the 7 columns' worth of unescaped pipes.
+    const dataRow = out.split('\n').find((l) => /^\| \d+ \| \d+ \|/.test(l)) ?? '';
+    expect(dataRow.replace(/\\\|/g, '').match(/\|/g)).toHaveLength(8);
+  });
 });
 
 describe('parseDraftArchiveSummary', () => {

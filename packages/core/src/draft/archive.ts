@@ -73,6 +73,11 @@ function fmtValue(pick: GradedPick): string {
   return `${sign}${pick.value}`;
 }
 
+/** Escape free text for a markdown table cell — a literal `|` would break the column layout. */
+function cell(value: string): string {
+  return value.replace(/\|/g, '\\|');
+}
+
 function positionCounts(grade: RosterGrade): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const [pos, { count }] of Object.entries(grade.byPosition)) counts[pos] = count;
@@ -111,7 +116,7 @@ export function buildDraftArchiveMarkdown(meta: DraftArchiveMeta, grade: RosterG
     .map((p) => {
       const round = roundOf(p.overall, meta.settings.size);
       const adp = p.adp === undefined ? '—' : String(p.adp);
-      return `| ${round} | ${p.overall} | ${p.playerName} | ${p.position ?? '—'} | ${adp} | ${fmtValue(p)} | ${p.verdict} |`;
+      return `| ${round} | ${p.overall} | ${cell(p.playerName)} | ${p.position ?? '—'} | ${adp} | ${fmtValue(p)} | ${p.verdict} |`;
     });
 
   const stealLines = grade.steals.length
@@ -133,7 +138,7 @@ export function buildDraftArchiveMarkdown(meta: DraftArchiveMeta, grade: RosterG
     `<!-- ${SUMMARY_MARKER}: ${JSON.stringify(summary)} -->`,
     '',
     `# ${meta.team} — ${meta.date} draft`,
-    `### ${meta.settings.size}-team ${meta.settings.type} · ${meta.settings.scoring} · slot ${meta.slot} · ${meta.source}`,
+    `_${meta.settings.size}-team ${meta.settings.type} · ${meta.settings.scoring} · slot ${meta.slot} · ${meta.source}_`,
     '',
     '## Grade',
     `**${grade.grade}** (score ${grade.score}, value ${grade.valueScore} over ${grade.gradedCount} graded picks)`,
@@ -190,7 +195,7 @@ export function buildDraftIndexRow(
   filename: string,
 ): string {
   const steals = grade.steals.length ? grade.steals.map((p) => p.playerName).join(', ') : '—';
-  return `| ${meta.date} | ${meta.source} | ${meta.team} | ${meta.slot} | ${grade.grade} | ${grade.valueScore} | ${steals} | [report](${filename}) |`;
+  return `| ${meta.date} | ${meta.source} | ${cell(meta.team)} | ${meta.slot} | ${grade.grade} | ${grade.valueScore} | ${cell(steals)} | [report](${filename}) |`;
 }
 
 /**
@@ -241,7 +246,7 @@ export function compareDraftEntries(summaries: DraftArchiveSummary[]): string {
   const sep = `| ---- | ------ | ---- | ---- | ----- | ----- | ${positions.map(() => '--').join(' | ')} |`;
   const rows = ordered.map((s) => {
     const posCells = positions.map((p) => String(s.positions[p] ?? 0)).join(' | ');
-    return `| ${s.date} | ${s.source} | ${s.team} | ${s.slot} | ${s.grade} | ${s.valueScore} | ${posCells} |`;
+    return `| ${s.date} | ${s.source} | ${cell(s.team)} | ${s.slot} | ${s.grade} | ${s.valueScore} | ${posCells} |`;
   });
 
   const trend = ordered
