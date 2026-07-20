@@ -5,3 +5,4 @@ export * from './manualSource.js';
 export * from './completedSource.js';
 export * from './espnDom.js';
 export * from './gradeRoster.js';
+export * from './archive.js';
