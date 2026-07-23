@@ -1,5 +1,6 @@
 {
   "extends": "./tsconfig.base.json",
   "include": ["apps", "packages", "scripts"],
-  "exclude": ["node_modules", "dist", "build"]
+  "//": "apps/api/src/client is the browser bundle — it needs DOM libs, so it's typechecked by its own src/client/tsconfig.json (via apps/api build), not this DOM-less root program.",
+  "exclude": ["node_modules", "dist", "build", "apps/api/src/client"]
 }

@@ -6,12 +6,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "node esbuild.mjs && tsx src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsc -b",
+    "build": "tsc -b && tsc -p src/client/tsconfig.json --noEmit",
+    "build:client": "node esbuild.mjs",
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
+    "@discord/embedded-app-sdk": "^2.1.0",
     "@fantasy-canon/core": "workspace:*",
     "@fantasy-canon/db": "workspace:*",
     "@fantasy-canon/espn-client": "workspace:*",
@@ -20,6 +22,7 @@
     "ws": "^8.21.1"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.25.0"
   }
 }

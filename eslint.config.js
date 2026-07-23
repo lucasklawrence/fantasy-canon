@@ -40,6 +40,17 @@ export default tseslint.config(
     files: ['**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
   },
+  // The Activity's browser client (apps/api/src/client) uses DOM globals and its own DOM tsconfig,
+  // so detach it from the DOM-less base program (project: false) and give it browser globals; it is
+  // typechecked separately via src/client/tsconfig.json.
+  {
+    files: ['apps/api/src/client/**/*.ts'],
+    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      globals: globals.browser,
+      parserOptions: { project: false },
+    },
+  },
   // Must stay last: disables stylistic rules that conflict with Prettier.
   prettier,
 );

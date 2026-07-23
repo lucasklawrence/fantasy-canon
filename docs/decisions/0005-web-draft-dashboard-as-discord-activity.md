@@ -87,11 +87,11 @@ Concretely:
 
 ### Remaining phases
 
-| Phase                    | Work                                                                                                                                                            | Blocked on                                  |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| **2 — SDK client**       | Bundle a browser client (esbuild) that runs the Embedded App SDK handshake, add `POST /api/token`, route API/WS calls through the `/.proxy` prefix.             | —                                           |
-| **3 — Portal + hosting** | Register the Activity in the Discord Developer Portal, enable Activities, map the URL to the host, obtain `client_secret`, deploy the backend to an HTTPS host. | **`type:manual`** (portal + secrets + host) |
-| **4 — Live feed**        | Bridge [#156]'s read-only capture into the backend so the Activity can show a real draft, not just typed picks (same `DraftSource` seam).                       | Phase 2/3                                   |
+| Phase                    | Work                                                                                                                                                                                                                                                                                                     | Blocked on                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| **2 — SDK client** ✅    | **Shipped.** esbuild bundles a browser client (`apps/api/src/client/`) that runs the Embedded App SDK handshake; `POST /api/token` does the server-side OAuth exchange; HTTP + WS routing accepts the `/.proxy` prefix. The handshake itself is unvalidated until #168 (it can only run inside Discord). | —                                           |
+| **3 — Portal + hosting** | Register the Activity in the Discord Developer Portal, enable Activities, map the URL to the host, obtain `client_secret`, deploy the backend to an HTTPS host.                                                                                                                                          | **`type:manual`** (portal + secrets + host) |
+| **4 — Live feed**        | Bridge [#156]'s read-only capture into the backend so the Activity can show a real draft, not just typed picks (same `DraftSource` seam).                                                                                                                                                                | Phase 2/3                                   |
 
 ## Consequences
 
