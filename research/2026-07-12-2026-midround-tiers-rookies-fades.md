@@ -130,7 +130,7 @@ Build an RB/WR foundation early and **stream QB and TE late**. RB reliability fa
 | Bucky Irving | RB | 44 | high | 51st of 58 PFF rush grade, zero goal-line carries, pass-down competition |
 | Colston Loveland | TE | 33 | high | Burden/Odunze target competition unpriced at late-3rd cost; boom/bust |
 | Christian McCaffrey | RB | 3 | medium | Age-30, heavy 2025 workload — soft fade (stronger fades were refuted) |
-| Harold Fannin | TE | 78 | medium | Young-TE ADP is hype-prone (cf. Loveland); already streaming-tier — take only at true streaming cost, not the ~R6 (~68) market ADP |
+| Harold Fannin | TE | 78 | medium | Young-TE ADP is hype-prone (cf. Loveland); already streaming-tier — take only at true streaming cost, not the Rounds 6–7 (picks ~68–78) market ADP |
 
 ## Sources
 **Primary tier & strategy boards:**

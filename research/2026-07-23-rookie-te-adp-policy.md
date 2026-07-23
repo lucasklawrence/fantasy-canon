@@ -33,7 +33,7 @@ pay the market's round for an unproven tight end.
 - **The #152 trigger — Harold Fannin Jr. (TE, CLE)** — is on the board at ADP ~78 as a "streaming
   tier" talent (his market ADP has ranged ~68–78). He is not a bust to avoid; he is a streamer whose
   ADP occasionally creeps into startable-TE range. A **medium-confidence** FADE chip says exactly
-  that: take him at true streaming cost, not the ~Round-6 market price.
+  that: take him at true streaming cost, not the Rounds 6–7 (picks ~68–78) market price.
 
 ## What changed
 
