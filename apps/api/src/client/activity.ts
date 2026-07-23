@@ -122,9 +122,14 @@ async function boot(): Promise<void> {
       // Fall through: the board is read-mostly, so still show state even if auth didn't complete.
     }
   }
+  const send = (route: string, payload: unknown): void => {
+    postJson(base, route, payload)
+      .then(() => poll(base))
+      .catch(() => setStatus('could not reach the backend', 'err'));
+  };
   wireControls({
-    onPick: (name) => void postJson(base, '/api/pick', { playerName: name }).then(() => poll(base)),
-    onReset: () => void postJson(base, '/api/reset', {}).then(() => poll(base)),
+    onPick: (name) => send('/api/pick', { playerName: name }),
+    onReset: () => send('/api/reset', {}),
   });
   connect(base);
 }
