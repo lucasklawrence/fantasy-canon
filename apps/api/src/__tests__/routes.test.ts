@@ -1,7 +1,13 @@
 import type { PlayerTier } from '@fantasy-canon/core';
 import { describe, expect, it } from 'vitest';
 import { createDraftHub, type DraftHub } from '../hub.js';
-import { parsePickBody, routeRequest, type Envelope, type RouteDeps } from '../routes.js';
+import {
+  normalizePath,
+  parsePickBody,
+  routeRequest,
+  type Envelope,
+  type RouteDeps,
+} from '../routes.js';
 
 const POOL: PlayerTier[] = [
   { name: 'A', position: 'RB', adp: 1, source: 'test' },
@@ -9,13 +15,17 @@ const POOL: PlayerTier[] = [
   { name: 'C', position: 'RB', adp: 3, source: 'test' },
 ];
 
-/** Route deps backed by a real hub, with a fixed timestamp so replies are deterministic. */
-function deps(h: DraftHub): RouteDeps {
+/** Route deps backed by a real hub, a fixed timestamp, and stub client/token wiring. */
+function deps(h: DraftHub, over: Partial<RouteDeps> = {}): RouteDeps {
   return {
     getEnvelope: (): Envelope => ({ ...h.snapshot(), updatedAt: '2026-07-14T00:00:00.000Z' }),
     ingest: (picks) => h.ingest(picks),
     nextOverall: () => h.nextOverall(),
     reset: () => h.reset(),
+    clientId: over.clientId ?? '',
+    clientScript: over.clientScript ?? ((): string | undefined => 'export const bundled = 1;'),
+    exchangeToken:
+      over.exchangeToken ?? ((code: string) => Promise.resolve({ accessToken: `tok-${code}` })),
   };
 }
 
@@ -28,36 +38,74 @@ function hub(): DraftHub {
   });
 }
 
+describe('normalizePath', () => {
+  it('drops the query string', () => {
+    expect(normalizePath('/api/state?t=1')).toBe('/api/state');
+  });
+
+  it('strips a single leading /.proxy segment (the Discord Activity prefix)', () => {
+    expect(normalizePath('/.proxy/api/state')).toBe('/api/state');
+    expect(normalizePath('/.proxy/client/activity.js?v=2')).toBe('/client/activity.js');
+    expect(normalizePath('/.proxy')).toBe('/');
+    expect(normalizePath('/.proxy/')).toBe('/');
+  });
+
+  it('leaves an un-prefixed path untouched', () => {
+    expect(normalizePath('/api/pick')).toBe('/api/pick');
+  });
+});
+
 describe('routeRequest', () => {
-  it('serves the dashboard page at /', () => {
-    const reply = routeRequest('GET', '/', '', deps(hub()));
+  it('serves the dashboard shell with the injected client id and bundle script at /', async () => {
+    const reply = await routeRequest('GET', '/', '', deps(hub(), { clientId: 'app-42' }));
     expect(reply.status).toBe(200);
     expect(reply.contentType).toContain('text/html');
     expect(reply.body).toContain('Draft Dashboard');
+    expect(reply.body).toContain('clientId: "app-42"');
+    expect(reply.body).toContain('src="./client/activity.js"');
   });
 
-  it('serves the current envelope as JSON at /api/state', () => {
-    const reply = routeRequest('GET', '/api/state?t=1', '', deps(hub()));
-    expect(reply.status).toBe(200);
-    const env = JSON.parse(reply.body) as Envelope;
-    expect(env.status).toBe('waiting for the first pick');
-    expect(env.updatedAt).toBe('2026-07-14T00:00:00.000Z');
-    expect(env.view.poolSize).toBe(3);
+  it('serves the built client bundle, and 503s when it has not been built', async () => {
+    const built = await routeRequest('GET', '/client/activity.js', '', deps(hub()));
+    expect(built.status).toBe(200);
+    expect(built.contentType).toContain('javascript');
+    expect(built.body).toContain('bundled');
+
+    const missing = await routeRequest(
+      'GET',
+      '/client/activity.js',
+      '',
+      deps(hub(), { clientScript: () => undefined }),
+    );
+    expect(missing.status).toBe(503);
+    expect(missing.body).toContain('build:client');
   });
 
-  it('ingests a single { playerName } pick and reflects it in state', () => {
+  it('serves the current envelope as JSON at /api/state — and under the /.proxy prefix', async () => {
+    const d = deps(hub());
+    for (const url of ['/api/state?t=1', '/.proxy/api/state']) {
+      const reply = await routeRequest('GET', url, '', d);
+      expect(reply.status).toBe(200);
+      const env = JSON.parse(reply.body) as Envelope;
+      expect(env.status).toBe('waiting for the first pick');
+      expect(env.updatedAt).toBe('2026-07-14T00:00:00.000Z');
+      expect(env.view.poolSize).toBe(3);
+    }
+  });
+
+  it('ingests a single { playerName } pick and reflects it in state', async () => {
     const h = hub();
     const d = deps(h);
-    const post = routeRequest('POST', '/api/pick', JSON.stringify({ playerName: 'A' }), d);
+    const post = await routeRequest('POST', '/api/pick', JSON.stringify({ playerName: 'A' }), d);
     expect(post.status).toBe(200);
     expect(JSON.parse(post.body)).toEqual({ added: 1, picks: 1 });
 
-    const state = JSON.parse(routeRequest('GET', '/api/state', '', d).body) as Envelope;
+    const state = JSON.parse((await routeRequest('GET', '/api/state', '', d)).body) as Envelope;
     expect(state.view.remaining).toBe(2); // A off the board
     expect(state.view.recentPicks[0]?.name).toBe('A');
   });
 
-  it('ingests an explicit { picks: [...] } board idempotently', () => {
+  it('ingests an explicit { picks: [...] } board idempotently', async () => {
     const h = hub();
     const d = deps(h);
     const body = JSON.stringify({
@@ -66,34 +114,57 @@ describe('routeRequest', () => {
         { overall: 2, playerName: 'B' },
       ],
     });
-    expect(JSON.parse(routeRequest('POST', '/api/pick', body, d).body)).toEqual({
+    expect(JSON.parse((await routeRequest('POST', '/api/pick', body, d)).body)).toEqual({
       added: 2,
       picks: 2,
     });
     // Re-POST the same board → nothing new.
-    expect(JSON.parse(routeRequest('POST', '/api/pick', body, d).body)).toEqual({
+    expect(JSON.parse((await routeRequest('POST', '/api/pick', body, d)).body)).toEqual({
       added: 0,
       picks: 2,
     });
   });
 
-  it('400s on invalid JSON and on a body with no usable pick', () => {
+  it('400s on invalid JSON and on a body with no usable pick', async () => {
     const d = deps(hub());
-    expect(routeRequest('POST', '/api/pick', '{not json', d).status).toBe(400);
-    expect(routeRequest('POST', '/api/pick', JSON.stringify({ foo: 1 }), d).status).toBe(400);
+    expect((await routeRequest('POST', '/api/pick', '{not json', d)).status).toBe(400);
+    expect((await routeRequest('POST', '/api/pick', JSON.stringify({ foo: 1 }), d)).status).toBe(
+      400,
+    );
   });
 
-  it('resets the board', () => {
+  it('resets the board', async () => {
     const h = hub();
     const d = deps(h);
-    routeRequest('POST', '/api/pick', JSON.stringify({ playerName: 'A' }), d);
-    expect(routeRequest('POST', '/api/reset', '', d).status).toBe(200);
-    const state = JSON.parse(routeRequest('GET', '/api/state', '', d).body) as Envelope;
+    await routeRequest('POST', '/api/pick', JSON.stringify({ playerName: 'A' }), d);
+    expect((await routeRequest('POST', '/api/reset', '', d)).status).toBe(200);
+    const state = JSON.parse((await routeRequest('GET', '/api/state', '', d)).body) as Envelope;
     expect(state.view.remaining).toBe(3); // whole pool back
   });
 
-  it('404s an unknown route', () => {
-    expect(routeRequest('GET', '/nope', '', deps(hub())).status).toBe(404);
+  it('exchanges an OAuth code for an access token at /api/token', async () => {
+    const reply = await routeRequest(
+      'POST',
+      '/api/token',
+      JSON.stringify({ code: 'xyz' }),
+      deps(hub()),
+    );
+    expect(reply.status).toBe(200);
+    expect(JSON.parse(reply.body)).toEqual({ access_token: 'tok-xyz' });
+  });
+
+  it('400s a token request with no code, and 502s when the exchange fails', async () => {
+    const bad = await routeRequest('POST', '/api/token', JSON.stringify({}), deps(hub()));
+    expect(bad.status).toBe(400);
+
+    const failing = deps(hub(), { exchangeToken: () => Promise.reject(new Error('discord down')) });
+    const reply = await routeRequest('POST', '/api/token', JSON.stringify({ code: 'x' }), failing);
+    expect(reply.status).toBe(502);
+    expect(JSON.parse(reply.body)).toEqual({ error: 'discord down' });
+  });
+
+  it('404s an unknown route', async () => {
+    expect((await routeRequest('GET', '/nope', '', deps(hub()))).status).toBe(404);
   });
 });
 

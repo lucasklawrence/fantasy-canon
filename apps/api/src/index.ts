@@ -55,7 +55,13 @@ async function main(): Promise<void> {
   }
 
   const hub = createDraftHub({ leagueSize, mySlot, rosterSlots: ROSTER_SLOTS, pool: players, adp });
-  const server = await startApiServer(hub, { port });
+  // The Activity SDK needs the app (client) id in the browser; the token exchange needs the secret
+  // server-side. Both are absent in plain dev — the board still runs, it just skips the SDK handshake.
+  const server = await startApiServer(hub, {
+    port,
+    clientId: process.env.DISCORD_APP_ID ?? '',
+    clientSecret: process.env.DISCORD_CLIENT_SECRET ?? '',
+  });
 
   console.log(`\n▶ Dashboard: ${server.url}`);
   console.log('  Enter picks in the page, or POST /api/pick { "playerName": "…" }.');
