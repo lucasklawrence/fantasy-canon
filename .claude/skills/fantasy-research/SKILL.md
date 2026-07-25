@@ -18,6 +18,25 @@ This is our league. Bake it into every research run so we never re-answer scopin
 - **Roster type:** redraft (NOT keeper/dynasty)
 - **Scoring:** full-PPR (1.0 point per reception)
 - **Season:** the current NFL season (derive the year from today's date)
+- **IR slots:** 2 (typical for this league — confirm if it matters materially).
+  This makes injured-player bench stashes cheap: a player starting the season on
+  IR costs no active roster spot. Note ESPN only permits an IR slot for players
+  carrying a qualifying designation (OUT / IR / PUP per league settings) — not
+  merely "questionable" — so a stash thesis must check the actual designation.
+- **Roster size:** ~15-16 spots (not yet confirmed). Matters for endgame advice —
+  and note best-ball ADP sources quote picks beyond Round 16 that do not exist
+  in this format.
+- **Positional roster limits:** RB 6, WR 6 (user-reported, *unconfirmed* — verify
+  in league settings). If correct this **caps** the RB/WR bench question: you
+  cannot hoard past 6 at either spot, and 6+6+QB+TE+K+DST = 16 fits a 16-man
+  roster exactly. Treat roster-construction advice as bounded by these caps.
+- **Waivers:** FAAB, **$500 for the season**. ⚠️ **Dollar figures never port —
+  percentages do.** Published FAAB analysis uses *varying* assumed budgets, so
+  you MUST read each source's stated budget before converting; do not assume
+  $100. Worked example of the trap: FantasyPros' widely-cited "$11 median
+  winning Week 1 bid" comes from an article assuming a **$1,000** budget, so it
+  is 1.1% ≈ **$5.50** here — not the ~$55 you would get by assuming $100.
+  Always state the source's assumed budget when quoting a figure.
 
 > To change the league (different scoring, size, dynasty, etc.), edit this block — the rest of the skill reads from it.
 
