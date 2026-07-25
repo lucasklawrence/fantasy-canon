@@ -15,6 +15,9 @@ screenshots
 tmp-*
 *.tmp.json
 
+# durable bot state, e.g. committed draft-order ceremonies — holds a pre-reveal seed (#176)
+.data/
+
 # ignore everything under .claude (local settings, caches, per-machine state)
 # except shared slash commands and team settings (settings.local.json stays ignored)
 .claude/*

@@ -36,6 +36,7 @@ import {
   renderLotteryOddsCard,
   renderLotteryRevealCard,
 } from '@fantasy-canon/renderer';
+import type { CeremonyStore, PersistedCeremony } from './ceremonyStore.js';
 
 /** One ceremony message. `kind` is semantic metadata for tests/logging; adapters post `content` + `image`. */
 export interface CeremonyPost {
@@ -64,6 +65,8 @@ export interface CeremonyIo {
 
 export interface CeremonySession {
   guildId: string;
+  /** Origin channel id — persisted at commit so startup recovery can disclose the seed there (#176). */
+  channelId?: string;
   title: string;
   createdAt: number;
   state: DraftOrderState;
@@ -91,6 +94,12 @@ export interface RunCeremonyOptions {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   /** Injected for tests; defaults to 32 hex chars from crypto randomness. */
   seedSource?: () => string;
+  /**
+   * Durable store (#176): the committed record is saved once the commitment posts and removed once
+   * the seed is disclosed (finalize or abort), so a crash in between leaves a record for startup
+   * recovery. Omitted ⇒ no persistence (the pre-#176 in-memory-only behavior).
+   */
+  store?: CeremonyStore;
 }
 
 /** Thrown out of {@link runCeremony} when the commissioner aborts mid-ceremony. */
@@ -404,6 +413,43 @@ function throwIfAborted(session: CeremonySession): void {
   }
 }
 
+/** Snapshot the committed fields of a session for the durable store (#176). Only called post-commit. */
+function toPersisted(session: CeremonySession): PersistedCeremony {
+  return {
+    guildId: session.guildId,
+    channelId: session.channelId ?? '',
+    title: session.title,
+    config: session.config,
+    names: [...session.names.entries()],
+    secretSeed: session.secretSeed ?? '',
+    commitment: session.commitment ?? '',
+    commitMessageId: session.commitMessageId ?? '',
+    drawSeed: session.drawSeed,
+    state: session.state,
+    createdAt: session.createdAt,
+  };
+}
+
+/**
+ * The disclosure a restarted bot posts for a ceremony that committed but never finalized (#176).
+ * Pure so it unit-tests without a client. It reveals the seed (keeping the commit-reveal promise)
+ * and tells the channel the run was interrupted and a re-run starts fresh.
+ */
+export function interruptedDisclosureContent(record: PersistedCeremony): string {
+  return [
+    `🔓 **${record.title} — interrupted run, seed revealed.**`,
+    'The bot restarted after posting the commitment below but before the reveal, so this draw was never completed.',
+    `Committed hash: \`${record.commitment}\``,
+    `Secret seed: \`${record.secretSeed}\``,
+    record.commitMessageId
+      ? `Public salt (commitment message id): \`${record.commitMessageId}\`${record.drawSeed ? ` — draw seed \`${record.drawSeed}\`` : ''}.`
+      : '',
+    'Anyone can verify the commitment against this seed. A fresh ceremony starts from a new commitment; this seed is never reused.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 async function postAbortDisclosure(session: CeremonySession, io: CeremonyIo): Promise<void> {
   // ADR 0006 abort policy: a committed seed is revealed even when the draw is discarded.
   const wouldHaveBeen = (session.draws ?? [])
@@ -454,6 +500,13 @@ export async function runCeremony(
     session.commitMessageId = committed.id;
     session.drawSeed = composeDrawSeed(session.secretSeed, committed.id);
     session.draws = computeDraftOrder({ ...session.config, seed: session.drawSeed });
+    // Persist now (#176): from here until the seed reveal, a crash would otherwise lose the secret
+    // behind a public commitment. A failed write must not abort the ceremony — log and continue.
+    try {
+      options.store?.saveCommitted(toPersisted(session));
+    } catch (persistError) {
+      console.error('[draftorder] failed to persist committed ceremony state:', persistError);
+    }
     const odds = computePickOdds(session.config.teams, session.config.baseBallCount);
 
     // REVEAL — worst to first.
@@ -497,18 +550,32 @@ export async function runCeremony(
     await io.post({ kind: 'seed-reveal', content: verificationContent(session) });
     assertTransition(session.state, 'FINALIZED');
     session.state = 'FINALIZED';
+    // The seed is now public — nothing left to recover.
+    unpersist(options.store, session.guildId);
     return session.draws;
   } catch (error) {
     if (session.state === 'LOTTERY_RUNNING') {
       session.state = 'CANCELLED';
       try {
         await postAbortDisclosure(session, io);
+        // The abort disclosure revealed the seed, so the persisted record is no longer owed.
+        unpersist(options.store, session.guildId);
       } catch (disclosureError) {
         // Never mask the original failure with a disclosure failure — log and fall through.
+        // Leave the persisted record in place: startup recovery becomes the disclosure backstop.
         console.error('[draftorder] failed to post the abort disclosure:', disclosureError);
       }
     }
     throw error;
+  }
+}
+
+/** Best-effort removal of a persisted record — a failed delete must never crash the ceremony. */
+function unpersist(store: CeremonyStore | undefined, guildId: string): void {
+  try {
+    store?.remove(guildId);
+  } catch (error) {
+    console.error('[draftorder] failed to clear persisted ceremony state:', error);
   }
 }
 

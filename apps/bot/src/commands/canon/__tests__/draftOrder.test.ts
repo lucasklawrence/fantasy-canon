@@ -25,7 +25,10 @@ import {
   handleDraftOrderSetupSubcommand,
   handleDraftOrderStatusSubcommand,
   parseManualTeams,
+  recoverInterruptedCeremonies,
 } from '../draftOrder.js';
+import { createMemoryCeremonyStore, type PersistedCeremony } from '../../../lib/ceremonyStore.js';
+import type { Client } from 'discord.js';
 
 interface ChannelPost {
   content?: string;
@@ -495,5 +498,81 @@ describe('preview ≡ commitment consistency (#165)', () => {
     expect(begin.channelPosts).toHaveLength(0);
     expect(session.state).toBe('CREATED');
     expect(begin.lastContent()).toContain('setup');
+  });
+});
+
+describe('recoverInterruptedCeremonies (#176)', () => {
+  function pendingRecord(over: Partial<PersistedCeremony> = {}): PersistedCeremony {
+    return {
+      guildId: 'guild-1',
+      channelId: 'chan-1',
+      title: '2026 Draft Lottery',
+      config: { teams: [{ teamId: 'a' }, { teamId: 'b' }], baseBallCount: 1 },
+      names: [
+        ['a', 'Alpha'],
+        ['b', 'Bravo'],
+      ],
+      secretSeed: 'the-secret',
+      commitment: 'the-hash',
+      commitMessageId: 'msg-1',
+      drawSeed: 'the-secret|msg-1',
+      state: 'LOTTERY_RUNNING',
+      createdAt: 1,
+      ...over,
+    };
+  }
+
+  function fakeClient(fetch: (id: string) => Promise<unknown>): Client {
+    return { channels: { fetch: (id: string) => fetch(id) } } as unknown as Client;
+  }
+
+  it('discloses the seed to the origin channel and clears the record', async () => {
+    const store = createMemoryCeremonyStore();
+    store.saveCommitted(pendingRecord());
+    const sent: { content?: string }[] = [];
+    const channel = {
+      isSendable: () => true,
+      send: (p: { content?: string }) => {
+        sent.push(p);
+        return Promise.resolve({ id: 'x' });
+      },
+    };
+    const fetched: string[] = [];
+    const client = fakeClient((id) => {
+      fetched.push(id);
+      return Promise.resolve(channel);
+    });
+
+    await recoverInterruptedCeremonies(client, store);
+
+    expect(fetched).toEqual(['chan-1']);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].content).toContain('the-secret');
+    expect(sent[0].content).toContain('interrupted');
+    expect(store.loadPending()).toEqual([]);
+  });
+
+  it('keeps the record when the channel is gone (nothing to disclose to)', async () => {
+    const store = createMemoryCeremonyStore();
+    store.saveCommitted(pendingRecord());
+    const client = fakeClient(() => Promise.resolve(null));
+
+    await recoverInterruptedCeremonies(client, store);
+
+    expect(store.loadPending()).toHaveLength(1);
+  });
+
+  it('keeps the record when the disclosure post throws (retry next startup)', async () => {
+    const store = createMemoryCeremonyStore();
+    store.saveCommitted(pendingRecord());
+    const channel = {
+      isSendable: () => true,
+      send: () => Promise.reject(new Error('rate limited')),
+    };
+    const client = fakeClient(() => Promise.resolve(channel));
+
+    await recoverInterruptedCeremonies(client, store);
+
+    expect(store.loadPending()).toHaveLength(1);
   });
 });

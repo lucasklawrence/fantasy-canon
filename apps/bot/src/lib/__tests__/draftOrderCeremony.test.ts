@@ -8,6 +8,7 @@ import {
   clearCeremony,
   createCeremony,
   getCeremony,
+  interruptedDisclosureContent,
   markPreviewPosted,
   oddsRows,
   requestAbort,
@@ -15,6 +16,7 @@ import {
   runCeremony,
   setCeremony,
 } from '../draftOrderCeremony.js';
+import { createMemoryCeremonyStore, type PersistedCeremony } from '../ceremonyStore.js';
 
 /** 12 fixture teams — last season's basement dwellers hold extra balls. */
 const TEAMS = Array.from({ length: 12 }, (_, i) => ({
@@ -233,5 +235,109 @@ describe('setup surfaces', () => {
     expect(posts).toHaveLength(0);
     expect(session.state).toBe('GAME_OPEN');
     expect(session.secretSeed).toBeUndefined();
+  });
+});
+
+describe('ceremony persistence (#176)', () => {
+  it('persists the committed record and clears it once the seed is revealed at finalize', async () => {
+    const session = makeSession();
+    session.channelId = 'chan-1';
+    const { io } = collectorIo();
+    const store = createMemoryCeremonyStore();
+    const saved: PersistedCeremony[] = [];
+    const realSave = store.saveCommitted.bind(store);
+    store.saveCommitted = (r): void => {
+      saved.push(r);
+      realSave(r);
+    };
+
+    await runCeremony(session, io, {
+      delayMs: 0,
+      sleep: instantSleep,
+      seedSource: () => 'sekret',
+      store,
+    });
+
+    // Saved exactly once, at commit, with everything needed to reveal later.
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      guildId: 'guild-1',
+      channelId: 'chan-1',
+      secretSeed: 'sekret',
+      commitMessageId: 'msg-1',
+      state: 'LOTTERY_RUNNING',
+    });
+    expect(saved[0].commitment).toBe(computeCommitment('sekret', CONFIG));
+    // Cleared at finalize — the seed is public now, nothing to recover.
+    expect(store.loadPending()).toEqual([]);
+  });
+
+  it('clears the record after a successful abort disclosure', async () => {
+    const session = makeSession();
+    session.channelId = 'chan-1';
+    const { io } = collectorIo();
+    const store = createMemoryCeremonyStore();
+    const abortingSleep = (): Promise<void> => {
+      requestAbort(session);
+      return Promise.resolve();
+    };
+
+    await expect(
+      runCeremony(session, io, { delayMs: 0, sleep: abortingSleep, seedSource: () => 's', store }),
+    ).rejects.toThrow(CeremonyAborted);
+
+    expect(store.loadPending()).toEqual([]);
+  });
+
+  it('keeps the record when the abort disclosure post fails — startup recovery is the backstop', async () => {
+    const session = makeSession();
+    session.channelId = 'chan-1';
+    const store = createMemoryCeremonyStore();
+    let posts = 0;
+    const io: CeremonyIo = {
+      post: (p) => {
+        posts += 1;
+        if (p.kind === 'abort') return Promise.reject(new Error('channel gone'));
+        return Promise.resolve({ id: `msg-${posts}` });
+      },
+    };
+    const abortingSleep = (): Promise<void> => {
+      requestAbort(session);
+      return Promise.resolve();
+    };
+
+    await expect(
+      runCeremony(session, io, { delayMs: 0, sleep: abortingSleep, seedSource: () => 's', store }),
+    ).rejects.toThrow(CeremonyAborted);
+
+    // Disclosure failed, so the committed seed stays persisted for the next startup to reveal.
+    const pending = store.loadPending();
+    expect(pending).toHaveLength(1);
+    expect(pending[0].secretSeed).toBe('s');
+  });
+});
+
+describe('interruptedDisclosureContent (#176)', () => {
+  it('reveals the seed, the commitment hash, and the salt, and flags the interruption', () => {
+    const record: PersistedCeremony = {
+      guildId: 'g',
+      channelId: 'c',
+      title: '2026 Draft Lottery',
+      config: CONFIG,
+      names: [...NAMES.entries()],
+      secretSeed: 'the-secret',
+      commitment: 'the-hash',
+      commitMessageId: 'msg-1',
+      drawSeed: 'the-secret|msg-1',
+      state: 'LOTTERY_RUNNING',
+      createdAt: 1,
+    };
+
+    const content = interruptedDisclosureContent(record);
+
+    expect(content).toContain('the-secret');
+    expect(content).toContain('the-hash');
+    expect(content).toContain('msg-1');
+    expect(content).toContain('interrupted');
   });
 });

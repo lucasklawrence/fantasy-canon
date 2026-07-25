@@ -15,6 +15,7 @@
 import {
   AttachmentBuilder,
   ChatInputCommandInteraction,
+  Client,
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
@@ -33,11 +34,13 @@ import {
   clearCeremony,
   createCeremony,
   getCeremony,
+  interruptedDisclosureContent,
   markPreviewPosted,
   requestAbort,
   runCeremony,
   setCeremony,
 } from '../../lib/draftOrderCeremony.js';
+import { createFileCeremonyStore, type CeremonyStore } from '../../lib/ceremonyStore.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
@@ -305,6 +308,8 @@ export async function handleDraftOrderSetupSubcommand(
       { teams: configTeams, baseBallCount },
       names,
     );
+    // Remember the origin channel so a restarted bot can post the seed disclosure here (#176).
+    session.channelId = interaction.channelId;
 
     // Re-validate after the awaits above (ESPN fetch, card render): if a ceremony started
     // running meanwhile, replacing it now would orphan a live draw.
@@ -401,7 +406,10 @@ export async function handleDraftOrderBeginSubcommand(
 
   // Fire and forget: the ceremony runs on channel messages and outlives this interaction's
   // 15-minute token. Errors land in the channel via the abort disclosure + the log.
-  void runCeremony(session, channelIo(channel), { delayMs: delaySeconds * 1000 }).catch((error) => {
+  void runCeremony(session, channelIo(channel), {
+    delayMs: delaySeconds * 1000,
+    store: createFileCeremonyStore(),
+  }).catch((error) => {
     if (!(error instanceof CeremonyAborted)) {
       console.error('[draftorder] ceremony failed:', error);
     }
@@ -598,4 +606,36 @@ export async function handleDraftOrderHypeSubcommand(
   }
   await channelIo(channel).post(hype);
   await interaction.editReply({ content: 'Hype posted. The hopper thanks you.' });
+}
+
+/**
+ * On bot startup (#176): for every ceremony that committed but never finalized — a crash/restart
+ * between the commitment post and the seed reveal — post the seed disclosure to its origin channel
+ * and clear the record. Keeps the ADR 0006 promise that a committed hash is always openable.
+ *
+ * Best-effort per record: a transient channel-fetch failure leaves the record for the next startup
+ * (so an undisclosed seed is never silently dropped); a successful post clears it.
+ */
+export async function recoverInterruptedCeremonies(
+  client: Client,
+  store: CeremonyStore = createFileCeremonyStore(),
+): Promise<void> {
+  for (const record of store.loadPending()) {
+    // Never disclose over a ceremony that's somehow live in memory for this guild.
+    if (getCeremony(record.guildId)?.state === 'LOTTERY_RUNNING') continue;
+    try {
+      const channel = record.channelId ? await client.channels.fetch(record.channelId) : null;
+      if (!channel || !channel.isSendable()) {
+        console.error(
+          `[draftorder] interrupted ceremony for guild ${record.guildId}: channel ${record.channelId} is not sendable; keeping the record`,
+        );
+        continue;
+      }
+      await channel.send({ content: interruptedDisclosureContent(record) });
+      store.remove(record.guildId);
+      console.log(`[draftorder] disclosed interrupted ceremony seed for guild ${record.guildId}`);
+    } catch (error) {
+      console.error('[draftorder] failed to disclose an interrupted ceremony:', error);
+    }
+  }
 }
