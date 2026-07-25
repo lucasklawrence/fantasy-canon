@@ -16,10 +16,10 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function record(guildId: string, overrides: Partial<PersistedCeremony> = {}): PersistedCeremony {
+function record(commitment: string, overrides: Partial<PersistedCeremony> = {}): PersistedCeremony {
   return {
-    guildId,
-    channelId: `chan-${guildId}`,
+    guildId: 'guild-1',
+    channelId: 'chan-1',
     title: '2026 Draft Lottery',
     config: { teams: [{ teamId: 'a' }, { teamId: 'b' }], baseBallCount: 1 },
     names: [
@@ -27,7 +27,7 @@ function record(guildId: string, overrides: Partial<PersistedCeremony> = {}): Pe
       ['b', 'Bravo'],
     ],
     secretSeed: 'seed-hex',
-    commitment: 'commit-hex',
+    commitment,
     commitMessageId: 'msg-1',
     drawSeed: 'seed-hex|msg-1',
     state: 'LOTTERY_RUNNING',
@@ -39,33 +39,38 @@ function record(guildId: string, overrides: Partial<PersistedCeremony> = {}): Pe
 describe('createFileCeremonyStore', () => {
   it('round-trips a committed record (creating the parent dir)', () => {
     const store = createFileCeremonyStore({ filePath });
-    store.saveCommitted(record('g1'));
+    store.saveCommitted(record('commit-1'));
 
     // A fresh store instance reads the same file — survives a "restart".
     const reopened = createFileCeremonyStore({ filePath });
     const pending = reopened.loadPending();
     expect(pending).toHaveLength(1);
     expect(pending[0]).toMatchObject({
-      guildId: 'g1',
-      channelId: 'chan-g1',
+      commitment: 'commit-1',
+      channelId: 'chan-1',
       secretSeed: 'seed-hex',
       commitMessageId: 'msg-1',
     });
   });
 
-  it('keys by guild, overwrites on re-save, and removes', () => {
+  it('keys by commitment so a second run for the same guild does not clobber the first', () => {
     const store = createFileCeremonyStore({ filePath });
-    store.saveCommitted(record('g1', { commitment: 'first' }));
-    store.saveCommitted(record('g2'));
-    store.saveCommitted(record('g1', { commitment: 'second' }));
-
+    // Same guild, two distinct commitments (e.g. a failed-disclosure run + its re-run).
+    store.saveCommitted(record('commit-old'));
+    store.saveCommitted(record('commit-new'));
     expect(store.loadPending()).toHaveLength(2);
-    expect(store.loadPending().find((r) => r.guildId === 'g1')?.commitment).toBe('second');
 
-    store.remove('g1');
+    // Overwriting the same commitment updates in place (pre-post record → post-update record).
+    store.saveCommitted(record('commit-new', { commitMessageId: 'msg-2' }));
+    expect(store.loadPending()).toHaveLength(2);
+    expect(store.loadPending().find((r) => r.commitment === 'commit-new')?.commitMessageId).toBe(
+      'msg-2',
+    );
+
+    store.remove('commit-old');
     const left = store.loadPending();
     expect(left).toHaveLength(1);
-    expect(left[0].guildId).toBe('g2');
+    expect(left[0].commitment).toBe('commit-new');
   });
 
   it('is empty (never throws) when the file is missing or corrupt', () => {
@@ -76,5 +81,17 @@ describe('createFileCeremonyStore', () => {
     writeFileSync(path.join(dir, 'corrupt.json'), '{not json');
     const corrupt = createFileCeremonyStore({ filePath: path.join(dir, 'corrupt.json') });
     expect(corrupt.loadPending()).toEqual([]);
+  });
+
+  it('skips damaged records so one bad entry cannot hide the valid ones', () => {
+    const badFile = path.join(dir, 'mixed.json');
+    writeFileSync(
+      badFile,
+      JSON.stringify({ bad: null, alsoBad: { guildId: 'g' }, good: record('commit-good') }),
+    );
+    const store = createFileCeremonyStore({ filePath: badFile });
+    const pending = store.loadPending();
+    expect(pending).toHaveLength(1);
+    expect(pending[0].commitment).toBe('commit-good');
   });
 });

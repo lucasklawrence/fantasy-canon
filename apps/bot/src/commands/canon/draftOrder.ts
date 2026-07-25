@@ -308,8 +308,6 @@ export async function handleDraftOrderSetupSubcommand(
       { teams: configTeams, baseBallCount },
       names,
     );
-    // Remember the origin channel so a restarted bot can post the seed disclosure here (#176).
-    session.channelId = interaction.channelId;
 
     // Re-validate after the awaits above (ESPN fetch, card render): if a ceremony started
     // running meanwhile, replacing it now would orphan a live draw.
@@ -403,6 +401,10 @@ export async function handleDraftOrderBeginSubcommand(
     await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
     return;
   }
+
+  // The commitment + reveal post to *this* channel, which may differ from where `setup` ran — so
+  // recovery discloses beside the commitment, capture it here, not at setup (#176).
+  session.channelId = interaction.channelId;
 
   // Fire and forget: the ceremony runs on channel messages and outlives this interaction's
   // 15-minute token. Errors land in the channel via the abort disclosure + the log.
@@ -621,19 +623,25 @@ export async function recoverInterruptedCeremonies(
   store: CeremonyStore = createFileCeremonyStore(),
 ): Promise<void> {
   for (const record of store.loadPending()) {
-    // Never disclose over a ceremony that's somehow live in memory for this guild.
+    // Never disclose over a ceremony that's live in memory for this guild.
     if (getCeremony(record.guildId)?.state === 'LOTTERY_RUNNING') continue;
     try {
       const channel = record.channelId ? await client.channels.fetch(record.channelId) : null;
       if (!channel || !channel.isSendable()) {
         console.error(
-          `[draftorder] interrupted ceremony for guild ${record.guildId}: channel ${record.channelId} is not sendable; keeping the record`,
+          `[draftorder] interrupted ceremony ${record.commitment.slice(0, 12)}…: channel ${record.channelId} is not sendable; keeping the record`,
         );
         continue;
       }
+      // Re-check after the async fetch: a `begin` may have started a live ceremony in the interim.
+      if (getCeremony(record.guildId)?.state === 'LOTTERY_RUNNING') continue;
       await channel.send({ content: interruptedDisclosureContent(record) });
-      store.remove(record.guildId);
-      console.log(`[draftorder] disclosed interrupted ceremony seed for guild ${record.guildId}`);
+      // Remove by commitment (not guild): a newer run for the same guild has a different key, so
+      // this can never clobber a still-undisclosed record.
+      store.remove(record.commitment);
+      console.log(
+        `[draftorder] disclosed interrupted ceremony seed (commitment ${record.commitment.slice(0, 12)}…)`,
+      );
     } catch (error) {
       console.error('[draftorder] failed to disclose an interrupted ceremony:', error);
     }

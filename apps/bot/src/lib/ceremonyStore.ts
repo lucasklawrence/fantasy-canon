@@ -6,6 +6,11 @@
  * is lost — the public commitment can never be opened, breaking the one promise commit-reveal
  * exists to keep. This persists the committed record so a restarted bot can still disclose the seed.
  *
+ * Records are keyed by **commitment hash**, not guild: a commitment whose disclosure failed must
+ * survive even after the commissioner starts a *new* ceremony in the same guild, so both undisclosed
+ * seeds can be revealed on the next startup (a guild key would clobber the old one — the exact bug
+ * commit-reveal must not have). Every commitment is unique (a fresh 16-byte random seed per run).
+ *
  * Interim implementation per the issue: a single dependency-free JSON file (the `db` package is
  * still a `NoopDbClient`). The seed is only secret until reveal, so at-rest protection is a
  * nice-to-have, not required — but the file DOES hold a pre-reveal seed, so it must stay gitignored.
@@ -27,18 +32,20 @@ export interface PersistedCeremony {
   /** teamId → display name, as entries (a `Map` isn't JSON-serializable). */
   names: [string, string][];
   secretSeed: string;
+  /** sha256 commitment — the store key; present from the moment the seed is generated. */
   commitment: string;
-  commitMessageId: string;
+  /** Discord commitment-message id — absent if persisted before the post landed (fail-closed). */
+  commitMessageId?: string;
   drawSeed?: string;
   state: DraftOrderState;
   createdAt: number;
 }
 
 export interface CeremonyStore {
-  /** Persist (or overwrite) the committed record for a guild. */
+  /** Persist (or overwrite) a committed record, keyed by its commitment hash. */
   saveCommitted(record: PersistedCeremony): void;
-  /** Drop a guild's record — called once the seed has been disclosed (finalize or abort). */
-  remove(guildId: string): void;
+  /** Drop a record by commitment — called once that seed has been disclosed (finalize or abort). */
+  remove(commitment: string): void;
   /** Every persisted record: each is a committed ceremony that never finalized (i.e. interrupted). */
   loadPending(): PersistedCeremony[];
 }
@@ -58,16 +65,31 @@ export function defaultStateFile(): string {
   return path.join(dir, 'draftorder-ceremonies.json');
 }
 
+/** Runtime guard so a valid-but-damaged file (e.g. `{"k":null}`) can't crash recovery. */
+function isPersistedCeremony(value: unknown): value is PersistedCeremony {
+  if (!value || typeof value !== 'object') return false;
+  const r = value as Record<string, unknown>;
+  return (
+    typeof r.guildId === 'string' &&
+    typeof r.channelId === 'string' &&
+    typeof r.secretSeed === 'string' &&
+    typeof r.commitment === 'string' &&
+    Array.isArray(r.names)
+  );
+}
+
 function readAll(filePath: string): Record<string, PersistedCeremony> {
   if (!existsSync(filePath)) return {};
   try {
     const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
-    // A corrupt/partial file must never crash startup — treat it as empty and move on.
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, PersistedCeremony>;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, PersistedCeremony> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (isPersistedCeremony(value)) out[key] = value;
     }
-    return {};
+    return out;
   } catch {
+    // A corrupt/partial file must never crash startup — treat it as empty and move on.
     return {};
   }
 }
@@ -81,19 +103,19 @@ function writeAll(filePath: string, records: Record<string, PersistedCeremony>):
   renameSync(tmp, filePath);
 }
 
-/** A JSON-file {@link CeremonyStore}, keyed by guildId (one active ceremony per guild). */
+/** A JSON-file {@link CeremonyStore}, keyed by commitment hash. */
 export function createFileCeremonyStore(options: FileCeremonyStoreOptions = {}): CeremonyStore {
   const filePath = options.filePath ?? defaultStateFile();
   return {
     saveCommitted(record) {
       const all = readAll(filePath);
-      all[record.guildId] = record;
+      all[record.commitment] = record;
       writeAll(filePath, all);
     },
-    remove(guildId) {
+    remove(commitment) {
       const all = readAll(filePath);
-      if (guildId in all) {
-        delete all[guildId];
+      if (commitment in all) {
+        delete all[commitment];
         writeAll(filePath, all);
       }
     },
@@ -107,8 +129,8 @@ export function createFileCeremonyStore(options: FileCeremonyStoreOptions = {}):
 export function createMemoryCeremonyStore(): CeremonyStore {
   const all = new Map<string, PersistedCeremony>();
   return {
-    saveCommitted: (record) => void all.set(record.guildId, record),
-    remove: (guildId) => void all.delete(guildId),
+    saveCommitted: (record) => void all.set(record.commitment, record),
+    remove: (commitment) => void all.delete(commitment),
     loadPending: () => [...all.values()],
   };
 }

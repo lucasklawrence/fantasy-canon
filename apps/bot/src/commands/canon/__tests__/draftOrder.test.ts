@@ -575,4 +575,27 @@ describe('recoverInterruptedCeremonies (#176)', () => {
 
     expect(store.loadPending()).toHaveLength(1);
   });
+
+  it('skips a guild that already has a live ceremony in memory', async () => {
+    const store = createMemoryCeremonyStore();
+    store.saveCommitted(pendingRecord());
+    const live = createCeremony('guild-1', 'Live Lottery', { teams: [{ teamId: 'a' }] }, new Map());
+    live.state = 'LOTTERY_RUNNING';
+    setCeremony(live);
+    let sent = 0;
+    const client = fakeClient(() =>
+      Promise.resolve({
+        isSendable: () => true,
+        send: () => {
+          sent += 1;
+          return Promise.resolve({});
+        },
+      }),
+    );
+
+    await recoverInterruptedCeremonies(client, store);
+
+    expect(sent).toBe(0);
+    expect(store.loadPending()).toHaveLength(1);
+  });
 });

@@ -413,7 +413,7 @@ function throwIfAborted(session: CeremonySession): void {
   }
 }
 
-/** Snapshot the committed fields of a session for the durable store (#176). Only called post-commit. */
+/** Snapshot the committed fields of a session for the durable store (#176). Only called post-seed. */
 function toPersisted(session: CeremonySession): PersistedCeremony {
   return {
     guildId: session.guildId,
@@ -423,11 +423,21 @@ function toPersisted(session: CeremonySession): PersistedCeremony {
     names: [...session.names.entries()],
     secretSeed: session.secretSeed ?? '',
     commitment: session.commitment ?? '',
-    commitMessageId: session.commitMessageId ?? '',
+    commitMessageId: session.commitMessageId,
     drawSeed: session.drawSeed,
     state: session.state,
     createdAt: session.createdAt,
   };
+}
+
+/** Best-effort removal of a persisted record by commitment — a failed delete must not crash. */
+function unpersist(store: CeremonyStore | undefined, commitment: string | undefined): void {
+  if (!store || !commitment) return;
+  try {
+    store.remove(commitment);
+  } catch (error) {
+    console.error('[draftorder] failed to clear persisted ceremony state:', error);
+  }
 }
 
 /**
@@ -494,18 +504,33 @@ export async function runCeremony(
   // is the id Discord assigns to this very post.
   session.secretSeed = seedSource();
   session.commitment = computeCommitment(session.secretSeed, session.config);
+  // Persist the seed BEFORE the commitment goes public (#176) and FAIL CLOSED: a crash after the
+  // post lands but before we could record the seed would otherwise leave a public, unopenable
+  // commitment. Nothing is public yet, so on a write failure roll back and refuse to start rather
+  // than post a commitment we can't back up.
+  if (options.store) {
+    try {
+      options.store.saveCommitted(toPersisted(session));
+    } catch (persistError) {
+      session.state = 'GAME_OPEN';
+      const message = persistError instanceof Error ? persistError.message : String(persistError);
+      throw new Error(`refusing to start the draw: could not persist ceremony state (${message})`, {
+        cause: persistError,
+      });
+    }
+  }
   try {
     throwIfAborted(session);
     const committed = await io.post({ kind: 'commitment', content: commitmentContent(session) });
     session.commitMessageId = committed.id;
     session.drawSeed = composeDrawSeed(session.secretSeed, committed.id);
     session.draws = computeDraftOrder({ ...session.config, seed: session.drawSeed });
-    // Persist now (#176): from here until the seed reveal, a crash would otherwise lose the secret
-    // behind a public commitment. A failed write must not abort the ceremony — log and continue.
+    // Update the record with the salt (commit-message id) + draw seed. Already public, so this is
+    // best-effort — a failed update still leaves the pre-post record for startup recovery.
     try {
       options.store?.saveCommitted(toPersisted(session));
     } catch (persistError) {
-      console.error('[draftorder] failed to persist committed ceremony state:', persistError);
+      console.error('[draftorder] failed to update persisted ceremony state:', persistError);
     }
     const odds = computePickOdds(session.config.teams, session.config.baseBallCount);
 
@@ -551,7 +576,7 @@ export async function runCeremony(
     assertTransition(session.state, 'FINALIZED');
     session.state = 'FINALIZED';
     // The seed is now public — nothing left to recover.
-    unpersist(options.store, session.guildId);
+    unpersist(options.store, session.commitment);
     return session.draws;
   } catch (error) {
     if (session.state === 'LOTTERY_RUNNING') {
@@ -559,7 +584,7 @@ export async function runCeremony(
       try {
         await postAbortDisclosure(session, io);
         // The abort disclosure revealed the seed, so the persisted record is no longer owed.
-        unpersist(options.store, session.guildId);
+        unpersist(options.store, session.commitment);
       } catch (disclosureError) {
         // Never mask the original failure with a disclosure failure — log and fall through.
         // Leave the persisted record in place: startup recovery becomes the disclosure backstop.
@@ -567,15 +592,6 @@ export async function runCeremony(
       }
     }
     throw error;
-  }
-}
-
-/** Best-effort removal of a persisted record — a failed delete must never crash the ceremony. */
-function unpersist(store: CeremonyStore | undefined, guildId: string): void {
-  try {
-    store?.remove(guildId);
-  } catch (error) {
-    console.error('[draftorder] failed to clear persisted ceremony state:', error);
   }
 }
 

@@ -239,7 +239,7 @@ describe('setup surfaces', () => {
 });
 
 describe('ceremony persistence (#176)', () => {
-  it('persists the committed record and clears it once the seed is revealed at finalize', async () => {
+  it('persists the seed before the post and updates it after, then clears at finalize', async () => {
     const session = makeSession();
     session.channelId = 'chan-1';
     const { io } = collectorIo();
@@ -247,7 +247,7 @@ describe('ceremony persistence (#176)', () => {
     const saved: PersistedCeremony[] = [];
     const realSave = store.saveCommitted.bind(store);
     store.saveCommitted = (r): void => {
-      saved.push(r);
+      saved.push({ ...r });
       realSave(r);
     };
 
@@ -258,18 +258,33 @@ describe('ceremony persistence (#176)', () => {
       store,
     });
 
-    // Saved exactly once, at commit, with everything needed to reveal later.
-    expect(saved).toHaveLength(1);
-    expect(saved[0]).toMatchObject({
-      guildId: 'guild-1',
-      channelId: 'chan-1',
-      secretSeed: 'sekret',
-      commitMessageId: 'msg-1',
-      state: 'LOTTERY_RUNNING',
-    });
+    // Saved twice: once BEFORE the commitment post (no message id yet — the fail-closed backstop),
+    // then updated AFTER with the salt (commit-message id).
+    expect(saved).toHaveLength(2);
+    expect(saved[0]).toMatchObject({ channelId: 'chan-1', secretSeed: 'sekret' });
+    expect(saved[0].commitMessageId).toBeUndefined();
     expect(saved[0].commitment).toBe(computeCommitment('sekret', CONFIG));
+    expect(saved[1].commitMessageId).toBe('msg-1');
     // Cleared at finalize — the seed is public now, nothing to recover.
     expect(store.loadPending()).toEqual([]);
+  });
+
+  it('fails closed: a persist failure before the post aborts the run without posting anything', async () => {
+    const session = makeSession();
+    session.channelId = 'chan-1';
+    const { io, posts } = collectorIo();
+    const store = createMemoryCeremonyStore();
+    store.saveCommitted = (): void => {
+      throw new Error('disk full');
+    };
+
+    await expect(
+      runCeremony(session, io, { delayMs: 0, sleep: instantSleep, seedSource: () => 's', store }),
+    ).rejects.toThrow('could not persist ceremony state');
+
+    // Nothing went public, and the session is back to GAME_OPEN so the commissioner can retry.
+    expect(posts).toHaveLength(0);
+    expect(session.state).toBe('GAME_OPEN');
   });
 
   it('clears the record after a successful abort disclosure', async () => {
