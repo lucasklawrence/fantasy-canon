@@ -1,19 +1,36 @@
 /**
- * The draft dashboard page, served at `/`. One self-contained HTML string — inline CSS + vanilla JS,
- * no framework, no build step, no external assets — so it works offline and drops straight into the
- * Discord Activity iframe once the proxy mapping is wired (ADR 0005).
+ * The draft dashboard page shell, served at `/`. Static HTML + inline CSS with **no inline logic**:
+ * the board's render + transport + the Discord Embedded App SDK handshake all live in the bundled
+ * browser client (`src/client/`, built by esbuild to `dist/client/activity.js`) so there is one
+ * implementation shared by the standalone dev board and the in-Discord Activity (ADR 0005 Phase 2).
  *
- * Transport is **WebSocket** (`/api/ws`), the only push channel that survives the Activity proxy
- * sandbox; it falls back to polling `/api/state` if the socket drops. A small manual-entry form
- * (`POST /api/pick`) makes the board usable standalone for mock-draft testing. The client script uses
- * string concatenation (no backticks / no ${…}) so it lives in this outer template literal cleanly.
- *
- * NEXT PHASE (ADR 0005): before this renders inside Discord it needs the Embedded App SDK handshake
- * (ready → authorize → server-side token exchange → authenticate) and API/WS calls routed through the
- * `/.proxy` prefix. That adapter is deliberately out of this scaffold; here the board runs in dev
- * mode against the local backend.
+ * The page loads the bundle with a **relative** `src` (`./client/activity.js`) so it resolves under
+ * whatever base the page is served from — the backend root in dev, or `/.proxy/` inside the Discord
+ * Activity iframe, with no hardcoded prefix. The server injects the Discord application (client) id
+ * into `window.__DRAFT_CONFIG__`; the client feature-detects Discord and only runs the SDK handshake
+ * there, falling back to the manual-entry dev board otherwise.
  */
-export const BOARD_HTML = `<!doctype html>
+
+// U+2028 / U+2029 are valid JSON but illegal raw in a <script>; build them from char codes so this
+// source file stays pure ASCII.
+const LINE_SEP = String.fromCharCode(0x2028);
+const PARA_SEP = String.fromCharCode(0x2029);
+
+/** Escape a value for safe interpolation inside a `<script>` JSON island. */
+function jsonForScript(value: unknown): string {
+  // `<` (→ `</script>`) and the two line terminators are the only sequences that can break out of
+  // a script/JSON island; escape them so an injected id can never break the markup.
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .split(LINE_SEP)
+    .join('\\u2028')
+    .split(PARA_SEP)
+    .join('\\u2029');
+}
+
+/** The dashboard HTML for the given Discord application (client) id (`''` in dev / standalone). */
+export function boardHtml(clientId: string): string {
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -113,175 +130,8 @@ export const BOARD_HTML = `<!doctype html>
   </section>
 </main>
 <footer id="meta"></footer>
-<script>
-(function () {
-  function el(tag, cls, text) {
-    var e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text != null) e.textContent = text;
-    return e;
-  }
-  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
-  function adpStr(c) { return c.adp != null ? "ADP " + Math.round(c.adp) : "no ADP"; }
-  function tierStr(c) { return c.tier != null ? "Tier " + c.tier : ""; }
-
-  function candRow(c) {
-    var r = el("div", "row");
-    r.appendChild(el("span", "pos " + c.position, c.position));
-    r.appendChild(el("span", "nm", c.name));
-    r.appendChild(el("span", "tag " + c.recommend, c.recommend));
-    var sub = [tierStr(c), adpStr(c)].filter(Boolean).join(" · ");
-    r.appendChild(el("span", "sub", sub));
-    return r;
-  }
-
-  function setStatus(text, kind) {
-    var s = document.getElementById("status");
-    s.textContent = text;
-    s.className = "pill" + (kind ? " " + kind : "");
-  }
-
-  function fill(id, items, mk, emptyText) {
-    var node = document.getElementById(id);
-    clear(node);
-    if (!items || items.length === 0) { node.appendChild(el("div", "empty", emptyText)); return; }
-    items.forEach(function (it) { node.appendChild(mk(it)); });
-  }
-
-  function render(state) {
-    var v = state.view;
-    if (!v) {
-      setStatus(state.status || "waiting", "err");
-      document.getElementById("turn").textContent = state.status || "Waiting for the draft…";
-      return;
-    }
-    setStatus(v.complete ? "draft complete" : (state.status || "watching draft"), "live");
-
-    var clock = document.getElementById("clock");
-    clear(clock);
-    var line1 = el("div");
-    line1.innerHTML = "Round <b>" + v.round + "</b> · Pick <b>" + v.pickInRound + "</b> · Overall <b>" + v.currentOverall + "</b>";
-    clock.appendChild(line1);
-    clock.appendChild(el("div", null, v.remaining + " players left · pool " + v.poolSize));
-
-    var turn = document.getElementById("turn");
-    clear(turn);
-    turn.className = "turn" + (v.isMyPick ? " mine" : "");
-    if (v.isMyPick) {
-      turn.innerHTML = "<b>You're on the clock</b> — pick " + v.currentOverall + ".";
-    } else {
-      var until = v.picksUntilMine;
-      var nextTxt = v.myNextOverall != null
-        ? "Your next pick: overall <b>" + v.myNextOverall + "</b>" + (until != null ? " (in " + until + " pick" + (until === 1 ? "" : "s") + ")" : "")
-        : "No more picks for you.";
-      turn.innerHTML = "Slot <b>" + v.onTheClockSlot + "</b> on the clock. " + nextTxt;
-    }
-
-    var rec = document.getElementById("rec");
-    clear(rec);
-    if (v.recommended) {
-      var c = v.recommended;
-      var head = el("div");
-      head.appendChild(el("span", "pos " + c.position, c.position));
-      head.appendChild(el("span", "name", " " + c.name));
-      head.appendChild(el("span", "tag " + c.recommend, " " + c.recommend));
-      rec.appendChild(head);
-      rec.appendChild(el("div", "meta", [tierStr(c), adpStr(c), "VONA " + c.vona].filter(Boolean).join(" · ")));
-      rec.appendChild(el("div", "reason", c.reason));
-    } else {
-      rec.appendChild(el("div", "empty", "No players left on the board."));
-    }
-
-    fill("alts", v.alternatives, candRow, "No alternatives.");
-    fill("byneed", (v.byNeed || []).map(function (x) { return x.candidate; }), candRow, "Skill starters filled.");
-
-    var needs = document.getElementById("needs");
-    clear(needs);
-    if (!v.needs || v.needs.length === 0) {
-      needs.appendChild(el("span", "need none", "Skill starters set"));
-    } else {
-      v.needs.forEach(function (p) { needs.appendChild(el("span", "need", p)); });
-    }
-
-    var roster = document.getElementById("roster");
-    clear(roster);
-    if (!v.myRoster || v.myRoster.length === 0) {
-      roster.appendChild(el("div", "empty", "No picks yet."));
-    } else {
-      v.myRoster.forEach(function (spot) {
-        var r = el("div", "row");
-        r.appendChild(el("span", "pos " + spot.position, spot.position));
-        r.appendChild(el("span", "nm", spot.name));
-        r.appendChild(el("span", "sub", "#" + spot.overall));
-        roster.appendChild(r);
-      });
-    }
-
-    var recent = document.getElementById("recent");
-    clear(recent);
-    if (!v.recentPicks || v.recentPicks.length === 0) {
-      recent.appendChild(el("div", "empty", "No picks entered yet."));
-    } else {
-      v.recentPicks.forEach(function (p) {
-        var r = el("div", "row" + (p.mine ? " mine" : ""));
-        r.appendChild(el("span", "ov", "#" + p.overall));
-        r.appendChild(el("span", "nm", p.name));
-        r.appendChild(el("span", "sub", "slot " + p.slot));
-        recent.appendChild(r);
-      });
-    }
-
-    var meta = document.getElementById("meta");
-    var bits = [];
-    if (v.adp) bits.push("ADP " + v.adp.asOf + " (" + v.adp.sampleSize + " drafts)");
-    bits.push("updated " + new Date(state.updatedAt).toLocaleTimeString());
-    meta.textContent = bits.join("  ·  ");
-  }
-
-  // --- transport: WebSocket push, with a polling fallback if the socket drops ---
-  var pollTimer = null;
-  function poll() {
-    fetch("/api/state", { cache: "no-store" })
-      .then(function (r) { return r.json(); })
-      .then(render)
-      .catch(function () { setStatus("backend offline", "err"); });
-  }
-  function startPolling() { if (!pollTimer) { poll(); pollTimer = setInterval(poll, 2000); } }
-  function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
-
-  function connect() {
-    poll(); // paint immediately from the current state, don't wait for the first push
-    var proto = location.protocol === "https:" ? "wss://" : "ws://";
-    var ws;
-    try { ws = new WebSocket(proto + location.host + "/api/ws"); }
-    catch (e) { startPolling(); return; }
-    ws.onopen = function () { stopPolling(); };
-    ws.onmessage = function (ev) {
-      try { render(JSON.parse(ev.data)); } catch (e) { /* ignore malformed frame */ }
-    };
-    ws.onclose = function () { startPolling(); setTimeout(connect, 3000); };
-    ws.onerror = function () { try { ws.close(); } catch (e) {} };
-  }
-
-  // --- manual entry (POST /api/pick) — makes the board usable standalone for mock-draft testing ---
-  document.getElementById("entry").addEventListener("submit", function (ev) {
-    ev.preventDefault();
-    var input = document.getElementById("playerName");
-    var name = input.value.trim();
-    if (!name) return;
-    fetch("/api/pick", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ playerName: name })
-    }).then(function () { input.value = ""; input.focus(); poll(); })
-      .catch(function () { setStatus("could not add pick", "err"); });
-  });
-  document.getElementById("reset").addEventListener("click", function () {
-    fetch("/api/reset", { method: "POST" }).then(poll).catch(function () {});
-  });
-
-  connect();
-})();
-</script>
+<script>window.__DRAFT_CONFIG__ = { clientId: ${jsonForScript(clientId)} };</script>
+<script type="module" src="./client/activity.js"></script>
 </body>
 </html>`;
+}

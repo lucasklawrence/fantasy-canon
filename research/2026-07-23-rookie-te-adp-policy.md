@@ -27,9 +27,10 @@ pay the market's round for an unproven tight end.
   (TE, ADP ~33 / TE3) is an adversarially-confirmed fade (vote 3-0): target competition unpriced at
   his cost, boom/bust median. The policy generalizes that one-off into a rule.
 - **True 2026 rookie TEs are not an early-round consideration** — the mid-round report's rookie
-  pecking order finds the only true 2026 rookie worth an early pick is Jeremiyah Love (an RB); no
-  rookie TE is priced as a startable asset. The market already prices them out, so there is nothing
-  to fade there; "trust the market" = don't draft them.
+  pecking order finds the only true 2026 rookie worth an early pick is Jeremiyah Love (an RB), and
+  the [rookies & breakouts report](2026-07-19-rookies-breakouts.md) confirms a ~39-pick cliff after
+  him with no rookie TE priced as a startable asset. The market already prices them out, so there is
+  nothing to fade there; "trust the market" = don't draft them.
 - **The #152 trigger — Harold Fannin Jr. (TE, CLE)** — is on the board at ADP ~78 as a "streaming
   tier" talent (his market ADP has ranged ~68–78). He is not a bust to avoid; he is a streamer whose
   ADP occasionally creeps into startable-TE range. A **medium-confidence** FADE chip says exactly
@@ -57,3 +58,4 @@ pay the market's round for an unproven tight end.
 Internal research archive (no new web sources):
 
 - [`2026-07-12-2026-midround-tiers-rookies-fades.md`](2026-07-12-2026-midround-tiers-rookies-fades.md) — the confirmed Loveland fade, the rookie pecking order, and the Fannin board row
+- [`2026-07-19-rookies-breakouts.md`](2026-07-19-rookies-breakouts.md) — rookie-TE pricing (no rookie TE priced as a startable asset)

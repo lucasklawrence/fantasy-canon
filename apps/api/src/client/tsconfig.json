@@ -1,0 +1,11 @@
+{
+  "//": "Browser client typecheck (#127 Phase 2). Separate from the server tsconfig because it needs DOM libs and no Node types; esbuild does the actual bundling. Kept out of `tsc -b` and the root typecheck (both DOM-less) via their `exclude`.",
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "composite": false,
+    "noEmit": true
+  },
+  "include": ["."]
+}
