@@ -1,3 +1,4 @@
+import { recoverInterruptedCeremonies } from './commands/canon/draftOrder.js';
 import { createBotContext } from './config.js';
 import { createDiscordClient, registerInteractionHandlers } from './services/discord.js';
 import { startScheduledBroadcasts } from './services/scheduler.js';
@@ -8,6 +9,10 @@ async function start(): Promise<void> {
 
   client.once('clientReady', () => {
     console.log(`Fantasy Canon bot ready as ${client.user?.tag ?? 'unknown user'}`);
+    // Disclose the seed for any lottery that committed but never finalized before a restart (#176).
+    void recoverInterruptedCeremonies(client).catch((error) => {
+      console.error('[draftorder] ceremony recovery failed:', error);
+    });
   });
 
   registerInteractionHandlers(client, context);
