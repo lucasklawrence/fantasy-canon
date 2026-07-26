@@ -92,7 +92,18 @@ export async function routeRequest(
   const path = normalizePath(url);
 
   if (method === 'GET' && (path === '/' || path === '/index.html')) {
-    return { status: 200, contentType: 'text/html; charset=utf-8', body: boardHtml(deps.clientId) };
+    // A Discord Activity iframe always opens at the root URL mapping — it cannot ask for
+    // `/lottery`. So the root is mode-switched: while a lottery ceremony occupies the stage
+    // (any non-idle phase, including a finished run so late clickers get the finale + verify
+    // panel), serve the machine; otherwise the draft dashboard. The stage is in-memory, so a
+    // stale finished run stops shadowing the dashboard on the next api restart, and `/lottery`
+    // below always reaches the machine directly (dev).
+    const lotteryLive = deps.lottery.snapshot().phase !== 'idle';
+    return {
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: lotteryLive ? lotteryHtml(deps.clientId) : boardHtml(deps.clientId),
+    };
   }
   if (method === 'GET' && path === '/lottery') {
     return {

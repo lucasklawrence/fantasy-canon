@@ -81,6 +81,34 @@ describe('routeRequest', () => {
     expect(reply.body).toContain('src="./client/activity.js"');
   });
 
+  it('mode-switches / to the lottery machine while a stage is live (the Activity opens at root)', async () => {
+    const d = deps(hub());
+    // Idle stage → the draft dashboard.
+    expect((await routeRequest('GET', '/', '', d)).body).toContain('Draft Dashboard');
+
+    await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d);
+    for (const url of ['/', '/.proxy/']) {
+      const live = await routeRequest('GET', url, '', d);
+      expect(live.body).toContain('The Lottery Machine');
+      expect(live.body).toContain('src="./client/lottery.js"');
+    }
+    // A finished run keeps serving the machine (late clickers get the finale + verify panel)…
+    await routeRequest(
+      'POST',
+      '/api/lottery/finish',
+      JSON.stringify({
+        order: [{ pick: 1, team: 'B' }],
+        verify: { secretSeed: 's', salt: 'm', drawSeed: 's|m', commitment: 'h' },
+      }),
+      d,
+    );
+    expect((await routeRequest('GET', '/', '', d)).body).toContain('The Lottery Machine');
+    // …and /lottery always reaches the machine directly, while a fresh (idle) deps set serves
+    // the dashboard at root again — the in-memory stage resets with the process.
+    expect((await routeRequest('GET', '/lottery', '', d)).body).toContain('The Lottery Machine');
+    expect((await routeRequest('GET', '/', '', deps(hub()))).body).toContain('Draft Dashboard');
+  });
+
   it('serves the built client bundle, and 503s when it has not been built', async () => {
     const built = await routeRequest('GET', '/client/activity.js', '', deps(hub()));
     expect(built.status).toBe(200);
