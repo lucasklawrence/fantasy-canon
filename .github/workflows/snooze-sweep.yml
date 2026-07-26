@@ -1,0 +1,19 @@
+name: snooze-sweep
+
+# Adopts the shared snooze plugin (lucasklawrence/gh-automation). Label an issue `snoozed` + add a
+# `snooze: YYYY-MM-DD` line in its body; when that date passes, the daily run drops the label and
+# @-mentions the author. The `snoozed` label is auto-created on first run. See the plugin README.
+
+on:
+  schedule:
+    - cron: '0 13 * * *' # daily ~13:00 UTC
+  workflow_dispatch: {} # manual sweep
+
+permissions:
+  issues: write
+
+jobs:
+  sweep:
+    uses: lucasklawrence/gh-automation/.github/workflows/snooze-sweep.yml@main
+    permissions:
+      issues: write
