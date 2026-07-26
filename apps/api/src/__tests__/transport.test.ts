@@ -39,4 +39,10 @@ describe('wsUrl', () => {
       'wss://abc.discordsays.com/.proxy/api/ws',
     );
   });
+
+  it('takes an alternate feed route (the lottery stage)', () => {
+    expect(
+      wsUrl({ protocol: 'https:', host: 'abc.discordsays.com' }, '/.proxy', '/api/lottery/ws'),
+    ).toBe('wss://abc.discordsays.com/.proxy/api/lottery/ws');
+  });
 });

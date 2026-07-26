@@ -19,6 +19,16 @@
 import type { DraftPick } from '@fantasy-canon/core';
 import { boardHtml } from './board.js';
 import type { HubSnapshot } from './hub.js';
+import { lotteryHtml } from './lotteryPage.js';
+import {
+  parseLotteryAbort,
+  parseLotteryBeat,
+  parseLotteryFinish,
+  parseLotteryReveal,
+  parseLotteryStart,
+  StageBusyError,
+  type LotteryStage,
+} from './lotteryStage.js';
 import { parseTokenRequest } from './token.js';
 
 /** The snapshot plus a server-stamped timestamp — what `/api/state` and the WS push both carry. */
@@ -43,6 +53,15 @@ export interface RouteDeps {
   clientScript: () => string | undefined;
   /** Exchange an OAuth code for an access token (server-side; injected so tests use a stub). */
   exchangeToken: (code: string) => Promise<{ accessToken: string }>;
+  /** The lottery-machine reveal stage the bot paces via `POST /api/lottery/*` (#169). */
+  lottery: LotteryStage;
+  /** The lottery client bundle (`dist/client/lottery.js`), or `undefined` if `build:client` hasn't run. */
+  lotteryScript: () => string | undefined;
+  /**
+   * Shared secret the bot must send as `x-stage-key` on lottery POSTs. Empty ⇒ open (dev: the
+   * server binds 127.0.0.1). Set it in production — the mapped host is publicly reachable.
+   */
+  stageKey: string;
 }
 
 const json = (status: number, value: unknown): HttpReply => ({
@@ -68,14 +87,22 @@ export async function routeRequest(
   url: string,
   body: string,
   deps: RouteDeps,
+  headers: Record<string, string | string[] | undefined> = {},
 ): Promise<HttpReply> {
   const path = normalizePath(url);
 
   if (method === 'GET' && (path === '/' || path === '/index.html')) {
     return { status: 200, contentType: 'text/html; charset=utf-8', body: boardHtml(deps.clientId) };
   }
-  if (method === 'GET' && path === '/client/activity.js') {
-    const script = deps.clientScript();
+  if (method === 'GET' && path === '/lottery') {
+    return {
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: lotteryHtml(deps.clientId),
+    };
+  }
+  if (method === 'GET' && (path === '/client/activity.js' || path === '/client/lottery.js')) {
+    const script = path === '/client/lottery.js' ? deps.lotteryScript() : deps.clientScript();
     if (script === undefined) {
       return {
         status: 503,
@@ -84,6 +111,9 @@ export async function routeRequest(
       };
     }
     return { status: 200, contentType: 'text/javascript; charset=utf-8', body: script };
+  }
+  if (path.startsWith('/api/lottery/')) {
+    return lotteryRoute(method, path, body, deps, headers);
   }
   if (method === 'GET' && path === '/api/state') {
     return json(200, deps.getEnvelope());
@@ -110,6 +140,81 @@ export async function routeRequest(
     }
   }
   return json(404, { error: 'not found' });
+}
+
+/**
+ * `/api/lottery/*` — the bot-paced reveal stage (#169).
+ *
+ *   GET  /api/lottery/state   → {@link LotterySnapshot} (public — it's the shared presentation)
+ *   POST /api/lottery/start   → open the stage (bot only)
+ *   POST /api/lottery/beat    → drum-roll for the next pick (bot only)
+ *   POST /api/lottery/reveal  → the ball drop (bot only)
+ *   POST /api/lottery/finish  → final order + seed-reveal verify info (bot only)
+ *   POST /api/lottery/abort   → the ceremony aborted (bot only)
+ *
+ * Bot-only routes require the `x-stage-key` header to match the configured key. With no key
+ * configured they are open — acceptable only on the loopback dev bind; production must set one.
+ */
+function lotteryRoute(
+  method: string,
+  path: string,
+  body: string,
+  deps: RouteDeps,
+  headers: Record<string, string | string[] | undefined>,
+): HttpReply {
+  if (method === 'GET' && path === '/api/lottery/state') {
+    return json(200, deps.lottery.snapshot());
+  }
+  if (method !== 'POST') return json(404, { error: 'not found' });
+
+  if (deps.stageKey) {
+    const sent = headers['x-stage-key'];
+    if (typeof sent !== 'string' || sent !== deps.stageKey) {
+      return json(401, { error: 'missing or bad x-stage-key' });
+    }
+  }
+
+  switch (path) {
+    case '/api/lottery/start': {
+      const parsed = parseLotteryStart(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      try {
+        deps.lottery.start(parsed.value);
+      } catch (error) {
+        // Another guild's ceremony is armed/live — the caller's bot falls back to its
+        // in-channel reveal rather than interleaving two ceremonies on shared screens.
+        if (error instanceof StageBusyError) return json(409, { error: error.message });
+        throw error;
+      }
+      return json(200, { ok: true });
+    }
+    case '/api/lottery/beat': {
+      const parsed = parseLotteryBeat(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.beat(parsed.value);
+      return json(200, { ok: true });
+    }
+    case '/api/lottery/reveal': {
+      const parsed = parseLotteryReveal(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.reveal(parsed.value);
+      return json(200, { ok: true });
+    }
+    case '/api/lottery/finish': {
+      const parsed = parseLotteryFinish(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.finish(parsed.value);
+      return json(200, { ok: true });
+    }
+    case '/api/lottery/abort': {
+      const parsed = parseLotteryAbort(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.abort(parsed.value);
+      return json(200, { ok: true });
+    }
+    default:
+      return json(404, { error: 'not found' });
+  }
 }
 
 type ParsedPicks = { picks: DraftPick[] } | { error: string };

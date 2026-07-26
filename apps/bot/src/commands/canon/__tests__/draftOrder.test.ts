@@ -19,14 +19,17 @@ import {
 import {
   applyBallsOverrides,
   applyBonusOverrides,
+  DRAFT_ORDER_LAUNCH_ID,
   handleDraftOrderAbortSubcommand,
   handleDraftOrderBeginSubcommand,
   handleDraftOrderHypeSubcommand,
+  handleDraftOrderLaunchButton,
   handleDraftOrderSetupSubcommand,
   handleDraftOrderStatusSubcommand,
   parseManualTeams,
   recoverInterruptedCeremonies,
 } from '../draftOrder.js';
+import type { ButtonInteraction } from 'discord.js';
 import { createMemoryCeremonyStore, type PersistedCeremony } from '../../../lib/ceremonyStore.js';
 import type { Client } from 'discord.js';
 
@@ -574,6 +577,27 @@ describe('recoverInterruptedCeremonies (#176)', () => {
     await recoverInterruptedCeremonies(client, store);
 
     expect(store.loadPending()).toHaveLength(1);
+  });
+
+  it('launch button responds with LAUNCH_ACTIVITY, ephemeral error on failure (#169)', async () => {
+    expect(DRAFT_ORDER_LAUNCH_ID).toBe('canon:draftorder:launch');
+    const launchActivity = vi.fn().mockResolvedValue({});
+    const reply = vi.fn().mockResolvedValue({});
+    await handleDraftOrderLaunchButton({
+      launchActivity,
+      reply,
+    } as unknown as ButtonInteraction);
+    expect(launchActivity).toHaveBeenCalledOnce();
+    expect(reply).not.toHaveBeenCalled();
+
+    const failing = vi.fn().mockRejectedValue(new Error('activities disabled'));
+    await handleDraftOrderLaunchButton({
+      launchActivity: failing,
+      reply,
+    } as unknown as ButtonInteraction);
+    expect(reply).toHaveBeenCalledOnce();
+    const [payload] = reply.mock.calls[0] as [{ content: string }];
+    expect(payload.content).toContain('Lottery Machine');
   });
 
   it('skips a guild that already has a live ceremony in memory', async () => {

@@ -100,6 +100,52 @@ export interface RunCeremonyOptions {
    * recovery. Omitted ⇒ no persistence (the pre-#176 in-memory-only behavior).
    */
   store?: CeremonyStore;
+  /**
+   * The lottery-machine reveal stage (#169). When present, the paced ball-by-ball reveal streams
+   * to the Activity via this seam instead of the channel — the channel still gets the commitment,
+   * final board, and seed reveal, so members outside the Activity audit the same draw. The bot
+   * remains the single pacer; the stage is presentation-only.
+   */
+  stage?: RevealStage;
+}
+
+/** One row of the stage's pre-reveal odds table (matches the api's `LotteryOddsRow`). */
+export interface StageOddsRow {
+  team: string;
+  balls: number;
+  firstPct: number;
+  top3Pct: number;
+}
+
+/**
+ * The Activity reveal stage the ceremony paces (#169) — implemented over HTTP by
+ * `lotteryStageClient.ts`, or by an in-memory collector in tests. Mirrors the api's
+ * `/api/lottery/*` payloads.
+ */
+export interface RevealStage {
+  start(start: {
+    title: string;
+    commitment: string;
+    teamCount: number;
+    totalBalls: number;
+    delayMs: number;
+    rows: StageOddsRow[];
+    /** Lets the stage refuse a second guild's ceremony while another is armed/live. */
+    guildId?: string;
+  }): Promise<void>;
+  beat(beat: { pick: number; remaining: string[] }): Promise<void>;
+  reveal(reveal: {
+    pick: number;
+    team: string;
+    balls: number;
+    oddsPct: number;
+    remaining: string[];
+  }): Promise<void>;
+  finish(finish: {
+    order: { pick: number; team: string }[];
+    verify: { secretSeed: string; salt: string; drawSeed: string; commitment: string };
+  }): Promise<void>;
+  abort(abort: { reason: string }): Promise<void>;
 }
 
 /** Thrown out of {@link runCeremony} when the commissioner aborts mid-ceremony. */
@@ -341,39 +387,57 @@ function verificationContent(session: CeremonySession): string {
   ].join('\n');
 }
 
-async function revealFrames(
+/** Per-pick reveal facts shared by the channel frames and the Activity stage (#169). */
+interface RevealData {
+  teamName: string;
+  balls: number;
+  oddsPct: number;
+  /** Undrawn teams *including* the one about to be revealed (the drum-roll view). */
+  remaining: string[];
+  /** Undrawn teams after this reveal. */
+  remainingAfter: string[];
+}
+
+function revealData(
   session: CeremonySession,
   draws: LotteryDraw[],
   odds: TeamPickOdds[],
   pick: number,
-): Promise<{ beat: CeremonyPost; reveal: CeremonyPost }> {
+): RevealData {
   const draw = draws.find((d) => d.pick === pick) as LotteryDraw;
   const oddsByTeam = new Map(odds.map((o) => [o.teamId, o]));
   const unrevealedDraws = draws.filter((d) => d.pick <= pick).sort((a, b) => a.pick - b.pick);
-  const unrevealed = unrevealedDraws.map((d) => displayName(session, d.teamId));
+  const remaining = unrevealedDraws.map((d) => displayName(session, d.teamId));
   const remainingAfter = unrevealedDraws
     .filter((d) => d.teamId !== draw.teamId)
     .map((d) => displayName(session, d.teamId));
   const team = session.config.teams.find((t) => t.teamId === draw.teamId);
   const balls = team ? ballCountForTeam(team, session.config.baseBallCount ?? 1) : 0;
   const oddsPct = pct(oddsByTeam.get(draw.teamId)?.probabilities[pick - 1] ?? 0);
+  return { teamName: displayName(session, draw.teamId), balls, oddsPct, remaining, remainingAfter };
+}
 
+async function revealFrames(
+  session: CeremonySession,
+  data: RevealData,
+  pick: number,
+): Promise<{ beat: CeremonyPost; reveal: CeremonyPost }> {
   const beatImage = await renderLotteryRevealCard({
     phase: 'beat',
     title: session.title,
     subtitle: 'The Ceremony • live from the hopper',
     pick,
-    remaining: unrevealed,
+    remaining: data.remaining,
   });
   const revealImage = await renderLotteryRevealCard({
     phase: 'reveal',
     title: session.title,
     subtitle: 'The Ceremony • live from the hopper',
     pick,
-    remaining: remainingAfter,
-    team: displayName(session, draw.teamId),
-    balls,
-    oddsPct,
+    remaining: data.remainingAfter,
+    team: data.teamName,
+    balls: data.balls,
+    oddsPct: data.oddsPct,
   });
   return {
     beat: {
@@ -383,7 +447,7 @@ async function revealFrames(
     },
     reveal: {
       kind: 'reveal',
-      content: `🏀 Pick **#${pick}** goes to **${displayName(session, draw.teamId)}** (${balls} ball(s), ${oddsPct.toFixed(1)}% chance at this slot).`,
+      content: `🏀 Pick **#${pick}** goes to **${data.teamName}** (${data.balls} ball(s), ${data.oddsPct.toFixed(1)}% chance at this slot).`,
       image: { name: `lottery-reveal-${pick}.png`, data: revealImage },
     },
   };
@@ -519,6 +583,9 @@ export async function runCeremony(
       });
     }
   }
+  // The stage that actually STARTED for this run — reset on a failed start so neither the reveal
+  // loop nor the abort path below ever notifies a stage that isn't showing this ceremony.
+  let liveStage: RevealStage | undefined;
   try {
     throwIfAborted(session);
     const committed = await io.post({ kind: 'commitment', content: commitmentContent(session) });
@@ -534,14 +601,62 @@ export async function runCeremony(
     }
     const odds = computePickOdds(session.config.teams, session.config.baseBallCount);
 
-    // REVEAL — worst to first.
+    // Open the Activity stage (#169). If it can't even start, fall back to the in-channel reveal
+    // so the ceremony never stalls on a presentation surface; later transient stage failures are
+    // logged and skipped (the channel board + seed reveal remain the authoritative record).
+    liveStage = options.stage;
+    if (liveStage) {
+      try {
+        await liveStage.start({
+          title: session.title,
+          commitment: session.commitment,
+          teamCount: session.config.teams.length,
+          totalBalls: totalBalls(session.config),
+          delayMs: options.delayMs,
+          rows: oddsRows(session),
+          guildId: session.guildId,
+        });
+      } catch (stageError) {
+        console.error(
+          '[draftorder] stage unavailable, falling back to channel reveal:',
+          stageError,
+        );
+        liveStage = undefined;
+      }
+    }
+    const safeStage = async (send: () => Promise<void>): Promise<void> => {
+      try {
+        await send();
+      } catch (stageError) {
+        console.error('[draftorder] stage push failed (continuing):', stageError);
+      }
+    };
+
+    // REVEAL — worst to first: to the Activity stage when open, else as channel card posts.
     for (let pick = session.config.teams.length; pick >= 1; pick -= 1) {
       throwIfAborted(session);
-      const frames = await revealFrames(session, session.draws, odds, pick);
-      await io.post(frames.beat);
-      await sleep(options.delayMs, session.abort.signal);
-      throwIfAborted(session);
-      await io.post(frames.reveal);
+      const data = revealData(session, session.draws, odds, pick);
+      const stage = liveStage;
+      if (stage) {
+        await safeStage(() => stage.beat({ pick, remaining: data.remaining }));
+        await sleep(options.delayMs, session.abort.signal);
+        throwIfAborted(session);
+        await safeStage(() =>
+          stage.reveal({
+            pick,
+            team: data.teamName,
+            balls: data.balls,
+            oddsPct: data.oddsPct,
+            remaining: data.remainingAfter,
+          }),
+        );
+      } else {
+        const frames = await revealFrames(session, data, pick);
+        await io.post(frames.beat);
+        await sleep(options.delayMs, session.abort.signal);
+        throwIfAborted(session);
+        await io.post(frames.reveal);
+      }
     }
 
     // Past this point aborts are deliberately ignored: every pick is already public, so the
@@ -577,6 +692,25 @@ export async function runCeremony(
     session.state = 'FINALIZED';
     // The seed is now public — nothing left to recover.
     unpersist(options.store, session.commitment);
+    // Close out the Activity stage AFTER the in-channel seed reveal, so the Activity never shows
+    // the seed before the channel record does.
+    const stageAtFinish = liveStage;
+    if (stageAtFinish) {
+      await safeStage(() =>
+        stageAtFinish.finish({
+          order: (session.draws ?? [])
+            .slice()
+            .sort((a, b) => a.pick - b.pick)
+            .map((draw) => ({ pick: draw.pick, team: displayName(session, draw.teamId) })),
+          verify: {
+            secretSeed: session.secretSeed ?? '',
+            salt: session.commitMessageId ?? '',
+            drawSeed: session.drawSeed ?? '',
+            commitment: session.commitment ?? '',
+          },
+        }),
+      );
+    }
     return session.draws;
   } catch (error) {
     if (session.state === 'LOTTERY_RUNNING') {
@@ -589,6 +723,19 @@ export async function runCeremony(
         // Never mask the original failure with a disclosure failure — log and fall through.
         // Leave the persisted record in place: startup recovery becomes the disclosure backstop.
         console.error('[draftorder] failed to post the abort disclosure:', disclosureError);
+      }
+      // Tell any Activity viewers the run ended; the full disclosure lives in-channel. Only a
+      // stage that actually STARTED for this run is notified — after a start-failure fallback
+      // (`liveStage` reset) the stage isn't showing this ceremony and must not get an abort.
+      const stageAtAbort = liveStage;
+      if (stageAtAbort) {
+        try {
+          await stageAtAbort.abort({
+            reason: `${session.title} was aborted — the committed seed is disclosed in the channel.`,
+          });
+        } catch (stageError) {
+          console.error('[draftorder] failed to notify the stage of the abort:', stageError);
+        }
       }
     }
     throw error;

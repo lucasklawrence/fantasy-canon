@@ -1,6 +1,7 @@
 import type { PlayerTier } from '@fantasy-canon/core';
 import { describe, expect, it } from 'vitest';
 import { createDraftHub, type DraftHub } from '../hub.js';
+import { createLotteryStage, type LotterySnapshot } from '../lotteryStage.js';
 import {
   normalizePath,
   parsePickBody,
@@ -15,7 +16,7 @@ const POOL: PlayerTier[] = [
   { name: 'C', position: 'RB', adp: 3, source: 'test' },
 ];
 
-/** Route deps backed by a real hub, a fixed timestamp, and stub client/token wiring. */
+/** Route deps backed by a real hub + stage, a fixed timestamp, and stub client/token wiring. */
 function deps(h: DraftHub, over: Partial<RouteDeps> = {}): RouteDeps {
   return {
     getEnvelope: (): Envelope => ({ ...h.snapshot(), updatedAt: '2026-07-14T00:00:00.000Z' }),
@@ -26,8 +27,23 @@ function deps(h: DraftHub, over: Partial<RouteDeps> = {}): RouteDeps {
     clientScript: over.clientScript ?? ((): string | undefined => 'export const bundled = 1;'),
     exchangeToken:
       over.exchangeToken ?? ((code: string) => Promise.resolve({ accessToken: `tok-${code}` })),
+    lottery: over.lottery ?? createLotteryStage(),
+    lotteryScript: over.lotteryScript ?? ((): string | undefined => 'export const machine = 1;'),
+    stageKey: over.stageKey ?? '',
   };
 }
+
+const LOTTERY_START_BODY = JSON.stringify({
+  title: 'Lottery',
+  commitment: 'hash',
+  teamCount: 2,
+  totalBalls: 3,
+  delayMs: 1000,
+  rows: [
+    { team: 'B', balls: 2, firstPct: 66.7, top3Pct: 100 },
+    { team: 'A', balls: 1, firstPct: 33.3, top3Pct: 100 },
+  ],
+});
 
 function hub(): DraftHub {
   return createDraftHub({
@@ -165,6 +181,95 @@ describe('routeRequest', () => {
 
   it('404s an unknown route', async () => {
     expect((await routeRequest('GET', '/nope', '', deps(hub()))).status).toBe(404);
+  });
+});
+
+describe('lottery routes (#169)', () => {
+  it('serves the lottery shell and its bundle (503 when unbuilt)', async () => {
+    const d = deps(hub(), { clientId: 'app-9' });
+    const page = await routeRequest('GET', '/lottery', '', d);
+    expect(page.status).toBe(200);
+    expect(page.body).toContain('The Lottery Machine');
+    expect(page.body).toContain('clientId: "app-9"');
+    expect(page.body).toContain('src="./client/lottery.js"');
+
+    const js = await routeRequest('GET', '/client/lottery.js', '', d);
+    expect(js.status).toBe(200);
+    expect(js.body).toContain('machine');
+
+    const missing = await routeRequest(
+      'GET',
+      '/client/lottery.js',
+      '',
+      deps(hub(), { lotteryScript: () => undefined }),
+    );
+    expect(missing.status).toBe(503);
+  });
+
+  it('drives the stage through start → beat → reveal → finish, visible in /api/lottery/state', async () => {
+    const d = deps(hub());
+    expect((await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d)).status).toBe(
+      200,
+    );
+    await routeRequest(
+      'POST',
+      '/api/lottery/beat',
+      JSON.stringify({ pick: 2, remaining: ['A', 'B'] }),
+      d,
+    );
+    await routeRequest(
+      'POST',
+      '/api/lottery/reveal',
+      JSON.stringify({ pick: 2, team: 'A', balls: 1, oddsPct: 33.3, remaining: ['B'] }),
+      d,
+    );
+
+    const state = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(state.phase).toBe('revealing');
+    expect(state.start?.title).toBe('Lottery');
+    expect(state.reveals.map((r) => r.team)).toEqual(['A']);
+  });
+
+  it('routes work under the /.proxy prefix and 400 on bad payloads', async () => {
+    const d = deps(hub());
+    expect(
+      (await routeRequest('POST', '/.proxy/api/lottery/start', LOTTERY_START_BODY, d)).status,
+    ).toBe(200);
+    expect((await routeRequest('POST', '/api/lottery/beat', '{bad', d)).status).toBe(400);
+    expect((await routeRequest('POST', '/api/lottery/finish', '{}', d)).status).toBe(400);
+  });
+
+  it("409s a second guild's start while another guild's run is live", async () => {
+    const d = deps(hub());
+    const forGuild = (guildId: string): string =>
+      JSON.stringify({ ...(JSON.parse(LOTTERY_START_BODY) as object), guildId });
+    expect((await routeRequest('POST', '/api/lottery/start', forGuild('g-a'), d)).status).toBe(200);
+    await routeRequest(
+      'POST',
+      '/api/lottery/beat',
+      JSON.stringify({ pick: 2, remaining: ['A', 'B'] }),
+      d,
+    );
+    const busy = await routeRequest('POST', '/api/lottery/start', forGuild('g-b'), d);
+    expect(busy.status).toBe(409);
+    expect(busy.body).toContain('another live ceremony');
+  });
+
+  it('requires x-stage-key on POSTs when configured — state stays public', async () => {
+    const d = deps(hub(), { stageKey: 'sekrit' });
+    const denied = await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d);
+    expect(denied.status).toBe(401);
+    const wrong = await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d, {
+      'x-stage-key': 'nope',
+    });
+    expect(wrong.status).toBe(401);
+    const ok = await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d, {
+      'x-stage-key': 'sekrit',
+    });
+    expect(ok.status).toBe(200);
+    expect((await routeRequest('GET', '/api/lottery/state', '', d)).status).toBe(200);
   });
 });
 

@@ -57,10 +57,12 @@ async function main(): Promise<void> {
   const hub = createDraftHub({ leagueSize, mySlot, rosterSlots: ROSTER_SLOTS, pool: players, adp });
   // The Activity SDK needs the app (client) id in the browser; the token exchange needs the secret
   // server-side. Both are absent in plain dev — the board still runs, it just skips the SDK handshake.
+  // FANTASY_STAGE_KEY guards the bot-paced lottery POSTs (#169); empty = open on the loopback bind.
   const server = await startApiServer(hub, {
     port,
     clientId: process.env.DISCORD_APP_ID ?? '',
     clientSecret: process.env.DISCORD_CLIENT_SECRET ?? '',
+    stageKey: process.env.FANTASY_STAGE_KEY ?? '',
   });
 
   console.log(`\n▶ Dashboard: ${server.url}`);

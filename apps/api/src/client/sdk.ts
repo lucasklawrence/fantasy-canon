@@ -1,0 +1,42 @@
+/**
+ * The Discord Embedded App SDK handshake, shared by both Activity entries (the draft board and
+ * the lottery machine, #169): `ready → authorize → server-side token exchange → authenticate`.
+ * Browser-only glue over the unit-tested pure pieces (`transport.ts` client-side, `token.ts`
+ * server-side); unvalidated until the Activity is registered in the portal (#168).
+ */
+
+import { DiscordSDK } from '@discord/embedded-app-sdk';
+import { apiPath } from './transport.js';
+
+declare global {
+  interface Window {
+    __DRAFT_CONFIG__?: { clientId?: string };
+  }
+}
+
+/** The Discord application (client) id the server injected into the page (`''` in dev). */
+export function configuredClientId(): string {
+  return window.__DRAFT_CONFIG__?.clientId ?? '';
+}
+
+/** Run the Discord OAuth handshake so the Activity is authenticated before it shows data. */
+export async function runHandshake(base: string): Promise<void> {
+  const clientId = configuredClientId();
+  const sdk = new DiscordSDK(clientId);
+  await sdk.ready();
+  const { code } = await sdk.commands.authorize({
+    client_id: clientId,
+    response_type: 'code',
+    state: '',
+    prompt: 'none',
+    scope: ['identify'],
+  });
+  const res = await fetch(apiPath(base, '/api/token'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error(`token exchange failed (${res.status})`);
+  const { access_token: accessToken } = (await res.json()) as { access_token: string };
+  await sdk.commands.authenticate({ access_token: accessToken });
+}

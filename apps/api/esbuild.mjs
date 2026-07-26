@@ -8,8 +8,8 @@
 import { build } from 'esbuild';
 
 await build({
-  entryPoints: ['src/client/activity.ts'],
-  outfile: 'dist/client/activity.js',
+  entryPoints: ['src/client/activity.ts', 'src/client/lottery.ts'],
+  outdir: 'dist/client',
   bundle: true,
   format: 'esm',
   platform: 'browser',
