@@ -13,7 +13,11 @@
  * `lib/draftOrderCeremony.ts` so it stays testable without discord.js.
  */
 import {
+  ActionRowBuilder,
   AttachmentBuilder,
+  ButtonBuilder,
+  ButtonInteraction,
+  ButtonStyle,
   ChatInputCommandInteraction,
   Client,
   MessageFlags,
@@ -41,6 +45,7 @@ import {
   setCeremony,
 } from '../../lib/draftOrderCeremony.js';
 import { createFileCeremonyStore, type CeremonyStore } from '../../lib/ceremonyStore.js';
+import { stageFromEnv } from '../../lib/lotteryStageClient.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
@@ -159,7 +164,13 @@ async function denyUnlessCommissioner(interaction: ChatInputCommandInteraction):
 }
 
 interface SendableChannel {
-  send(payload: { content?: string; files?: AttachmentBuilder[] }): Promise<{ id: string }>;
+  send(payload: {
+    content?: string;
+    files?: AttachmentBuilder[];
+    components?: (
+      ActionRowBuilder<ButtonBuilder> | ReturnType<ActionRowBuilder<ButtonBuilder>['toJSON']>
+    )[];
+  }): Promise<{ id: string }>;
 }
 
 function sendableChannel(interaction: ChatInputCommandInteraction): SendableChannel | undefined {
@@ -373,9 +384,10 @@ export async function handleDraftOrderBeginSubcommand(
   }
 
   const delaySeconds = interaction.options.getInteger('delay') ?? DEFAULT_REVEAL_DELAY_SECONDS;
+  const stageMode = interaction.options.getString('stage') ?? 'channel';
 
   await interaction.reply({
-    content: `Sealing the bag — commitment posts now, first reveal ~${delaySeconds}s after its drum roll. Abort with \`/canon draftorder abort\` (the seed gets revealed either way).`,
+    content: `Sealing the bag — commitment posts now, first reveal ~${delaySeconds}s after its drum roll.${stageMode === 'activity' ? ' The reveal streams in the Lottery Machine Activity.' : ''} Abort with \`/canon draftorder abort\` (the seed gets revealed either way).`,
     flags: MessageFlags.Ephemeral,
   });
 
@@ -406,16 +418,55 @@ export async function handleDraftOrderBeginSubcommand(
   // recovery discloses beside the commitment, capture it here, not at setup (#176).
   session.channelId = interaction.channelId;
 
+  // Activity mode (#169): invite the league into the Lottery Machine before the commitment posts.
+  // The reveal itself streams there; commitment, final board, and seed reveal still post here.
+  if (stageMode === 'activity') {
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${DRAFT_ORDER_LAUNCH_ID}:${session.createdAt}`)
+        .setLabel('🎰 Open the Lottery Machine')
+        .setStyle(ButtonStyle.Primary),
+    );
+    await channel.send({
+      content: `🎰 **${session.title}** — the ball-by-ball reveal streams live in the Lottery Machine. Click to watch; the commitment, final board, and seed verification still post right here.`,
+      components: [row],
+    });
+  }
+
   // Fire and forget: the ceremony runs on channel messages and outlives this interaction's
   // 15-minute token. Errors land in the channel via the abort disclosure + the log.
   void runCeremony(session, channelIo(channel), {
     delayMs: delaySeconds * 1000,
     store: createFileCeremonyStore(),
+    stage: stageMode === 'activity' ? stageFromEnv() : undefined,
   }).catch((error) => {
     if (!(error instanceof CeremonyAborted)) {
       console.error('[draftorder] ceremony failed:', error);
     }
   });
+}
+
+/** Component id prefix for the ceremony's LAUNCH_ACTIVITY button (#169). */
+export const DRAFT_ORDER_LAUNCH_ID = 'canon:draftorder:launch';
+
+/**
+ * The "Open the Lottery Machine" button: responds with LAUNCH_ACTIVITY (type 12), which opens the
+ * Activity iframe for the clicking member. Launching is idempotent and harmless when stale, so no
+ * session-marker validation — the machine simply shows whatever the stage currently holds.
+ */
+export async function handleDraftOrderLaunchButton(interaction: ButtonInteraction): Promise<void> {
+  try {
+    await interaction.launchActivity();
+  } catch (error) {
+    console.error('[draftorder] launchActivity failed:', error);
+    await interaction
+      .reply({
+        content:
+          'Could not launch the Lottery Machine — Activities may not be enabled for this app yet (see #168). The reveal still runs; results post in this channel.',
+        flags: MessageFlags.Ephemeral,
+      })
+      .catch(() => {});
+  }
 }
 
 export const DEFAULT_MINIGAME_WINDOW_SECONDS = DEFAULT_WINDOW_MS / 1000;

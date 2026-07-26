@@ -37,6 +37,8 @@ import {
   BOARD_GRADE_ID,
 } from './draftSession.js';
 import {
+  DRAFT_ORDER_LAUNCH_ID,
+  handleDraftOrderLaunchButton,
   handleDraftOrderSetupSubcommand,
   handleDraftOrderMinigameSubcommand,
   handleDraftOrderBeginSubcommand,
@@ -703,6 +705,15 @@ export const canonCommand = new SlashCommandBuilder()
               .setDescription('Seconds between drum roll and reveal (default 20)')
               .setMinValue(5)
               .setMaxValue(120),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('stage')
+              .setDescription('Where the ball-by-ball reveal plays (default: channel cards)')
+              .addChoices(
+                { name: 'channel — card posts in this channel', value: 'channel' },
+                { name: 'activity — the Lottery Machine (Embedded App)', value: 'activity' },
+              ),
           ),
       )
       .addSubcommand((sub) =>
@@ -913,6 +924,10 @@ const CANON_COMPONENT_ROUTES: {
     handle: (i) => (i.isButton() ? handleBoardRefresh(i) : undefined),
   },
   { prefix: `${BOARD_GRADE_ID}:`, handle: (i) => (i.isButton() ? handleBoardGrade(i) : undefined) },
+  {
+    prefix: `${DRAFT_ORDER_LAUNCH_ID}:`,
+    handle: (i) => (i.isButton() ? handleDraftOrderLaunchButton(i) : undefined),
+  },
 ];
 
 /**

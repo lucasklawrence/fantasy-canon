@@ -14,19 +14,9 @@
  * unit-tested.
  */
 
-import { DiscordSDK } from '@discord/embedded-app-sdk';
+import { runHandshake } from './sdk.js';
 import { apiPath, isDiscordActivity, proxyBase, wsUrl } from './transport.js';
 import { renderState, setStatus, wireControls, type BoardState } from './render.js';
-
-declare global {
-  interface Window {
-    __DRAFT_CONFIG__?: { clientId?: string };
-  }
-}
-
-function clientId(): string {
-  return window.__DRAFT_CONFIG__?.clientId ?? '';
-}
 
 async function postJson(base: string, route: string, payload: unknown): Promise<void> {
   await fetch(apiPath(base, route), {
@@ -34,27 +24,6 @@ async function postJson(base: string, route: string, payload: unknown): Promise<
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-}
-
-/** Run the Discord OAuth handshake so the Activity is authenticated before it shows data. */
-async function runHandshake(base: string): Promise<void> {
-  const sdk = new DiscordSDK(clientId());
-  await sdk.ready();
-  const { code } = await sdk.commands.authorize({
-    client_id: clientId(),
-    response_type: 'code',
-    state: '',
-    prompt: 'none',
-    scope: ['identify'],
-  });
-  const res = await fetch(apiPath(base, '/api/token'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
-  });
-  if (!res.ok) throw new Error(`token exchange failed (${res.status})`);
-  const { access_token: accessToken } = (await res.json()) as { access_token: string };
-  await sdk.commands.authenticate({ access_token: accessToken });
 }
 
 /** Poll `/api/state` once and paint it (used on connect and as the WS-drop fallback). */

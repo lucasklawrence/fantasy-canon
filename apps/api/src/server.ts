@@ -15,6 +15,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import type { DraftHub } from './hub.js';
+import { createLotteryStage, type LotteryStage } from './lotteryStage.js';
 import { normalizePath, routeRequest, type Envelope } from './routes.js';
 import { exchangeCodeForToken } from './token.js';
 
@@ -36,6 +37,12 @@ export interface ApiServerOptions {
   clientSecret?: string;
   /** Path to the esbuild client bundle; defaults to `dist/client/activity.js` under the cwd. */
   clientScriptPath?: string;
+  /** Path to the lottery client bundle; defaults to `dist/client/lottery.js` under the cwd. */
+  lotteryScriptPath?: string;
+  /** The lottery reveal stage (#169); a fresh one is created when not injected (tests inject). */
+  lottery?: LotteryStage;
+  /** Shared secret required on `POST /api/lottery/*` (the bot's `x-stage-key`). Empty ⇒ open. */
+  stageKey?: string;
   /** Injected for tests; defaults to `() => new Date()`. */
   now?: () => Date;
 }
@@ -51,16 +58,23 @@ export function startApiServer(
   const clientSecret = opts.clientSecret ?? '';
   const clientScriptPath =
     opts.clientScriptPath ?? path.resolve(process.cwd(), 'dist/client/activity.js');
+  const lotteryScriptPath =
+    opts.lotteryScriptPath ?? path.resolve(process.cwd(), 'dist/client/lottery.js');
+  const lottery = opts.lottery ?? createLotteryStage();
+  const stageKey = opts.stageKey ?? '';
 
   const envelope = (): Envelope => ({ ...hub.snapshot(), updatedAt: now().toISOString() });
 
-  // Read the bundle once and cache it; absent (before `build:client`) ⇒ the route serves a 503.
-  let cachedScript: string | undefined;
-  try {
-    cachedScript = readFileSync(clientScriptPath, 'utf8');
-  } catch {
-    cachedScript = undefined;
-  }
+  // Read the bundles once and cache them; absent (before `build:client`) ⇒ the route serves a 503.
+  const readScript = (file: string): string | undefined => {
+    try {
+      return readFileSync(file, 'utf8');
+    } catch {
+      return undefined;
+    }
+  };
+  const cachedScript = readScript(clientScriptPath);
+  const cachedLotteryScript = readScript(lotteryScriptPath);
 
   const exchangeToken = (code: string): Promise<{ accessToken: string }> => {
     if (!clientId || !clientSecret) {
@@ -102,15 +116,24 @@ export function startApiServer(
         // Never let a bad request take the process down mid-draft — any throw becomes a 500 and the
         // board keeps polling.
         const body = Buffer.concat(chunks).toString('utf8');
-        routeRequest(req.method ?? 'GET', req.url ?? '/', body, {
-          getEnvelope: envelope,
-          ingest: (picks) => hub.ingest(picks),
-          nextOverall: () => hub.nextOverall(),
-          reset: () => hub.reset(),
-          clientId,
-          clientScript: () => cachedScript,
-          exchangeToken,
-        })
+        routeRequest(
+          req.method ?? 'GET',
+          req.url ?? '/',
+          body,
+          {
+            getEnvelope: envelope,
+            ingest: (picks) => hub.ingest(picks),
+            nextOverall: () => hub.nextOverall(),
+            reset: () => hub.reset(),
+            clientId,
+            clientScript: () => cachedScript,
+            exchangeToken,
+            lottery,
+            lotteryScript: () => cachedLotteryScript,
+            stageKey,
+          },
+          req.headers,
+        )
           .then((reply) => {
             res.statusCode = reply.status;
             res.setHeader('Content-Type', reply.contentType);
@@ -126,22 +149,45 @@ export function startApiServer(
       });
     });
 
-    // Accept the state feed at `/api/ws`, with or without the Activity's `/.proxy` prefix; reject
-    // any other upgrade path so a stray socket can't linger.
+    // Two WS feeds share the server: `/api/ws` (draft dashboard) and `/api/lottery/ws` (the
+    // lottery-machine stage, #169), each accepted with or without the Activity's `/.proxy`
+    // prefix; any other upgrade path is rejected so a stray socket can't linger. Sockets are
+    // tagged by path at connection so each fan-out reaches only its own audience.
     const wss = new WebSocketServer({ server });
+    const boardSockets = new Set<import('ws').WebSocket>();
+    const lotterySockets = new Set<import('ws').WebSocket>();
     wss.on('connection', (socket, req) => {
       socket.on('error', () => {});
-      if (normalizePath(req.url ?? '') !== '/api/ws') {
+      const wsPath = normalizePath(req.url ?? '');
+      const pool =
+        wsPath === '/api/ws' ? boardSockets : wsPath === '/api/lottery/ws' ? lotterySockets : null;
+      if (!pool) {
         socket.close(1008, 'unknown path');
         return;
       }
-      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(envelope()));
+      pool.add(socket);
+      socket.on('close', () => pool.delete(socket));
+      // Send the current state on connect so a late joiner paints immediately.
+      if (socket.readyState === socket.OPEN) {
+        socket.send(
+          JSON.stringify(
+            pool === boardSockets
+              ? envelope()
+              : { type: 'lottery-state', snapshot: lottery.snapshot() },
+          ),
+        );
+      }
     });
-    const unsubscribe = hub.subscribe((snap) => {
-      const msg = JSON.stringify({ ...snap, updatedAt: now().toISOString() });
-      for (const client of wss.clients) {
+    const fanOut = (pool: Set<import('ws').WebSocket>, msg: string): void => {
+      for (const client of pool) {
         if (client.readyState === client.OPEN) client.send(msg);
       }
+    };
+    const unsubscribe = hub.subscribe((snap) => {
+      fanOut(boardSockets, JSON.stringify({ ...snap, updatedAt: now().toISOString() }));
+    });
+    const unsubscribeLottery = lottery.subscribe((event) => {
+      fanOut(lotterySockets, JSON.stringify(event));
     });
 
     server.once('error', reject);
@@ -154,6 +200,7 @@ export function startApiServer(
         close: () =>
           new Promise<void>((res) => {
             unsubscribe();
+            unsubscribeLottery();
             wss.close();
             server.close(() => res());
           }),

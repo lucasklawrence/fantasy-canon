@@ -15,8 +15,33 @@ import {
   resetCeremoniesForTests,
   runCeremony,
   setCeremony,
+  type RevealStage,
 } from '../draftOrderCeremony.js';
 import { createMemoryCeremonyStore, type PersistedCeremony } from '../ceremonyStore.js';
+
+/** Records every stage call as `[method, payload]`, optionally failing selected methods. */
+function collectorStage(failing: { start?: boolean } = {}): {
+  stage: RevealStage;
+  calls: [string, unknown][];
+} {
+  const calls: [string, unknown][] = [];
+  const record =
+    (method: string, fail = false) =>
+    (payload: unknown): Promise<void> => {
+      calls.push([method, payload]);
+      return fail ? Promise.reject(new Error(`${method} down`)) : Promise.resolve();
+    };
+  return {
+    calls,
+    stage: {
+      start: record('start', failing.start),
+      beat: record('beat'),
+      reveal: record('reveal'),
+      finish: record('finish'),
+      abort: record('abort'),
+    },
+  };
+}
 
 /** 12 fixture teams — last season's basement dwellers hold extra balls. */
 const TEAMS = Array.from({ length: 12 }, (_, i) => ({
@@ -329,6 +354,97 @@ describe('ceremony persistence (#176)', () => {
     const pending = store.loadPending();
     expect(pending).toHaveLength(1);
     expect(pending[0].secretSeed).toBe('s');
+  });
+});
+
+describe('activity reveal stage (#169)', () => {
+  it('streams beats to the stage instead of the channel; commitment/board/seed stay in-channel', async () => {
+    const session = makeSession();
+    const { io, posts } = collectorIo();
+    const { stage, calls } = collectorStage();
+
+    const draws = await runCeremony(session, io, {
+      delayMs: 0,
+      sleep: instantSleep,
+      seedSource: () => 'stage-secret',
+      stage,
+    });
+
+    // Channel: commitment first, then ONLY board + seed-reveal — no per-pick spam.
+    expect(posts.map((p) => p.kind)).toEqual(['commitment', 'board', 'seed-reveal']);
+
+    // Stage: start → 12×(beat, reveal) → finish, in strict order.
+    expect(calls.map(([m]) => m)).toEqual([
+      'start',
+      ...Array.from({ length: 12 }, () => ['beat', 'reveal']).flat(),
+      'finish',
+    ]);
+    const start = calls[0][1] as { commitment: string; teamCount: number; rows: unknown[] };
+    expect(start.commitment).toBe(computeCommitment('stage-secret', CONFIG));
+    expect(start.teamCount).toBe(12);
+    expect(start.rows).toHaveLength(12);
+
+    // Beats pace worst-to-first and the finish carries the full order + verify info.
+    const beatPicks = calls
+      .filter(([m]) => m === 'beat')
+      .map(([, p]) => (p as { pick: number }).pick);
+    expect(beatPicks).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    const finish = calls[calls.length - 1][1] as {
+      order: { pick: number; team: string }[];
+      verify: { secretSeed: string; salt: string; drawSeed: string; commitment: string };
+    };
+    expect(finish.order.map((o) => o.pick)).toEqual(Array.from({ length: 12 }, (_, i) => i + 1));
+    expect(finish.order.map((o) => o.team).sort()).toEqual(
+      draws
+        .map((d) => NAMES.get(d.teamId) as string)
+        .slice()
+        .sort(),
+    );
+    expect(finish.verify.secretSeed).toBe('stage-secret');
+    expect(finish.verify.salt).toBe('msg-1');
+    expect(finish.verify.drawSeed).toBe(composeDrawSeed('stage-secret', 'msg-1'));
+  });
+
+  it('falls back to the in-channel reveal when the stage cannot even start', async () => {
+    const session = makeSession();
+    const { io, posts } = collectorIo();
+    const { stage, calls } = collectorStage({ start: true });
+
+    await runCeremony(session, io, {
+      delayMs: 0,
+      sleep: instantSleep,
+      seedSource: () => 's',
+      stage,
+    });
+
+    // Only the failed start reached the stage; the channel got the full card ceremony.
+    expect(calls.map(([m]) => m)).toEqual(['start']);
+    expect(posts.filter((p) => p.kind === 'beat')).toHaveLength(12);
+    expect(posts.filter((p) => p.kind === 'reveal')).toHaveLength(12);
+    expect(session.state).toBe('FINALIZED');
+  });
+
+  it('notifies the stage on abort, after the in-channel disclosure', async () => {
+    const session = makeSession();
+    const { io, posts } = collectorIo();
+    const { stage, calls } = collectorStage();
+    let beats = 0;
+    const abortingSleep = (): Promise<void> => {
+      beats += 1;
+      if (beats === 2) requestAbort(session);
+      return Promise.resolve();
+    };
+
+    await expect(
+      runCeremony(session, io, { delayMs: 0, sleep: abortingSleep, seedSource: () => 's', stage }),
+    ).rejects.toThrow(CeremonyAborted);
+
+    expect(calls.map(([m]) => m)).toContain('abort');
+    expect(calls.map(([m]) => m)).not.toContain('finish');
+    // The channel abort disclosure still went out (ADR 0006).
+    expect(posts.some((p) => p.kind === 'abort')).toBe(true);
+    const abortPayload = calls.find(([m]) => m === 'abort')?.[1] as { reason: string };
+    expect(abortPayload.reason).toContain('aborted');
   });
 });
 

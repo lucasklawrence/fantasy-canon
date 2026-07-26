@@ -38,8 +38,12 @@ export function apiPath(base: string, route: string): string {
   return `${base}${suffix}`;
 }
 
-/** The WebSocket URL for the state feed under the given base, matching the page's ws/wss scheme. */
-export function wsUrl(loc: Pick<LocationLike, 'protocol' | 'host'>, base: string): string {
+/** The WebSocket URL for a push feed under the given base, matching the page's ws/wss scheme. */
+export function wsUrl(
+  loc: Pick<LocationLike, 'protocol' | 'host'>,
+  base: string,
+  route = '/api/ws',
+): string {
   const scheme = loc.protocol === 'https:' ? 'wss://' : 'ws://';
-  return `${scheme}${loc.host}${base}/api/ws`;
+  return `${scheme}${loc.host}${base}${route}`;
 }
