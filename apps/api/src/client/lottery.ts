@@ -166,10 +166,18 @@ function confetti(): void {
 
 /** Repaint everything from a snapshot — the late-join / reconnect path. */
 function renderSnapshot(snapshot: LotterySnapshot): void {
+  // A fresh phase repaints from scratch: hide the sections a previous run may have left visible
+  // (a re-run start after a finished/aborted ceremony must not show stale board/verify/abort).
+  if (snapshot.phase === 'idle' || snapshot.phase === 'waiting') {
+    show('board', false);
+    show('verify', false);
+    show('abort', false);
+  }
   switch (snapshot.phase) {
     case 'idle':
       setStatus('no ceremony yet');
       show('waiting', true);
+      show('stage', false);
       byId('waiting-sub').textContent = 'The commissioner has not opened the stage.';
       break;
     case 'waiting':
@@ -208,6 +216,8 @@ function applyEvent(event: LotteryEvent): void {
       renderSnapshot(event.snapshot);
       break;
     case 'lottery-start':
+      // A start (re)opens the stage — drop any previous run's reveals before repainting.
+      reveals = [];
       renderSnapshot({ phase: 'waiting', start: event.start, reveals: [] });
       break;
     case 'lottery-beat':

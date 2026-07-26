@@ -7,17 +7,7 @@
  * injected via `window.__DRAFT_CONFIG__`.
  */
 
-/** Escape a value for safe interpolation inside a `<script>` JSON island (see `board.ts`). */
-function jsonForScript(value: unknown): string {
-  const LINE_SEP = String.fromCharCode(0x2028);
-  const PARA_SEP = String.fromCharCode(0x2029);
-  return JSON.stringify(value)
-    .replace(/</g, '\\u003c')
-    .split(LINE_SEP)
-    .join('\\u2028')
-    .split(PARA_SEP)
-    .join('\\u2029');
-}
+import { jsonForScript } from './scriptIsland.js';
 
 /** The lottery-machine HTML for the given Discord application (client) id (`''` in dev). */
 export function lotteryHtml(clientId: string): string {

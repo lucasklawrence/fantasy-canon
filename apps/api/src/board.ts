@@ -11,22 +11,7 @@
  * there, falling back to the manual-entry dev board otherwise.
  */
 
-// U+2028 / U+2029 are valid JSON but illegal raw in a <script>; build them from char codes so this
-// source file stays pure ASCII.
-const LINE_SEP = String.fromCharCode(0x2028);
-const PARA_SEP = String.fromCharCode(0x2029);
-
-/** Escape a value for safe interpolation inside a `<script>` JSON island. */
-function jsonForScript(value: unknown): string {
-  // `<` (→ `</script>`) and the two line terminators are the only sequences that can break out of
-  // a script/JSON island; escape them so an injected id can never break the markup.
-  return JSON.stringify(value)
-    .replace(/</g, '\\u003c')
-    .split(LINE_SEP)
-    .join('\\u2028')
-    .split(PARA_SEP)
-    .join('\\u2029');
-}
+import { jsonForScript } from './scriptIsland.js';
 
 /** The dashboard HTML for the given Discord application (client) id (`''` in dev / standalone). */
 export function boardHtml(clientId: string): string {
