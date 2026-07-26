@@ -583,6 +583,9 @@ export async function runCeremony(
       });
     }
   }
+  // The stage that actually STARTED for this run — reset on a failed start so neither the reveal
+  // loop nor the abort path below ever notifies a stage that isn't showing this ceremony.
+  let liveStage: RevealStage | undefined;
   try {
     throwIfAborted(session);
     const committed = await io.post({ kind: 'commitment', content: commitmentContent(session) });
@@ -601,10 +604,10 @@ export async function runCeremony(
     // Open the Activity stage (#169). If it can't even start, fall back to the in-channel reveal
     // so the ceremony never stalls on a presentation surface; later transient stage failures are
     // logged and skipped (the channel board + seed reveal remain the authoritative record).
-    let stage = options.stage;
-    if (stage) {
+    liveStage = options.stage;
+    if (liveStage) {
       try {
-        await stage.start({
+        await liveStage.start({
           title: session.title,
           commitment: session.commitment,
           teamCount: session.config.teams.length,
@@ -618,10 +621,9 @@ export async function runCeremony(
           '[draftorder] stage unavailable, falling back to channel reveal:',
           stageError,
         );
-        stage = undefined;
+        liveStage = undefined;
       }
     }
-    const liveStage = stage;
     const safeStage = async (send: () => Promise<void>): Promise<void> => {
       try {
         await send();
@@ -634,12 +636,13 @@ export async function runCeremony(
     for (let pick = session.config.teams.length; pick >= 1; pick -= 1) {
       throwIfAborted(session);
       const data = revealData(session, session.draws, odds, pick);
-      if (liveStage) {
-        await safeStage(() => liveStage.beat({ pick, remaining: data.remaining }));
+      const stage = liveStage;
+      if (stage) {
+        await safeStage(() => stage.beat({ pick, remaining: data.remaining }));
         await sleep(options.delayMs, session.abort.signal);
         throwIfAborted(session);
         await safeStage(() =>
-          liveStage.reveal({
+          stage.reveal({
             pick,
             team: data.teamName,
             balls: data.balls,
@@ -691,9 +694,10 @@ export async function runCeremony(
     unpersist(options.store, session.commitment);
     // Close out the Activity stage AFTER the in-channel seed reveal, so the Activity never shows
     // the seed before the channel record does.
-    if (liveStage) {
+    const stageAtFinish = liveStage;
+    if (stageAtFinish) {
       await safeStage(() =>
-        liveStage.finish({
+        stageAtFinish.finish({
           order: (session.draws ?? [])
             .slice()
             .sort((a, b) => a.pick - b.pick)
@@ -720,11 +724,13 @@ export async function runCeremony(
         // Leave the persisted record in place: startup recovery becomes the disclosure backstop.
         console.error('[draftorder] failed to post the abort disclosure:', disclosureError);
       }
-      // Tell any Activity viewers the run ended; the full disclosure lives in-channel.
-      if (options.stage) {
-        const stageForAbort = options.stage;
+      // Tell any Activity viewers the run ended; the full disclosure lives in-channel. Only a
+      // stage that actually STARTED for this run is notified — after a start-failure fallback
+      // (`liveStage` reset) the stage isn't showing this ceremony and must not get an abort.
+      const stageAtAbort = liveStage;
+      if (stageAtAbort) {
         try {
-          await stageForAbort.abort({
+          await stageAtAbort.abort({
             reason: `${session.title} was aborted — the committed seed is disclosed in the channel.`,
           });
         } catch (stageError) {

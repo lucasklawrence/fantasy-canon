@@ -420,17 +420,30 @@ export async function handleDraftOrderBeginSubcommand(
 
   // Activity mode (#169): invite the league into the Lottery Machine before the commitment posts.
   // The reveal itself streams there; commitment, final board, and seed reveal still post here.
+  // Best-effort — a failed invite post (permissions, transient API error) must never block the
+  // ceremony itself, which the commissioner was just told is starting.
   if (stageMode === 'activity') {
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${DRAFT_ORDER_LAUNCH_ID}:${session.createdAt}`)
-        .setLabel('🎰 Open the Lottery Machine')
-        .setStyle(ButtonStyle.Primary),
-    );
-    await channel.send({
-      content: `🎰 **${session.title}** — the ball-by-ball reveal streams live in the Lottery Machine. Click to watch; the commitment, final board, and seed verification still post right here.`,
-      components: [row],
-    });
+    try {
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${DRAFT_ORDER_LAUNCH_ID}:${session.createdAt}`)
+          .setLabel('🎰 Open the Lottery Machine')
+          .setStyle(ButtonStyle.Primary),
+      );
+      await channel.send({
+        content: `🎰 **${session.title}** — the ball-by-ball reveal streams live in the Lottery Machine. Click to watch; the commitment, final board, and seed verification still post right here.`,
+        components: [row],
+      });
+    } catch (error) {
+      console.error('[draftorder] failed to post the lottery-machine launch button:', error);
+      await interaction
+        .followUp({
+          content:
+            'Could not post the Lottery Machine button — the ceremony still runs (members can open the Activity from the app launcher).',
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+    }
   }
 
   // Fire and forget: the ceremony runs on channel messages and outlives this interaction's

@@ -424,6 +424,25 @@ describe('activity reveal stage (#169)', () => {
     expect(session.state).toBe('FINALIZED');
   });
 
+  it('does NOT notify the stage on abort when its start failed (fallback ran in-channel)', async () => {
+    const session = makeSession();
+    const { io } = collectorIo();
+    const { stage, calls } = collectorStage({ start: true });
+    let beats = 0;
+    const abortingSleep = (): Promise<void> => {
+      beats += 1;
+      if (beats === 2) requestAbort(session);
+      return Promise.resolve();
+    };
+
+    await expect(
+      runCeremony(session, io, { delayMs: 0, sleep: abortingSleep, seedSource: () => 's', stage }),
+    ).rejects.toThrow(CeremonyAborted);
+
+    // The stage never showed this run — an abort ping would paint over whatever it IS showing.
+    expect(calls.map(([m]) => m)).toEqual(['start']);
+  });
+
   it('notifies the stage on abort, after the in-channel disclosure', async () => {
     const session = makeSession();
     const { io, posts } = collectorIo();
