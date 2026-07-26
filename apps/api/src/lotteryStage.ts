@@ -33,6 +33,12 @@ export interface LotteryStart {
   /** Bot's reveal pacing, so the client can size its drum-roll animation. */
   delayMs: number;
   rows: LotteryOddsRow[];
+  /**
+   * Originating guild. The single process-wide stage serves one live ceremony at a time; a
+   * different guild's `start` during a live reveal is rejected (that bot falls back to its
+   * in-channel reveal) so two ceremonies can never interleave on shared screens.
+   */
+  guildId?: string;
 }
 
 /** Drum-roll: the next pick is about to be revealed. */
@@ -92,9 +98,21 @@ export type LotteryEvent =
   | { type: 'lottery-finish'; finish: LotteryFinish }
   | { type: 'lottery-abort'; abort: LotteryAbort };
 
+/** Thrown by {@link LotteryStage.start} when another guild's reveal is currently live. */
+export class StageBusyError extends Error {
+  constructor() {
+    super('the stage is showing another live ceremony');
+    this.name = 'StageBusyError';
+  }
+}
+
 export interface LotteryStage {
   snapshot(): LotterySnapshot;
-  /** (Re)open the stage for a new ceremony — clears any previous run's state. */
+  /**
+   * (Re)open the stage for a new ceremony — clears any previous run's state. Throws
+   * {@link StageBusyError} when a *different* guild's reveal is mid-flight (see
+   * {@link LotteryStart.guildId}); finished/aborted/waiting runs may always be replaced.
+   */
   start(start: LotteryStart): void;
   beat(beat: LotteryBeat): void;
   reveal(reveal: LotteryReveal): void;
@@ -158,6 +176,7 @@ export function parseLotteryStart(body: string): Parsed<LotteryStart> {
       totalBalls: r.totalBalls,
       delayMs: r.delayMs,
       rows,
+      ...(isStr(r.guildId) ? { guildId: r.guildId } : {}),
     },
   };
 }
@@ -260,6 +279,17 @@ export function createLotteryStage(): LotteryStage {
   return {
     snapshot: () => ({ phase, start, pendingBeat, reveals: [...reveals], finish, abort }),
     start(next) {
+      // One live ceremony at a time: never let a second guild clobber an armed or mid-flight
+      // run (its bot receives the rejection and falls back to the in-channel card reveal).
+      // Finished/aborted runs always release the stage; a same-guild restart is always allowed.
+      if (
+        (phase === 'waiting' || phase === 'revealing') &&
+        start?.guildId &&
+        next.guildId &&
+        start.guildId !== next.guildId
+      ) {
+        throw new StageBusyError();
+      }
       phase = 'waiting';
       start = next;
       pendingBeat = undefined;

@@ -26,6 +26,7 @@ import {
   parseLotteryFinish,
   parseLotteryReveal,
   parseLotteryStart,
+  StageBusyError,
   type LotteryStage,
 } from './lotteryStage.js';
 import { parseTokenRequest } from './token.js';
@@ -177,7 +178,14 @@ function lotteryRoute(
     case '/api/lottery/start': {
       const parsed = parseLotteryStart(body);
       if ('error' in parsed) return json(400, { error: parsed.error });
-      deps.lottery.start(parsed.value);
+      try {
+        deps.lottery.start(parsed.value);
+      } catch (error) {
+        // Another guild's ceremony is armed/live — the caller's bot falls back to its
+        // in-channel reveal rather than interleaving two ceremonies on shared screens.
+        if (error instanceof StageBusyError) return json(409, { error: error.message });
+        throw error;
+      }
       return json(200, { ok: true });
     }
     case '/api/lottery/beat': {

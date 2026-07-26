@@ -241,6 +241,22 @@ describe('lottery routes (#169)', () => {
     expect((await routeRequest('POST', '/api/lottery/finish', '{}', d)).status).toBe(400);
   });
 
+  it("409s a second guild's start while another guild's run is live", async () => {
+    const d = deps(hub());
+    const forGuild = (guildId: string): string =>
+      JSON.stringify({ ...(JSON.parse(LOTTERY_START_BODY) as object), guildId });
+    expect((await routeRequest('POST', '/api/lottery/start', forGuild('g-a'), d)).status).toBe(200);
+    await routeRequest(
+      'POST',
+      '/api/lottery/beat',
+      JSON.stringify({ pick: 2, remaining: ['A', 'B'] }),
+      d,
+    );
+    const busy = await routeRequest('POST', '/api/lottery/start', forGuild('g-b'), d);
+    expect(busy.status).toBe(409);
+    expect(busy.body).toContain('another live ceremony');
+  });
+
   it('requires x-stage-key on POSTs when configured — state stays public', async () => {
     const d = deps(hub(), { stageKey: 'sekrit' });
     const denied = await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d);

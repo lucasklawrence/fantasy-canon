@@ -34,28 +34,30 @@ function poll(base: string): void {
     .catch(() => setStatus('backend offline', 'err'));
 }
 
+// Module-level so every reconnect attempt shares ONE fallback timer: a `connect()`-local timer
+// would be orphaned by the next reconnect closure and leak an interval per drop.
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+function startPolling(base: string): void {
+  if (!pollTimer) {
+    poll(base);
+    pollTimer = setInterval(() => poll(base), 2000);
+  }
+}
+function stopPolling(): void {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
 /** Connect the state feed: WebSocket push with a polling fallback if the socket drops. */
 function connect(base: string): void {
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  const startPolling = (): void => {
-    if (!pollTimer) {
-      poll(base);
-      pollTimer = setInterval(() => poll(base), 2000);
-    }
-  };
-  const stopPolling = (): void => {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-  };
-
   poll(base); // paint immediately, don't wait for the first push
   let ws: WebSocket;
   try {
     ws = new WebSocket(wsUrl(window.location, base));
   } catch {
-    startPolling();
+    startPolling(base);
     return;
   }
   ws.onopen = (): void => stopPolling();
@@ -67,7 +69,7 @@ function connect(base: string): void {
     }
   };
   ws.onclose = (): void => {
-    startPolling();
+    startPolling(base);
     setTimeout(() => connect(base), 3000);
   };
   ws.onerror = (): void => {

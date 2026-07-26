@@ -54,6 +54,8 @@ describe('createHttpRevealStage', () => {
     expect(JSON.parse(calls[0].init.body as string) as { title: string }).toMatchObject({
       title: 'L',
     });
+    // Every POST carries a timeout signal — a hung stage must never stall the ceremony.
+    expect(calls.every((c) => c.init.signal instanceof AbortSignal)).toBe(true);
   });
 
   it('omits the key header when no stageKey is configured', async () => {

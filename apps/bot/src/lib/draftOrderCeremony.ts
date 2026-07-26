@@ -130,6 +130,8 @@ export interface RevealStage {
     totalBalls: number;
     delayMs: number;
     rows: StageOddsRow[];
+    /** Lets the stage refuse a second guild's ceremony while another is armed/live. */
+    guildId?: string;
   }): Promise<void>;
   beat(beat: { pick: number; remaining: string[] }): Promise<void>;
   reveal(reveal: {
@@ -609,6 +611,7 @@ export async function runCeremony(
           totalBalls: totalBalls(session.config),
           delayMs: options.delayMs,
           rows: oddsRows(session),
+          guildId: session.guildId,
         });
       } catch (stageError) {
         console.error(

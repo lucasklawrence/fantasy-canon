@@ -48,19 +48,50 @@ function show(id: string, visible: boolean): void {
 
 /** The board list is rebuilt from all reveals so late joiners and live viewers converge. */
 function renderBoard(reveals: LotteryReveal[]): void {
+  const sorted = [...reveals].sort((a, b) => a.pick - b.pick);
+  paintBoardList(
+    sorted.map((r) => ({ pick: r.pick, team: r.team, reveal: r })),
+    sorted.length > 0,
+  );
+}
+
+/**
+ * The finished board comes from the authoritative `finish.order` — a transiently-dropped reveal
+ * push must not leave a hole in the final result. Per-pick meta joins from whatever reveals did
+ * arrive.
+ */
+function renderFinalBoard(order: { pick: number; team: string }[], reveals: LotteryReveal[]): void {
+  const metaByPick = new Map(reveals.map((r) => [r.pick, r]));
+  paintBoardList(
+    [...order]
+      .sort((a, b) => a.pick - b.pick)
+      .map((entry) => ({ ...entry, reveal: metaByPick.get(entry.pick) })),
+    true,
+  );
+}
+
+function paintBoardList(
+  entries: { pick: number; team: string; reveal?: LotteryReveal }[],
+  visible: boolean,
+): void {
   const list = byId('board-list');
   clear(list);
-  const sorted = [...reveals].sort((a, b) => a.pick - b.pick);
-  for (const r of sorted) {
-    const li = el('li', r.pick === 1 ? 'first' : undefined);
-    li.appendChild(el('span', 'pk', String(r.pick)));
-    li.appendChild(el('span', 'tm', r.team));
-    li.appendChild(
-      el('span', 'meta', `${r.balls} ball${r.balls === 1 ? '' : 's'} · ${r.oddsPct.toFixed(1)}%`),
-    );
+  for (const { pick, team, reveal } of entries) {
+    const li = el('li', pick === 1 ? 'first' : undefined);
+    li.appendChild(el('span', 'pk', String(pick)));
+    li.appendChild(el('span', 'tm', team));
+    if (reveal) {
+      li.appendChild(
+        el(
+          'span',
+          'meta',
+          `${reveal.balls} ball${reveal.balls === 1 ? '' : 's'} · ${reveal.oddsPct.toFixed(1)}%`,
+        ),
+      );
+    }
     list.appendChild(li);
   }
-  show('board', sorted.length > 0);
+  show('board', visible);
 }
 
 function renderWaiting(start: LotteryStart): void {
@@ -134,10 +165,18 @@ function renderDrop(reveal: LotteryReveal): void {
   byId('drum-now').textContent = `Pick #${reveal.pick}: ${reveal.team}!`;
 }
 
+// One celebration per finished ceremony — a polling client re-rendering a finished snapshot
+// every couple of seconds must not rain confetti forever.
+let celebrated = false;
+
 function renderFinish(snapshot: LotterySnapshot): void {
   show('waiting', false);
   show('stage', false);
-  renderBoard(snapshot.reveals);
+  if (snapshot.finish) {
+    renderFinalBoard(snapshot.finish.order, snapshot.reveals);
+  } else {
+    renderBoard(snapshot.reveals);
+  }
   show('board', true);
   const verify = snapshot.finish?.verify;
   if (verify) {
@@ -148,7 +187,10 @@ function renderFinish(snapshot: LotterySnapshot): void {
     show('verify', true);
   }
   setStatus('final order sealed', 'live');
-  confetti();
+  if (!celebrated) {
+    celebrated = true;
+    confetti();
+  }
 }
 
 function confetti(): void {
@@ -167,11 +209,13 @@ function confetti(): void {
 /** Repaint everything from a snapshot — the late-join / reconnect path. */
 function renderSnapshot(snapshot: LotterySnapshot): void {
   // A fresh phase repaints from scratch: hide the sections a previous run may have left visible
-  // (a re-run start after a finished/aborted ceremony must not show stale board/verify/abort).
+  // (a re-run start after a finished/aborted ceremony must not show stale board/verify/abort),
+  // and re-arm the one-shot celebration.
   if (snapshot.phase === 'idle' || snapshot.phase === 'waiting') {
     show('board', false);
     show('verify', false);
     show('abort', false);
+    celebrated = false;
   }
   switch (snapshot.phase) {
     case 'idle':
@@ -251,27 +295,29 @@ function poll(base: string): void {
     .catch(() => setStatus('backend offline', 'err'));
 }
 
-function connect(base: string): void {
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  const startPolling = (): void => {
-    if (!pollTimer) {
-      poll(base);
-      pollTimer = setInterval(() => poll(base), 2000);
-    }
-  };
-  const stopPolling = (): void => {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-  };
+// Module-level so every reconnect attempt shares ONE fallback timer: a `connect()`-local timer
+// would be orphaned by the next reconnect closure and leak an interval per drop.
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+function startPolling(base: string): void {
+  if (!pollTimer) {
+    poll(base);
+    pollTimer = setInterval(() => poll(base), 2000);
+  }
+}
+function stopPolling(): void {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
 
+function connect(base: string): void {
   poll(base); // paint immediately from the current snapshot
   let ws: WebSocket;
   try {
     ws = new WebSocket(wsUrl(window.location, base, '/api/lottery/ws'));
   } catch {
-    startPolling();
+    startPolling(base);
     return;
   }
   ws.onopen = (): void => stopPolling();
@@ -285,7 +331,7 @@ function connect(base: string): void {
     }
   };
   ws.onclose = (): void => {
-    startPolling();
+    startPolling(base);
     setTimeout(() => connect(base), 3000);
   };
   ws.onerror = (): void => {

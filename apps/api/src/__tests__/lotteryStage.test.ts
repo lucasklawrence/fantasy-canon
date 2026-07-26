@@ -66,6 +66,21 @@ describe('createLotteryStage', () => {
     expect(snap.pendingBeat?.pick).toBe(2);
   });
 
+  it('refuses a second guild while a run is armed or live, releases after finish/abort', () => {
+    const stage = createLotteryStage();
+    stage.start({ ...START, guildId: 'guild-a' });
+    // Armed (waiting): another guild is refused; the same guild may restart.
+    expect(() => stage.start({ ...START, guildId: 'guild-b' })).toThrow('another live ceremony');
+    expect(() => stage.start({ ...START, guildId: 'guild-a' })).not.toThrow();
+
+    stage.beat({ pick: 3, remaining: ['A', 'B', 'C'] });
+    expect(() => stage.start({ ...START, guildId: 'guild-b' })).toThrow('another live ceremony');
+
+    stage.abort({ reason: 'done' });
+    expect(() => stage.start({ ...START, guildId: 'guild-b' })).not.toThrow();
+    expect(stage.snapshot().start?.guildId).toBe('guild-b');
+  });
+
   it('a new start clears the previous run entirely', () => {
     const stage = createLotteryStage();
     stage.start(START);

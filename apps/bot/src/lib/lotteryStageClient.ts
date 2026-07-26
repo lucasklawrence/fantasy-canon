@@ -18,10 +18,20 @@ export interface HttpRevealStageOptions {
   stageKey?: string;
   /** Injected for tests; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
+  /** Per-request timeout — a hung stage must never stall the authoritative ceremony. */
+  timeoutMs?: number;
 }
 
+/** Default per-POST timeout: generous for a beat, tiny next to the reveal pacing. */
+export const DEFAULT_STAGE_TIMEOUT_MS = 5000;
+
 export function createHttpRevealStage(options: HttpRevealStageOptions): RevealStage {
-  const { baseUrl, stageKey = '', fetchImpl = fetch } = options;
+  const {
+    baseUrl,
+    stageKey = '',
+    fetchImpl = fetch,
+    timeoutMs = DEFAULT_STAGE_TIMEOUT_MS,
+  } = options;
   const base = baseUrl.replace(/\/+$/, '');
 
   async function post(route: string, payload: unknown): Promise<void> {
@@ -32,6 +42,9 @@ export function createHttpRevealStage(options: HttpRevealStageOptions): RevealSt
         ...(stageKey ? { 'x-stage-key': stageKey } : {}),
       },
       body: JSON.stringify(payload),
+      // Bounded: if the stage accepts the connection but hangs, the ceremony's safeStage wrapper
+      // gets a rejection to skip past instead of `runCeremony` stalling on presentation.
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
