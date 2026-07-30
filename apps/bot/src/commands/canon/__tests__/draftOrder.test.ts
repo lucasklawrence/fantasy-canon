@@ -31,6 +31,10 @@ import {
 } from '../draftOrder.js';
 import type { ButtonInteraction } from 'discord.js';
 import { createMemoryCeremonyStore, type PersistedCeremony } from '../../../lib/ceremonyStore.js';
+import type {
+  InspectableRevealStage,
+  StageStateSnapshot,
+} from '../../../lib/lotteryStageClient.js';
 import type { Client } from 'discord.js';
 
 interface ChannelPost {
@@ -529,6 +533,38 @@ describe('recoverInterruptedCeremonies (#176)', () => {
     return { channels: { fetch: (id: string) => fetch(id) } } as unknown as Client;
   }
 
+  /** An inspectable stage double for the #205 reconcile pass — records clears and aborts. */
+  function fakeStage(snapshot: StageStateSnapshot | Error = { phase: 'idle' }): {
+    stage: InspectableRevealStage;
+    cleared: { guildId?: string }[];
+    aborted: { reason: string }[];
+    stateCalls: () => number;
+  } {
+    const cleared: { guildId?: string }[] = [];
+    const aborted: { reason: string }[] = [];
+    let stateCalls = 0;
+    const stage: InspectableRevealStage = {
+      state: () => {
+        stateCalls += 1;
+        return snapshot instanceof Error ? Promise.reject(snapshot) : Promise.resolve(snapshot);
+      },
+      lobby: () => Promise.resolve(),
+      clear: (c) => {
+        cleared.push(c);
+        return Promise.resolve();
+      },
+      start: () => Promise.resolve(),
+      beat: () => Promise.resolve(),
+      reveal: () => Promise.resolve(),
+      finish: () => Promise.resolve(),
+      abort: (a) => {
+        aborted.push(a);
+        return Promise.resolve();
+      },
+    };
+    return { stage, cleared, aborted, stateCalls: () => stateCalls };
+  }
+
   it('discloses the seed to the origin channel and clears the record', async () => {
     const store = createMemoryCeremonyStore();
     store.saveCommitted(pendingRecord());
@@ -546,7 +582,7 @@ describe('recoverInterruptedCeremonies (#176)', () => {
       return Promise.resolve(channel);
     });
 
-    await recoverInterruptedCeremonies(client, store);
+    await recoverInterruptedCeremonies(client, store, fakeStage().stage);
 
     expect(fetched).toEqual(['chan-1']);
     expect(sent).toHaveLength(1);
@@ -560,7 +596,7 @@ describe('recoverInterruptedCeremonies (#176)', () => {
     store.saveCommitted(pendingRecord());
     const client = fakeClient(() => Promise.resolve(null));
 
-    await recoverInterruptedCeremonies(client, store);
+    await recoverInterruptedCeremonies(client, store, fakeStage().stage);
 
     expect(store.loadPending()).toHaveLength(1);
   });
@@ -574,7 +610,7 @@ describe('recoverInterruptedCeremonies (#176)', () => {
     };
     const client = fakeClient(() => Promise.resolve(channel));
 
-    await recoverInterruptedCeremonies(client, store);
+    await recoverInterruptedCeremonies(client, store, fakeStage().stage);
 
     expect(store.loadPending()).toHaveLength(1);
   });
@@ -617,9 +653,96 @@ describe('recoverInterruptedCeremonies (#176)', () => {
       }),
     );
 
-    await recoverInterruptedCeremonies(client, store);
+    const stranded = fakeStage({ phase: 'revealing', start: { commitment: 'the-hash' } });
+    await recoverInterruptedCeremonies(client, store, stranded.stage);
 
     expect(sent).toBe(0);
     expect(store.loadPending()).toHaveLength(1);
+    // The live in-memory ceremony also blocks the #205 stage reconcile — nothing is inspected
+    // or torn down while this process could legitimately be pacing the stage.
+    expect(stranded.stateCalls()).toBe(0);
+    expect(stranded.aborted).toHaveLength(0);
+  });
+
+  it('clears an orphaned lobby at boot, scoped to the guild the snapshot reports (#205)', async () => {
+    const { stage, cleared, aborted } = fakeStage({ phase: 'lobby', lobby: { guildId: 'g-lob' } });
+    await recoverInterruptedCeremonies(
+      fakeClient(() => Promise.resolve(null)),
+      createMemoryCeremonyStore(),
+      stage,
+    );
+
+    expect(cleared).toEqual([{ guildId: 'g-lob' }]);
+    expect(aborted).toHaveLength(0);
+  });
+
+  it('aborts a stranded reveal whose seed this pass just disclosed, and says so (#205)', async () => {
+    const store = createMemoryCeremonyStore();
+    store.saveCommitted(pendingRecord()); // commitment 'the-hash'
+    const channel = {
+      isSendable: () => true,
+      send: () => Promise.resolve({ id: 'x' }),
+    };
+    const { stage, aborted, cleared } = fakeStage({
+      phase: 'revealing',
+      start: { commitment: 'the-hash', guildId: 'guild-1' },
+    });
+
+    await recoverInterruptedCeremonies(
+      fakeClient(() => Promise.resolve(channel)),
+      store,
+      stage,
+    );
+
+    expect(cleared).toHaveLength(0);
+    expect(aborted).toHaveLength(1);
+    expect(aborted[0].reason).toContain('just disclosed');
+  });
+
+  it('aborts a stranded run with the generic reason when no record matched (#205)', async () => {
+    const { stage, aborted } = fakeStage({
+      phase: 'waiting',
+      start: { commitment: 'unknown-hash' },
+    });
+    await recoverInterruptedCeremonies(
+      fakeClient(() => Promise.resolve(null)),
+      createMemoryCeremonyStore(),
+      stage,
+    );
+
+    expect(aborted).toHaveLength(1);
+    expect(aborted[0].reason).toContain('cannot continue');
+  });
+
+  it('leaves idle and terminal stage phases untouched (#205)', async () => {
+    for (const phase of ['idle', 'finished', 'aborted']) {
+      const { stage, cleared, aborted } = fakeStage({ phase });
+      await recoverInterruptedCeremonies(
+        fakeClient(() => Promise.resolve(null)),
+        createMemoryCeremonyStore(),
+        stage,
+      );
+      expect(cleared).toHaveLength(0);
+      expect(aborted).toHaveLength(0);
+    }
+  });
+
+  it('survives an unreachable stage at boot — disclosure still completes (#205)', async () => {
+    const store = createMemoryCeremonyStore();
+    store.saveCommitted(pendingRecord());
+    const channel = {
+      isSendable: () => true,
+      send: () => Promise.resolve({ id: 'x' }),
+    };
+    const down = fakeStage(new Error('ECONNREFUSED'));
+
+    await expect(
+      recoverInterruptedCeremonies(
+        fakeClient(() => Promise.resolve(channel)),
+        store,
+        down.stage,
+      ),
+    ).resolves.toBeUndefined();
+    expect(store.loadPending()).toEqual([]); // the seed still went out
   });
 });

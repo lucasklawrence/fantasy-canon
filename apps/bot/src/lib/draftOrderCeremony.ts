@@ -204,6 +204,18 @@ export function resetCeremoniesForTests(): void {
 }
 
 /**
+ * Whether any guild's ceremony is currently mid-reveal. The boot reconciler (#205) uses this as
+ * its safety interlock: it only tears down what's on the Activity stage when nothing in this
+ * process could legitimately be pacing it.
+ */
+export function hasRunningCeremony(): boolean {
+  for (const session of sessions.values()) {
+    if (session.state === 'LOTTERY_RUNNING') return true;
+  }
+  return false;
+}
+
+/**
  * Create a session in `CREATED`. Validates the config eagerly (duplicate teams, empty bag,
  * odds-DP team cap) so setup fails fast instead of mid-ceremony.
  */

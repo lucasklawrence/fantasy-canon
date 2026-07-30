@@ -38,6 +38,7 @@ import {
   clearCeremony,
   createCeremony,
   getCeremony,
+  hasRunningCeremony,
   interruptedDisclosureContent,
   markPreviewPosted,
   oddsRows,
@@ -46,7 +47,7 @@ import {
   setCeremony,
 } from '../../lib/draftOrderCeremony.js';
 import { createFileCeremonyStore, type CeremonyStore } from '../../lib/ceremonyStore.js';
-import { stageFromEnv } from '../../lib/lotteryStageClient.js';
+import { stageFromEnv, type InspectableRevealStage } from '../../lib/lotteryStageClient.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
@@ -738,11 +739,21 @@ export async function handleDraftOrderHypeSubcommand(
  *
  * Best-effort per record: a transient channel-fetch failure leaves the record for the next startup
  * (so an undisclosed seed is never silently dropped); a successful post clears it.
+ *
+ * Then reconcile the Activity stage (#205). Sessions live only in this process's memory, so after
+ * a restart nothing on the stage can still have a pacer: an armed lobby is disarmed (guild-scoped
+ * `clear`, from the snapshot's own guild) and a stranded `waiting`/`revealing` run is aborted so
+ * viewers see the banner instead of a frozen drum-roll — with the reason pointing at the seed
+ * disclosure when this pass just posted one. Assumes the single-bot deployment (this process is
+ * the only pacer; multi-tenant partitioning is #191). Skipped entirely while any in-memory
+ * ceremony is mid-reveal, so a test or late call can never tear down a live run.
  */
 export async function recoverInterruptedCeremonies(
   client: Client,
   store: CeremonyStore = createFileCeremonyStore(),
+  stage: InspectableRevealStage = stageFromEnv(),
 ): Promise<void> {
+  const disclosed = new Set<string>();
   for (const record of store.loadPending()) {
     // Never disclose over a ceremony that's live in memory for this guild.
     if (getCeremony(record.guildId)?.state === 'LOTTERY_RUNNING') continue;
@@ -760,11 +771,48 @@ export async function recoverInterruptedCeremonies(
       // Remove by commitment (not guild): a newer run for the same guild has a different key, so
       // this can never clobber a still-undisclosed record.
       store.remove(record.commitment);
+      disclosed.add(record.commitment);
       console.log(
         `[draftorder] disclosed interrupted ceremony seed (commitment ${record.commitment.slice(0, 12)}…)`,
       );
     } catch (error) {
       console.error('[draftorder] failed to disclose an interrupted ceremony:', error);
     }
+  }
+  await reconcileStage(stage, disclosed);
+}
+
+/**
+ * The #205 stage-reconciliation pass — see {@link recoverInterruptedCeremonies}. Best-effort as a
+ * whole: an unreachable api at boot just logs (its in-memory stage will have restarted empty by
+ * the time it's back, or the next bot boot sweeps it).
+ */
+async function reconcileStage(
+  stage: InspectableRevealStage,
+  disclosed: Set<string>,
+): Promise<void> {
+  if (hasRunningCeremony()) return;
+  try {
+    const snapshot = await stage.state();
+    if (snapshot.phase === 'lobby') {
+      // Targeted disarm via the existing lobby-only, guild-scoped route — never touches a
+      // committed run even if a race arms one between the GET and this POST.
+      await stage.clear({
+        ...(snapshot.lobby?.guildId ? { guildId: snapshot.lobby.guildId } : {}),
+      });
+      console.log('[draftorder] cleared an orphaned Activity lobby left from before the restart');
+    } else if (snapshot.phase === 'waiting' || snapshot.phase === 'revealing') {
+      const seedPosted = !!snapshot.start?.commitment && disclosed.has(snapshot.start.commitment);
+      await stage.abort({
+        reason: seedPosted
+          ? 'The bot restarted mid-reveal. The secret seed was just disclosed in the channel — verify the commitment there, then re-run setup for a fresh ceremony.'
+          : 'The bot restarted mid-reveal, so this ceremony cannot continue. Check the channel for the disclosure, then re-run setup for a fresh ceremony.',
+      });
+      console.log(
+        `[draftorder] aborted a stranded Activity reveal (commitment ${snapshot.start?.commitment?.slice(0, 12) ?? 'unknown'}…)`,
+      );
+    }
+  } catch (error) {
+    console.error('[draftorder] failed to reconcile the Activity stage at startup:', error);
   }
 }

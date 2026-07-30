@@ -386,10 +386,11 @@ export function createLotteryStage(): LotteryStage {
       //
       // Known trade-off: this also removes the accidental self-healing a laxer check gave us. If
       // the stage is stranded mid-reveal (the bot died between `start` and `finish`, so no
-      // `finish`/`abort` ever arrives), every later `setup` now 409s and the lobby stays
-      // unavailable until the api restarts — where before, a same-guild lobby would have re-armed
-      // over it. Recovering that properly needs stage-side reconciliation (a TTL, or the bot
-      // reconciling at startup), not a weaker guard here.
+      // `finish`/`abort` ever arrives), every later `setup` 409s until the run is torn down. The
+      // bot's boot reconciler (#205, `recoverInterruptedCeremonies`) owns that recovery: at
+      // startup it aborts a stranded run and clears an orphaned lobby, since nothing on the
+      // stage can still have a pacer once the bot's in-memory sessions are gone. A stage-side
+      // TTL fallback (heals even if no bot ever returns) is deliberately deferred to #191.
       if (phase === 'waiting' || phase === 'revealing') {
         throw new StageBusyError();
       }
