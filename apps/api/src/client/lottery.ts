@@ -515,6 +515,18 @@ function stopPlayback(options: { keepPull?: boolean } = {}): void {
   if (!options.keepPull) cancelPull();
 }
 
+/**
+ * Cancelling a catch-up abandons its queue, but those queued reveals are *published* picks the
+ * viewer is entitled to see. Fold them into the board so a cancel (an abort, most importantly)
+ * leaves the full published order on screen rather than the truncated prefix the catch-up had
+ * animated so far. The polling path repaints wholesale and doesn't need this; the WS path does.
+ */
+function flushCatchUpRevealsIntoBoard(): void {
+  for (const step of pendingSteps) {
+    if (step.event.type === 'lottery-reveal') reveals.push(step.event.reveal);
+  }
+}
+
 /** Queue a live event onto the tail of a running catch-up, at the compressed cadence. */
 function bufferCatchUpEvent(event: LotteryEvent): void {
   switch (event.type) {
@@ -699,6 +711,10 @@ function applyEvent(event: LotteryEvent): void {
       // are the *only* signal that `waiting` became `revealing` — without this the catch-up offer
       // would never appear for anyone except a strict mid-ceremony joiner.
       livePhase = 'revealing';
+      // Keep the "a draw is running ⇒ no sealed result in hand" invariant local to this path
+      // rather than resting on `lottery-start` having arrived first: a stale `finishedSnapshot`
+      // would route this button's click into a replay of the *previous* lottery.
+      finishedSnapshot = null;
       setStatus('live reveal', 'live');
       renderDrum(event.beat.pick, event.beat.remaining);
       break;
@@ -797,7 +813,9 @@ function connect(base: string): void {
           }
           return;
         }
-        stopPlayback(); // cancel: aborted, or a different ceremony
+        // cancel: aborted, or a different ceremony. Keep the picks we had already queued.
+        flushCatchUpRevealsIntoBoard();
+        stopPlayback();
       } else if (playbackMode === 'replay') {
         if (isReplayEcho(event)) return; // same finished ceremony — the replay runs on
         stopPlayback(); // anything else is real news, and live events win

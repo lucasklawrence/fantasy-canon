@@ -346,11 +346,22 @@ describe('catch-up stale vs different-run disambiguation (#203)', () => {
     ).toBe('ignore');
   });
 
-  it('still cancels a shorter snapshot when identity cannot be established', () => {
+  it('cancels a shorter snapshot that carries no start to identify it', () => {
+    // Half-identified: we know our own commitment, but the snapshot has nothing to compare it to.
+    // Identity is unproven, so the conservative branch must win.
     expect(
       classifyDuringCatchUp(
         { type: 'lottery-state', snapshot: { phase: 'revealing', reveals: REVEALS.slice(0, 1) } },
-        { known: 3 },
+        { known: 3, commitment: 'hash' },
+      ),
+    ).toBe('cancel');
+  });
+
+  it('cancels a shorter snapshot when we never recorded a commitment of our own', () => {
+    expect(
+      classifyDuringCatchUp(
+        { type: 'lottery-state', snapshot: { phase: 'revealing', start: START, reveals: [] } },
+        { known: 2 },
       ),
     ).toBe('cancel');
   });
