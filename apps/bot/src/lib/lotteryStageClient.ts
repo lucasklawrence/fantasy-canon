@@ -53,6 +53,8 @@ export function createHttpRevealStage(options: HttpRevealStageOptions): RevealSt
   }
 
   return {
+    lobby: (lobby) => post('/api/lottery/lobby', lobby),
+    clear: (clear) => post('/api/lottery/clear', clear),
     start: (start) => post('/api/lottery/start', start),
     beat: (beat) => post('/api/lottery/beat', beat),
     reveal: (reveal) => post('/api/lottery/reveal', reveal),

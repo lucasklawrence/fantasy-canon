@@ -34,6 +34,8 @@ function collectorStage(failing: { start?: boolean } = {}): {
   return {
     calls,
     stage: {
+      lobby: record('lobby'),
+      clear: record('clear'),
       start: record('start', failing.start),
       beat: record('beat'),
       reveal: record('reveal'),
@@ -483,8 +485,11 @@ describe('activity reveal stage (#169)', () => {
       stage,
     });
 
-    // Only the failed start reached the stage; the channel got the full card ceremony.
-    expect(calls.map(([m]) => m)).toEqual(['start']);
+    // The failed start, then a `clear` (#198) — the channel got the full card ceremony, so a lobby
+    // left armed by `setup` must not keep advertising a draw that already happened. No beats or
+    // reveals reach a stage that never opened.
+    expect(calls.map(([m]) => m)).toEqual(['start', 'clear']);
+    expect(calls.find(([m]) => m === 'clear')?.[1]).toEqual({ guildId: 'guild-1' });
     expect(posts.filter((p) => p.kind === 'beat')).toHaveLength(12);
     expect(posts.filter((p) => p.kind === 'reveal')).toHaveLength(12);
     expect(session.state).toBe('FINALIZED');
@@ -505,8 +510,13 @@ describe('activity reveal stage (#169)', () => {
       runCeremony(session, io, { delayMs: 0, sleep: abortingSleep, seedSource: () => 's', stage }),
     ).rejects.toThrow(CeremonyAborted);
 
-    // The stage never showed this run — an abort ping would paint over whatever it IS showing.
-    expect(calls.map(([m]) => m)).toEqual(['start']);
+    // The stage never showed this run, so it must NOT get an abort — that would paint over
+    // whatever it IS showing. It does get a guild-scoped `clear` (#198), which is a server-side
+    // no-op unless this guild's own pre-commitment lobby is still armed, so it cannot disturb
+    // another guild's live ceremony (the usual reason `start` failed with a 409).
+    expect(calls.map(([m]) => m)).toEqual(['start', 'clear']);
+    expect(calls.map(([m]) => m)).not.toContain('abort');
+    expect(calls.find(([m]) => m === 'clear')?.[1]).toEqual({ guildId: 'guild-1' });
   });
 
   it('notifies the stage on abort, after the in-channel disclosure', async () => {

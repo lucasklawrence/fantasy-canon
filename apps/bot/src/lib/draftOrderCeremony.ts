@@ -132,6 +132,25 @@ export interface StageOddsRow {
  * `/api/lottery/*` payloads.
  */
 export interface RevealStage {
+  /**
+   * Arm the pre-commitment lobby (#198) — visible from `setup` onward so members can join
+   * the Activity before `begin` is called. Must be called best-effort (never awaited on the
+   * hot path). Rejects once a commitment exists (the stage refuses to blank a committed run).
+   */
+  lobby(lobby: {
+    title: string;
+    teamCount: number;
+    totalBalls: number;
+    rows: StageOddsRow[];
+    guildId?: string;
+  }): Promise<void>;
+  /**
+   * Disarm the lobby (#198), returning the stage to idle. Must be called on every path that
+   * abandons an armed lobby without a reveal behind it — otherwise it lingers on members'
+   * screens and shadows the draft dashboard at the Activity root. A no-op server-side unless a
+   * matching lobby is armed, so it is always safe to fire.
+   */
+  clear(clear: { guildId?: string }): Promise<void>;
   start(start: {
     title: string;
     commitment: string;
@@ -730,6 +749,12 @@ export async function runCeremony(
           },
         }),
       );
+    } else if (options.stage) {
+      // Activity mode whose `start` failed: the reveal ran in-channel and the order is now public,
+      // but the lobby `setup` armed (#198) may still be up — advertising pre-draw odds for a draw
+      // that already happened, and shadowing the draft dashboard at the Activity root. Disarm it.
+      // Guild-scoped and lobby-only, so it cannot disturb whatever made `start` fail.
+      await safeStage(() => (options.stage as RevealStage).clear({ guildId: session.guildId }));
     }
     return session.draws;
   } catch (error) {
@@ -755,6 +780,15 @@ export async function runCeremony(
           });
         } catch (stageError) {
           console.error('[draftorder] failed to notify the stage of the abort:', stageError);
+        }
+      } else if (options.stage) {
+        // The stage never started for this run (start failed, or we died before reaching it), so it
+        // must not get an abort — but it may still be holding the lobby `setup` armed (#198). Left
+        // alone that lobby would advertise a ceremony that just died, so disarm it instead.
+        try {
+          await options.stage.clear({ guildId: session.guildId });
+        } catch (stageError) {
+          console.error('[draftorder] failed to disarm the Activity lobby on abort:', stageError);
         }
       }
     }

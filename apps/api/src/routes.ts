@@ -23,7 +23,9 @@ import { lotteryHtml } from './lotteryPage.js';
 import {
   parseLotteryAbort,
   parseLotteryBeat,
+  parseLotteryClear,
   parseLotteryFinish,
+  parseLotteryLobby,
   parseLotteryReveal,
   parseLotteryStart,
   StageBusyError,
@@ -157,6 +159,8 @@ export async function routeRequest(
  * `/api/lottery/*` — the bot-paced reveal stage (#169).
  *
  *   GET  /api/lottery/state   → {@link LotterySnapshot} (public — it's the shared presentation)
+ *   POST /api/lottery/lobby   → arm the pre-commitment lobby from setup onward (#198, bot only)
+ *   POST /api/lottery/clear   → disarm that lobby, back to idle (#198, bot only)
  *   POST /api/lottery/start   → open the stage (bot only)
  *   POST /api/lottery/beat    → drum-roll for the next pick (bot only)
  *   POST /api/lottery/reveal  → the ball drop (bot only)
@@ -186,6 +190,25 @@ function lotteryRoute(
   }
 
   switch (path) {
+    case '/api/lottery/lobby': {
+      const parsed = parseLotteryLobby(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      try {
+        deps.lottery.lobby(parsed.value);
+      } catch (error) {
+        if (error instanceof StageBusyError) return json(409, { error: error.message });
+        throw error;
+      }
+      return json(200, { ok: true });
+    }
+    case '/api/lottery/clear': {
+      const parsed = parseLotteryClear(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      // Idempotent no-op unless an armed lobby matches — never rejects, so the bot's cleanup
+      // paths can fire it blindly.
+      deps.lottery.clear(parsed.value);
+      return json(200, { ok: true });
+    }
     case '/api/lottery/start': {
       const parsed = parseLotteryStart(body);
       if ('error' in parsed) return json(400, { error: parsed.error });

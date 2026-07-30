@@ -14,6 +14,7 @@
 import type {
   LotteryEvent,
   LotteryFinish,
+  LotteryLobby,
   LotteryReveal,
   LotterySnapshot,
   LotteryStart,
@@ -97,20 +98,18 @@ function paintBoardList(
   show('board', visible);
 }
 
-function renderWaiting(start: LotteryStart): void {
-  currentStart = start; // remembered for pull scheduling (delayMs) across later phases
-  byId('title').textContent = start.title;
-  byId('waiting-sub').textContent =
-    `${start.teamCount} teams · ${start.totalBalls} balls in the hopper`;
-  byId('commit').textContent = `commitment ${start.commitment.slice(0, 16)}…`;
+/** The odds table + hopper fill, shared by the lobby (#198) and the committed waiting room. */
+function renderOddsTable(
+  oddsRows: { team: string; balls: number; firstPct: number; top3Pct: number }[],
+  totalBalls: number,
+): void {
   const rows = byId('odds-rows');
   clear(rows);
-  const maxBalls = Math.max(...start.rows.map((r) => r.balls), 1);
-  for (const row of start.rows) {
+  const maxBalls = Math.max(...oddsRows.map((r) => r.balls), 1);
+  for (const row of oddsRows) {
     const tr = el('tr');
     tr.appendChild(el('td', undefined, row.team));
-    const balls = el('td', 'num', String(row.balls));
-    tr.appendChild(balls);
+    tr.appendChild(el('td', 'num', String(row.balls)));
     const barCell = el('td');
     const bar = el('span', 'ballbar');
     bar.style.width = `${Math.max(8, Math.round((row.balls / maxBalls) * 90))}px`;
@@ -120,7 +119,28 @@ function renderWaiting(start: LotteryStart): void {
     tr.appendChild(el('td', 'num', `${row.top3Pct.toFixed(1)}%`));
     rows.appendChild(tr);
   }
-  fillHopper(start.totalBalls);
+  fillHopper(totalBalls);
+}
+
+/**
+ * Pre-commitment lobby (#198): odds visible before the draw begins. Shows a placeholder in the
+ * commit slot instead of the hash (which doesn't exist yet).
+ */
+function renderLobby(lobby: LotteryLobby): void {
+  byId('title').textContent = lobby.title;
+  byId('waiting-sub').textContent =
+    `${lobby.teamCount} teams · ${lobby.totalBalls} balls in the hopper`;
+  byId('commit').textContent = 'Commissioner will begin the draw soon…';
+  renderOddsTable(lobby.rows, lobby.totalBalls);
+}
+
+function renderWaiting(start: LotteryStart): void {
+  currentStart = start; // remembered for pull scheduling (delayMs) across later phases
+  byId('title').textContent = start.title;
+  byId('waiting-sub').textContent =
+    `${start.teamCount} teams · ${start.totalBalls} balls in the hopper`;
+  byId('commit').textContent = `commitment ${start.commitment.slice(0, 16)}…`;
+  renderOddsTable(start.rows, start.totalBalls);
 }
 
 /** Cosmetic only — ball positions/timings are random because they represent nothing. */
@@ -407,7 +427,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
   // A fresh phase repaints from scratch: hide the sections a previous run may have left visible
   // (a re-run start after a finished/aborted ceremony must not show stale board/verify/abort),
   // and re-arm the one-shot celebration.
-  if (snapshot.phase === 'idle' || snapshot.phase === 'waiting') {
+  if (snapshot.phase === 'idle' || snapshot.phase === 'lobby' || snapshot.phase === 'waiting') {
     show('board', false);
     show('verify', false);
     show('abort', false);
@@ -425,6 +445,23 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       show('waiting', true);
       show('stage', false);
       byId('waiting-sub').textContent = 'The commissioner has not opened the stage.';
+      // Wipe anything a previous phase painted. This matters more now that a lobby can be armed
+      // days before the draw (#198): an api restart, or a `clear` after a cancelled setup, drops
+      // an open iframe back to idle, and a leftover odds table under "not opened yet" reads as a
+      // live ceremony that no longer exists.
+      byId('title').textContent = 'The Lottery Machine';
+      byId('commit').textContent = '';
+      clear(byId('odds-rows'));
+      // Only the decorative balls — `#suck-ball` is static markup the pull animation needs, and
+      // `byId` throws if it's gone (same reason `fillHopper` removes selectively).
+      for (const stale of [...byId('hopper').querySelectorAll('.ball')]) stale.remove();
+      break;
+    case 'lobby':
+      // Pre-commitment lobby (#198): show odds without the commitment hash.
+      if (snapshot.lobby) renderLobby(snapshot.lobby);
+      setStatus('setup complete — draw pending', 'live');
+      show('waiting', true);
+      show('stage', false);
       break;
     case 'waiting':
       if (snapshot.start) renderWaiting(snapshot.start);
@@ -461,6 +498,11 @@ function applyEvent(event: LotteryEvent): void {
   switch (event.type) {
     case 'lottery-state':
       renderSnapshot(event.snapshot);
+      break;
+    case 'lottery-lobby':
+      // Pre-commitment lobby (#198): arm the waiting room from setup onward.
+      reveals = [];
+      renderSnapshot({ phase: 'lobby', lobby: event.lobby, reveals: [] });
       break;
     case 'lottery-start':
       // A start (re)opens the stage — drop any previous run's reveals before repainting.
