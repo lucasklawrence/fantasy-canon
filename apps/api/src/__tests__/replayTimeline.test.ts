@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildReplayTimeline,
+  catchUpTailFromSnapshot,
+  classifyDuringCatchUp,
   REPLAY_DWELL_MS,
   REPLAY_MAX_STEP_MS,
   replayStepMs,
 } from '../client/replayTimeline.js';
-import type { LotteryReveal, LotterySnapshot, LotteryStart } from '../lotteryStage.js';
+import type {
+  LotteryFinish,
+  LotteryReveal,
+  LotterySnapshot,
+  LotteryStart,
+} from '../lotteryStage.js';
 
 const START: LotteryStart = {
   title: '2026 Draft Lottery',
@@ -110,5 +117,117 @@ describe('buildReplayTimeline', () => {
 
   it('builds an empty timeline from an empty snapshot (nothing to replay)', () => {
     expect(buildReplayTimeline({ phase: 'idle', reveals: [] })).toEqual([]);
+  });
+});
+
+const FINISH: LotteryFinish = FINISHED.finish as LotteryFinish;
+/** The catch-up has played the first pick and nothing else. */
+const MID: { known: number } = { known: 1 };
+
+describe('classifyDuringCatchUp (#203)', () => {
+  it('buffers the ceremony own beats and reveals instead of cancelling', () => {
+    // The whole point: the old live-wins rule cancelled on the first live beat, which made a
+    // mid-reveal catch-up impossible. These extend the tail.
+    expect(
+      classifyDuringCatchUp(
+        { type: 'lottery-beat', beat: { pick: 2, remaining: ['A', 'C'] } },
+        MID,
+      ),
+    ).toBe('buffer');
+    expect(classifyDuringCatchUp({ type: 'lottery-reveal', reveal: REVEALS[1] }, MID)).toBe(
+      'buffer',
+    );
+  });
+
+  it('buffers a finish so the catch-up plays through to the finale, not a jump cut', () => {
+    expect(classifyDuringCatchUp({ type: 'lottery-finish', finish: FINISH }, MID)).toBe('buffer');
+  });
+
+  it('ignores a re-broadcast of a finish it already queued', () => {
+    expect(
+      classifyDuringCatchUp({ type: 'lottery-finish', finish: FINISH }, { ...MID, finish: FINISH }),
+    ).toBe('ignore');
+  });
+
+  it('cancels on an abort — never keep animating a draw that was thrown out', () => {
+    expect(classifyDuringCatchUp({ type: 'lottery-abort', abort: { reason: 'nope' } }, MID)).toBe(
+      'cancel',
+    );
+  });
+
+  it('cancels when a different ceremony opens', () => {
+    expect(classifyDuringCatchUp({ type: 'lottery-start', start: START }, MID)).toBe('cancel');
+    expect(
+      classifyDuringCatchUp(
+        {
+          type: 'lottery-lobby',
+          lobby: { title: 'next', teamCount: 3, totalBalls: 6, rows: START.rows },
+        },
+        MID,
+      ),
+    ).toBe('cancel');
+  });
+
+  describe('lottery-state snapshots', () => {
+    const snap = (over: Partial<LotterySnapshot>): LotterySnapshot => ({
+      phase: 'revealing',
+      start: START,
+      reveals: REVEALS.slice(0, 1),
+      ...over,
+    });
+
+    it('ignores a snapshot that has not moved past what the catch-up knows', () => {
+      expect(classifyDuringCatchUp({ type: 'lottery-state', snapshot: snap({}) }, MID)).toBe(
+        'ignore',
+      );
+    });
+
+    it('buffers a snapshot that ran ahead, so a poll-only client can still merge', () => {
+      expect(
+        classifyDuringCatchUp({ type: 'lottery-state', snapshot: snap({ reveals: REVEALS }) }, MID),
+      ).toBe('buffer');
+    });
+
+    it('buffers a snapshot carrying a finish it has not seen', () => {
+      expect(
+        classifyDuringCatchUp(
+          { type: 'lottery-state', snapshot: snap({ phase: 'finished', finish: FINISH }) },
+          MID,
+        ),
+      ).toBe('buffer');
+    });
+
+    it('cancels on a snapshot for a phase that is no longer this running draw', () => {
+      for (const phase of ['idle', 'lobby', 'waiting', 'aborted'] as const) {
+        expect(
+          classifyDuringCatchUp({ type: 'lottery-state', snapshot: snap({ phase }) }, MID),
+        ).toBe('cancel');
+      }
+    });
+  });
+});
+
+describe('catchUpTailFromSnapshot (#203)', () => {
+  it('emits only the reveals the catch-up has not accounted for', () => {
+    const tail = catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, MID);
+    expect(tail.map((e) => e.type)).toEqual(['lottery-reveal', 'lottery-reveal']);
+    expect(tail).toEqual([
+      { type: 'lottery-reveal', reveal: REVEALS[1] },
+      { type: 'lottery-reveal', reveal: REVEALS[2] },
+    ]);
+  });
+
+  it('appends the finish when the ceremony ended while catching up', () => {
+    const tail = catchUpTailFromSnapshot(FINISHED, MID);
+    expect(tail[tail.length - 1]).toEqual({ type: 'lottery-finish', finish: FINISH });
+  });
+
+  it('is empty when the snapshot matches what the catch-up already has', () => {
+    expect(
+      catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, { known: REVEALS.length }),
+    ).toEqual([]);
+    expect(catchUpTailFromSnapshot(FINISHED, { known: REVEALS.length, finish: FINISH })).toEqual(
+      [],
+    );
   });
 });
