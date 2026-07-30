@@ -51,14 +51,38 @@ export function lotteryHtml(clientId: string): string {
   /* the machine */
   .machine { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
   @media (max-width: 760px) { .machine { grid-template-columns: 1fr; } }
-  .hopper { position: relative; width: 260px; height: 260px; margin: 10px auto; border-radius: 50%;
+  .hopper { position: relative; width: 260px; height: 260px; margin: 10px auto 0; border-radius: 50%;
     border: 3px solid #2b3550; background: radial-gradient(circle at 35% 30%, #1c2338, #10141f 70%);
     overflow: hidden; box-shadow: inset 0 -18px 40px rgba(0,0,0,.5), 0 0 40px rgba(245,214,123,.06); }
+  /* Per-ball motion is randomized in JS via custom props: --s (size), --jig (period). The scale
+     lives inside the keyframes because an animation's transform replaces any inline transform. */
   .hopper .ball { position: absolute; width: 34px; height: 34px; border-radius: 50%;
     background: radial-gradient(circle at 32% 28%, #fff 0%, #f5d67b 35%, #c8912e 100%);
-    animation: jiggle 1.2s ease-in-out infinite alternate; box-shadow: 0 3px 6px rgba(0,0,0,.5); }
-  .hopper.spinning .ball { animation-duration: .35s; }
-  .chute { width: 12px; height: 34px; margin: -4px auto 0; background: #2b3550; border-radius: 0 0 6px 6px; }
+    animation: jiggle-a var(--jig, 1.3s) cubic-bezier(.45,.05,.55,.95) infinite alternate;
+    box-shadow: 0 3px 6px rgba(0,0,0,.5); will-change: transform; }
+  .hopper .ball.alt { animation-name: jiggle-b; }
+  .hopper.spinning .ball { animation-duration: calc(var(--jig, 1.3s) * .3);
+    animation-timing-function: cubic-bezier(.3,.1,.7,.9); }
+  .hopper.spinning { animation: agitate .22s linear infinite; }
+  /* The chute is a clear tube: the pulled ball is visible sliding down inside it. */
+  .chute { position: relative; width: 20px; height: 46px; margin: -4px auto 0; overflow: hidden;
+    background: linear-gradient(180deg, rgba(43,53,80,.28), rgba(43,53,80,.55));
+    border: 1px solid #2b3550; border-top: none; border-radius: 0 0 10px 10px;
+    transition: box-shadow .3s, border-color .3s; }
+  .chute.active { border-color: rgba(245,214,123,.5);
+    box-shadow: 0 0 14px rgba(245,214,123,.28), inset 0 0 8px rgba(245,214,123,.18); }
+
+  /* the pull (#195): one ball is sucked to the chute mouth, slides the tube, and waits at the
+     exit until the reveal hands it off to the big drop ball (FLIP in the client). */
+  .pullball { position: absolute; border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, #fff 0%, #f5d67b 35%, #c8912e 100%);
+    box-shadow: 0 2px 5px rgba(0,0,0,.5); opacity: 0; pointer-events: none; }
+  #suck-ball { width: 26px; height: 26px; left: calc(50% - 13px); top: 40%; }
+  #tube-ball { width: 14px; height: 14px; left: calc(50% - 7px); top: -14px; }
+  .machine-left.pulling #suck-ball { animation: suck .5s cubic-bezier(.55,0,.85,.55) forwards; }
+  .machine-left.pulling #tube-ball {
+    animation: tube .55s .42s cubic-bezier(.45,0,.85,.6) forwards,
+      held-pulse .9s 1.1s ease-in-out infinite; }
   #drum .now { font-size: 22px; font-weight: 800; text-align: center; color: #f5d67b;
     animation: pulse 0.9s ease-in-out infinite; margin: 8px 0 12px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
@@ -71,11 +95,25 @@ export function lotteryHtml(clientId: string): string {
   #drop .dropball { width: 120px; height: 120px; margin: 6px auto 10px; border-radius: 50%;
     background: radial-gradient(circle at 32% 28%, #fff 0%, #f5d67b 30%, #c8912e 100%);
     display: flex; align-items: center; justify-content: center; color: #201a08; font-weight: 900;
-    font-size: 34px; animation: drop .8s cubic-bezier(.22,1.4,.36,1); box-shadow: 0 10px 30px rgba(0,0,0,.55); }
-  #drop .team { font-size: 30px; font-weight: 900; margin-top: 4px; }
-  #drop .odds { color: #f5d67b; font-weight: 700; margin-top: 2px; animation: flash 1.1s ease-out; }
+    font-size: 34px; box-shadow: 0 10px 30px rgba(0,0,0,.55); will-change: transform; }
+  /* Handoff from the chute exit: the client sets a translate+scale start transform, then clears
+     it under this transition (FLIP). .fall is the fallback when the chute can't be measured. */
+  #drop .dropball.flip { transition: transform .62s cubic-bezier(.22,1.35,.36,1); }
+  #drop .dropball.fall { animation: drop .8s cubic-bezier(.22,1.4,.36,1); }
+  #drop .team { font-size: 30px; font-weight: 900; margin-top: 4px;
+    animation: rise .45s .18s cubic-bezier(.2,.9,.3,1.4) backwards; }
+  #drop .odds { color: #f5d67b; font-weight: 700; margin-top: 2px;
+    animation: flash 1.1s .3s ease-out backwards; }
 
-  /* results board */
+  /* results board + replay (#197) */
+  .board-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .replay { font: inherit; font-size: 12px; font-weight: 700; color: #f5d67b; background: #1b2233;
+    border: 1px solid rgba(245,214,123,.35); border-radius: 999px; padding: 5px 14px;
+    cursor: pointer; transition: background .2s, box-shadow .2s; }
+  .replay:hover { background: #232c42; box-shadow: 0 0 10px rgba(245,214,123,.25); }
+  .pill.skip { cursor: pointer; font: inherit; font-size: 12px; border: 1px solid #2a3145;
+    background: #1b2233; color: #cdd4e4; transition: background .2s; }
+  .pill.skip:hover { background: #232c42; }
   #board ol { list-style: none; margin: 0; padding: 0; }
   #board li { display: flex; align-items: center; gap: 12px; padding: 8px 6px;
     border-bottom: 1px solid #1a2030; font-size: 15px; }
@@ -90,24 +128,51 @@ export function lotteryHtml(clientId: string): string {
     background: #10141d; border: 1px solid #232a3d; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
   #abort { border-color: #55202c; background: rgba(58,22,32,.6); color: #fecaca; }
 
-  /* confetti */
+  /* confetti — pointer-events off so falling pieces never swallow a Replay/skip click */
   .confetti { position: fixed; top: -12px; width: 10px; height: 16px; opacity: .9; z-index: 40;
-    animation: confetti linear forwards; }
+    animation: confetti linear forwards; pointer-events: none; }
 
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
-  @keyframes jiggle { from { transform: translate(0,0) rotate(-6deg) } to { transform: translate(6px,-10px) rotate(8deg) } }
+  @keyframes jiggle-a {
+    0% { transform: translate(0,0) rotate(-8deg) scale(var(--s,1)) }
+    33% { transform: translate(4px,-8px) rotate(3deg) scale(var(--s,1)) }
+    66% { transform: translate(-5px,-3px) rotate(-3deg) scale(var(--s,1)) }
+    100% { transform: translate(6px,-11px) rotate(9deg) scale(var(--s,1)) } }
+  @keyframes jiggle-b {
+    0% { transform: translate(0,0) rotate(6deg) scale(var(--s,1)) }
+    30% { transform: translate(-6px,-9px) rotate(-4deg) scale(var(--s,1)) }
+    65% { transform: translate(3px,-14px) rotate(2deg) scale(var(--s,1)) }
+    100% { transform: translate(-4px,-2px) rotate(-7deg) scale(var(--s,1)) } }
+  @keyframes agitate { 0%,100% { transform: translate(0,0) } 25% { transform: translate(1px,-1px) }
+    50% { transform: translate(-1px,1px) } 75% { transform: translate(1px,1px) } }
+  @keyframes suck { 0% { opacity: 0; transform: translate(0,0) scale(1) } 12% { opacity: 1 }
+    55% { transform: translate(-7px,70px) scale(.85) }
+    100% { opacity: 1; transform: translate(0,165px) scale(.55) } }
+  @keyframes tube { 0% { opacity: 0; transform: translateY(0) } 20% { opacity: 1 }
+    100% { opacity: 1; transform: translateY(46px) } }
+  @keyframes held-pulse { 0%,100% { box-shadow: 0 0 4px rgba(245,214,123,.5) }
+    50% { box-shadow: 0 0 12px rgba(245,214,123,.95) } }
   @keyframes drop { 0% { transform: translateY(-220px) scale(.6); opacity: 0 }
     60% { transform: translateY(12px) scale(1.04); opacity: 1 } 80% { transform: translateY(-8px) }
     100% { transform: translateY(0) scale(1) } }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(.9) }
+    to { opacity: 1; transform: none } }
   @keyframes flash { 0% { text-shadow: 0 0 18px rgba(245,214,123,.9); transform: scale(1.15) }
     100% { text-shadow: none; transform: scale(1) } }
   @keyframes confetti { to { transform: translateY(105vh) rotate(720deg); opacity: .7 } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hopper .ball, .hopper.spinning, .pullball, #drop .dropball, #drop .team, #drop .odds,
+    .confetti, #waiting .pulse, #drum .now { animation: none !important; transition: none !important; }
+    #drop .dropball.flip { transition: none !important; }
+  }
 </style>
 </head>
 <body>
 <header>
   <h1 id="title">The Lottery Machine</h1>
   <span id="status" class="pill">connecting…</span>
+  <button id="replay-skip" class="pill skip hidden" type="button">&#9197; skip to result</button>
   <span class="commit" id="commit"></span>
 </header>
 <main>
@@ -124,9 +189,9 @@ export function lotteryHtml(clientId: string): string {
 
   <section class="card hidden" id="stage">
     <div class="machine">
-      <div>
-        <div class="hopper" id="hopper"></div>
-        <div class="chute"></div>
+      <div class="machine-left" id="machine-left">
+        <div class="hopper" id="hopper"><div class="pullball" id="suck-ball"></div></div>
+        <div class="chute" id="chute"><div class="pullball" id="tube-ball"></div></div>
       </div>
       <div>
         <div id="drum">
@@ -144,7 +209,10 @@ export function lotteryHtml(clientId: string): string {
   </section>
 
   <section class="card hidden" id="board">
-    <h2>The order so far</h2>
+    <div class="board-head">
+      <h2>The order so far</h2>
+      <button id="replay-btn" class="replay hidden" type="button">&#8635; Replay the reveal</button>
+    </div>
     <ol id="board-list"></ol>
   </section>
 
