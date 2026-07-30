@@ -76,6 +76,16 @@ export interface LotteryAbort {
 }
 
 /**
+ * The abort *request* (#205): `ifCommitment` makes the abort conditional — a no-op unless the
+ * stage is still showing that committed run. The bot's boot reconciler sends it so a stale
+ * snapshot can never abort a fresh ceremony that replaced the stranded one mid-flight. Stripped
+ * before broadcast; clients only ever see {@link LotteryAbort}.
+ */
+export interface LotteryAbortRequest extends LotteryAbort {
+  ifCommitment?: string;
+}
+
+/**
  * Pre-commitment lobby (#198): arms the waiting room from `setup` onward so members can
  * join the Activity before `begin` is called. No commitment yet — shown as a placeholder.
  */
@@ -161,7 +171,8 @@ export interface LotteryStage {
   beat(beat: LotteryBeat): void;
   reveal(reveal: LotteryReveal): void;
   finish(finish: LotteryFinish): void;
-  abort(abort: LotteryAbort): void;
+  /** See {@link LotteryAbortRequest} — a conditional request that no longer matches is a no-op. */
+  abort(abort: LotteryAbortRequest): void;
   /** Subscribe to events; returns an unsubscribe fn. New events only — snapshots are pulled. */
   subscribe(listener: (event: LotteryEvent) => void): () => void;
 }
@@ -301,11 +312,16 @@ export function parseLotteryFinish(body: string): Parsed<LotteryFinish> {
 }
 
 /** Guard for `POST /api/lottery/abort`. */
-export function parseLotteryAbort(body: string): Parsed<LotteryAbort> {
+export function parseLotteryAbort(body: string): Parsed<LotteryAbortRequest> {
   const parsed = parseJson(body);
   if ('error' in parsed) return parsed;
   const r = parsed.value;
-  return { value: { reason: isStr(r.reason) ? r.reason : 'The ceremony was aborted.' } };
+  return {
+    value: {
+      reason: isStr(r.reason) ? r.reason : 'The ceremony was aborted.',
+      ...(isStr(r.ifCommitment) ? { ifCommitment: r.ifCommitment } : {}),
+    },
+  };
 }
 
 /**
@@ -466,11 +482,21 @@ export function createLotteryStage(): LotteryStage {
       emit({ type: 'lottery-finish', finish: next });
     },
     abort(next) {
+      const { ifCommitment, ...publicAbort } = next;
+      // A conditional abort (#205) targets one specific committed run; if the stage has moved on
+      // — a fresh ceremony replaced it, or it already finished/aborted — the request is stale and
+      // must not touch what's showing now.
+      if (
+        ifCommitment !== undefined &&
+        !((phase === 'waiting' || phase === 'revealing') && start?.commitment === ifCommitment)
+      ) {
+        return;
+      }
       phase = 'aborted';
       lobby = undefined;
       pendingBeat = undefined;
-      abort = next;
-      emit({ type: 'lottery-abort', abort: next });
+      abort = publicAbort;
+      emit({ type: 'lottery-abort', abort: publicAbort });
     },
     subscribe(listener) {
       listeners.add(listener);

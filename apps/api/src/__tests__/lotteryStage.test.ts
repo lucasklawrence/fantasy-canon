@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createLotteryStage,
+  parseLotteryAbort,
   parseLotteryBeat,
   parseLotteryClear,
   parseLotteryFinish,
@@ -107,6 +108,33 @@ describe('createLotteryStage', () => {
     expect(snap.abort).toBeUndefined();
     expect(snap.reveals).toEqual([]);
     expect(snap.start?.title).toBe('Re-run');
+  });
+
+  it('a conditional abort only fires while its committed run is still showing (#205)', () => {
+    const stage = createLotteryStage();
+    stage.start(START); // commitment 'hash'
+    stage.beat({ pick: 3, remaining: ['A', 'B', 'C'] });
+
+    // Mismatched commitment: the boot reconciler's snapshot went stale — no-op.
+    stage.abort({ reason: 'stale', ifCommitment: 'some-other-hash' });
+    expect(stage.snapshot().phase).toBe('revealing');
+
+    // Match: aborts, and the broadcast payload carries only the public reason.
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+    stage.abort({ reason: 'reconciled', ifCommitment: 'hash' });
+    expect(stage.snapshot().phase).toBe('aborted');
+    expect(events).toEqual([{ type: 'lottery-abort', abort: { reason: 'reconciled' } }]);
+    expect(stage.snapshot().abort).toEqual({ reason: 'reconciled' });
+
+    // Terminal phases are equally protected: the run it targeted is no longer "showing".
+    stage.abort({ reason: 'stale again', ifCommitment: 'hash' });
+    expect(stage.snapshot().abort?.reason).toBe('reconciled');
+
+    // Unconditional aborts (the ceremony's own) are unchanged.
+    stage.start(START);
+    stage.abort({ reason: 'commissioner aborted' });
+    expect(stage.snapshot().phase).toBe('aborted');
   });
 });
 
@@ -286,6 +314,17 @@ describe('lottery payload guards', () => {
     ]) {
       expect('error' in parseLotteryLobby(JSON.stringify({ ...LOBBY, ...bad }))).toBe(true);
     }
+  });
+
+  it('parseLotteryAbort defaults the reason and passes ifCommitment through (#205)', () => {
+    expect(parseLotteryAbort('{}')).toEqual({ value: { reason: 'The ceremony was aborted.' } });
+    expect(parseLotteryAbort(JSON.stringify({ reason: 'r', ifCommitment: 'hash' }))).toEqual({
+      value: { reason: 'r', ifCommitment: 'hash' },
+    });
+    // A non-string condition is dropped, leaving the abort unconditional.
+    expect(parseLotteryAbort(JSON.stringify({ reason: 'r', ifCommitment: 7 }))).toEqual({
+      value: { reason: 'r' },
+    });
   });
 
   it('parseLotteryClear takes an optional guild scope and nothing else', () => {

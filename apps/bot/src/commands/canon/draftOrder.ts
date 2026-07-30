@@ -38,7 +38,7 @@ import {
   clearCeremony,
   createCeremony,
   getCeremony,
-  hasRunningCeremony,
+  hasAnyCeremony,
   interruptedDisclosureContent,
   markPreviewPosted,
   oddsRows,
@@ -746,7 +746,8 @@ export async function handleDraftOrderHypeSubcommand(
  * viewers see the banner instead of a frozen drum-roll — with the reason pointing at the seed
  * disclosure when this pass just posted one. Assumes the single-bot deployment (this process is
  * the only pacer; multi-tenant partitioning is #191). Skipped entirely while any in-memory
- * ceremony is mid-reveal, so a test or late call can never tear down a live run.
+ * ceremony exists — a `setup`'s fresh lobby or a `begin`'s live reveal must never be torn down
+ * by a stale snapshot — and the abort is additionally commitment-conditional server-side.
  */
 export async function recoverInterruptedCeremonies(
   client: Client,
@@ -791,15 +792,19 @@ async function reconcileStage(
   stage: InspectableRevealStage,
   disclosed: Set<string>,
 ): Promise<void> {
-  if (hasRunningCeremony()) return;
+  // Any in-memory session — not just a running reveal — means the stage may reflect current
+  // state (a `setup` arms its lobby right after `setCeremony`), so tear-down is only safe when
+  // this process knows of no ceremony at all.
+  if (hasAnyCeremony()) return;
   try {
     const snapshot = await stage.state();
-    // Re-check after the async fetch (same pattern as the disclosure loop): a `begin` that
-    // started during the GET must not have its fresh ceremony torn down over a stale snapshot.
-    if (hasRunningCeremony()) return;
+    // Re-check after the async fetch (same pattern as the disclosure loop): a `setup`/`begin`
+    // that landed during the GET must not have its fresh state torn down over a stale snapshot.
+    if (hasAnyCeremony()) return;
     if (snapshot.phase === 'lobby') {
-      // Targeted disarm via the existing lobby-only, guild-scoped route — never touches a
-      // committed run even if a race arms one between the GET and this POST.
+      // Targeted disarm via the existing lobby-only, guild-scoped route — it can never touch a
+      // committed run. (A same-guild `setup` racing this POST is closed off by the interlock
+      // above up to server ordering; the residual window is microseconds at boot.)
       await stage.clear({
         ...(snapshot.lobby?.guildId ? { guildId: snapshot.lobby.guildId } : {}),
       });
@@ -810,6 +815,9 @@ async function reconcileStage(
         reason: seedPosted
           ? 'The bot restarted mid-reveal. The secret seed was just disclosed in the channel — verify the commitment there, then re-run setup for a fresh ceremony.'
           : 'The bot restarted mid-reveal, so this ceremony cannot continue. Check the channel for the disclosure, then re-run setup for a fresh ceremony.',
+        // Conditional server-side: the stage only aborts if it is still showing THIS committed
+        // run, so a fresh `begin` that replaced it mid-flight can never be marked aborted.
+        ...(snapshot.start?.commitment ? { ifCommitment: snapshot.start.commitment } : {}),
       });
       console.log(
         `[draftorder] aborted a stranded Activity reveal (commitment ${snapshot.start?.commitment?.slice(0, 12) ?? 'unknown'}…)`,

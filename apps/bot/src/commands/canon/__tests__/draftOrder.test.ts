@@ -537,11 +537,11 @@ describe('recoverInterruptedCeremonies (#176)', () => {
   function fakeStage(snapshot: StageStateSnapshot | Error = { phase: 'idle' }): {
     stage: InspectableRevealStage;
     cleared: { guildId?: string }[];
-    aborted: { reason: string }[];
+    aborted: { reason: string; ifCommitment?: string }[];
     stateCalls: () => number;
   } {
     const cleared: { guildId?: string }[] = [];
-    const aborted: { reason: string }[] = [];
+    const aborted: { reason: string; ifCommitment?: string }[] = [];
     let stateCalls = 0;
     const stage: InspectableRevealStage = {
       state: () => {
@@ -697,6 +697,8 @@ describe('recoverInterruptedCeremonies (#176)', () => {
     expect(cleared).toHaveLength(0);
     expect(aborted).toHaveLength(1);
     expect(aborted[0].reason).toContain('just disclosed');
+    // Conditional server-side: only the inspected run may be aborted, never a replacement.
+    expect(aborted[0].ifCommitment).toBe('the-hash');
   });
 
   it('aborts a stranded run with the generic reason when no record matched (#205)', async () => {
@@ -735,10 +737,9 @@ describe('recoverInterruptedCeremonies (#176)', () => {
     const racing: InspectableRevealStage = {
       ...stage,
       state: () => {
-        // A begin lands while the reconciler's GET is in flight — the stale snapshot must lose.
-        const live = createCeremony('guild-9', 'Racing', { teams: [{ teamId: 'a' }] }, new Map());
-        live.state = 'LOTTERY_RUNNING';
-        setCeremony(live);
+        // A setup lands while the reconciler's GET is in flight — ANY fresh session (here still
+        // pre-begin, lobby just armed) must make the stale snapshot lose.
+        setCeremony(createCeremony('guild-9', 'Racing', { teams: [{ teamId: 'a' }] }, new Map()));
         return stage.state();
       },
     };
