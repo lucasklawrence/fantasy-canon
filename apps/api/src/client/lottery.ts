@@ -193,6 +193,9 @@ function replaceNode(id: string): HTMLElement {
  * springs to its resting spot — the pull and the reveal read as one continuous motion.
  */
 function flipFromChute(ball: HTMLElement, from: DOMRect): void {
+  // The clone carries the previous reveal's flip/fall classes — strip them so the start
+  // transform below is applied instantly, by intent rather than by insertion semantics.
+  ball.classList.remove('flip', 'fall');
   const to = ball.getBoundingClientRect();
   if (!to.width || !from.width) {
     ball.classList.add('fall'); // measurement failed — fall back to the plain drop-in
