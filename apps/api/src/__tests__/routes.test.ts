@@ -45,6 +45,17 @@ const LOTTERY_START_BODY = JSON.stringify({
   ],
 });
 
+const LOTTERY_LOBBY_BODY = JSON.stringify({
+  title: 'Lottery',
+  teamCount: 2,
+  totalBalls: 3,
+  guildId: 'g-a',
+  rows: [
+    { team: 'B', balls: 2, firstPct: 66.7, top3Pct: 100 },
+    { team: 'A', balls: 1, firstPct: 33.3, top3Pct: 100 },
+  ],
+});
+
 function hub(): DraftHub {
   return createDraftHub({
     leagueSize: 3,
@@ -283,6 +294,59 @@ describe('lottery routes (#169)', () => {
     const busy = await routeRequest('POST', '/api/lottery/start', forGuild('g-b'), d);
     expect(busy.status).toBe(409);
     expect(busy.body).toContain('another live ceremony');
+  });
+
+  it('arms and disarms the lobby, and the lobby phase owns the Activity root (#198)', async () => {
+    const d = deps(hub());
+    // An armed lobby must win the root: inside Discord the Activity can only open at `/`, so this
+    // is what makes joining before `begin` work at all.
+    expect((await routeRequest('GET', '/', '', d)).body).toContain('Draft Dashboard');
+    expect((await routeRequest('POST', '/api/lottery/lobby', LOTTERY_LOBBY_BODY, d)).status).toBe(
+      200,
+    );
+    expect((await routeRequest('GET', '/', '', d)).body).toContain('The Lottery Machine');
+    expect((await routeRequest('GET', '/api/lottery/state', '', d)).body).toContain('"lobby"');
+
+    // Disarming hands the root back to the draft dashboard — without this a stale lobby would
+    // shadow it until the api restarted.
+    const cleared = await routeRequest(
+      'POST',
+      '/api/lottery/clear',
+      JSON.stringify({ guildId: 'g-a' }),
+      d,
+    );
+    expect(cleared.status).toBe(200);
+    expect((await routeRequest('GET', '/', '', d)).body).toContain('Draft Dashboard');
+  });
+
+  it('409s a lobby armed over a committed run, and 400s a bad lobby payload', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d);
+    const busy = await routeRequest('POST', '/api/lottery/lobby', LOTTERY_LOBBY_BODY, d);
+    expect(busy.status).toBe(409);
+    expect(busy.body).toContain('another live ceremony');
+    // The committed run survived the rejected lobby.
+    expect((await routeRequest('GET', '/api/lottery/state', '', d)).body).toContain('hash');
+
+    expect((await routeRequest('POST', '/api/lottery/lobby', '{bad', d)).status).toBe(400);
+    expect((await routeRequest('POST', '/api/lottery/lobby', '{}', d)).status).toBe(400);
+    expect((await routeRequest('POST', '/api/lottery/clear', '{bad', d)).status).toBe(400);
+  });
+
+  it('requires x-stage-key on the new lobby and clear POSTs too', async () => {
+    const d = deps(hub(), { stageKey: 'sekrit' });
+    for (const [route, body] of [
+      ['/api/lottery/lobby', LOTTERY_LOBBY_BODY],
+      ['/api/lottery/clear', '{}'],
+    ] as const) {
+      expect((await routeRequest('POST', route, body, d)).status).toBe(401);
+      expect((await routeRequest('POST', route, body, d, { 'x-stage-key': 'nope' })).status).toBe(
+        401,
+      );
+      expect((await routeRequest('POST', route, body, d, { 'x-stage-key': 'sekrit' })).status).toBe(
+        200,
+      );
+    }
   });
 
   it('requires x-stage-key on POSTs when configured — state stays public', async () => {

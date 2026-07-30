@@ -462,6 +462,17 @@ export async function handleDraftOrderBeginSubcommand(
     }
   }
 
+  // Channel mode never touches the stage, so the lobby `setup` armed (#198) would otherwise sit
+  // there forever — showing pre-draw odds after the order is public, and shadowing the draft
+  // dashboard at the Activity root. Disarm it now; activity mode's `start` replaces it instead.
+  if (stageMode !== 'activity') {
+    void stageFromEnv()
+      .clear({ guildId })
+      .catch((error: unknown) => {
+        console.error('[draftorder] failed to disarm the Activity lobby for a channel run:', error);
+      });
+  }
+
   // Fire and forget: the ceremony runs on channel messages and outlives this interaction's
   // 15-minute token. Errors land in the channel via the abort disclosure + the log.
   void runCeremony(session, channelIo(channel), {
@@ -650,6 +661,15 @@ export async function handleDraftOrderAbortSubcommand(
       kind: 'abort',
       content: `⛔ **${session.title}** — setup cancelled before any commitment existed. No seed, nothing drawn.`,
     });
+  }
+  if (session.state === 'GAME_OPEN') {
+    // Nothing was ever committed, so there is no reveal to abort on the stage — just the lobby
+    // `setup` armed (#198). Disarm it so the Activity stops advertising a cancelled ceremony.
+    void stageFromEnv()
+      .clear({ guildId })
+      .catch((error: unknown) => {
+        console.error('[draftorder] failed to disarm the Activity lobby on cancel:', error);
+      });
   }
   await interaction.reply({ content: 'Ceremony cancelled.', flags: MessageFlags.Ephemeral });
 }

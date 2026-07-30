@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createLotteryStage,
   parseLotteryBeat,
+  parseLotteryClear,
   parseLotteryFinish,
   parseLotteryLobby,
   parseLotteryReveal,
@@ -143,21 +144,111 @@ describe('lobby phase (#198)', () => {
     expect(snap.reveals).toEqual([]);
   });
 
-  it('lobby() is blocked by a different guild mid-reveal, not by another lobby', () => {
-    const stage = createLotteryStage();
-    stage.start({ ...START, guildId: 'guild-a' });
-    stage.beat({ pick: 3, remaining: ['A', 'B', 'C'] }); // now 'revealing'
-    expect(() => stage.lobby({ ...LOBBY, guildId: 'guild-b' })).toThrow('another live ceremony');
-    // Same guild is always allowed even mid-reveal.
-    expect(() => stage.lobby({ ...LOBBY, guildId: 'guild-a' })).not.toThrow();
+  it('refuses to arm a lobby over a committed run — even for the same guild, even with no guildId', () => {
+    // Regression: a raced/retried lobby POST must never blank a committed ceremony's `start`,
+    // which would leave viewers on a board with no commitment line while beats keep arriving.
+    for (const armed of [{ guildId: 'guild-a' }, { guildId: 'guild-b' }, {}]) {
+      const waiting = createLotteryStage();
+      waiting.start({ ...START, guildId: 'guild-a' });
+      expect(() => waiting.lobby({ ...LOBBY, ...armed })).toThrow('another live ceremony');
+      expect(waiting.snapshot().start?.commitment).toBe('hash');
+
+      const revealing = createLotteryStage();
+      revealing.start({ ...START, guildId: 'guild-a' });
+      revealing.beat({ pick: 3, remaining: ['A', 'B', 'C'] });
+      expect(() => revealing.lobby({ ...LOBBY, ...armed })).toThrow('another live ceremony');
+      expect(revealing.snapshot().start?.commitment).toBe('hash');
+    }
   });
 
-  it('a lobby from a different guild may overwrite a stale lobby (pre-commitment)', () => {
+  it('re-arms freely from idle, lobby, finished and aborted — nothing committed to protect', () => {
+    const stage = createLotteryStage();
+    expect(() => stage.lobby({ ...LOBBY, guildId: 'guild-a' })).not.toThrow(); // from idle
+    expect(() => stage.lobby({ ...LOBBY, guildId: 'guild-b' })).not.toThrow(); // from lobby
+    expect(stage.snapshot().lobby?.guildId).toBe('guild-b');
+
+    const after = createLotteryStage();
+    after.start(START);
+    after.abort({ reason: 'done' });
+    expect(() => after.lobby(LOBBY)).not.toThrow(); // from aborted
+    expect(after.snapshot().phase).toBe('lobby');
+    expect(after.snapshot().abort).toBeUndefined();
+  });
+
+  it('never leaves a stale lobby in the snapshot once a later phase takes over', () => {
+    // `lobby` is documented as "set when phase is 'lobby'" — a snapshot carrying both a lobby and
+    // a finished/aborted phase would paint the wrong screen for a late joiner.
+    for (const advance of [
+      (s: ReturnType<typeof createLotteryStage>) => s.beat({ pick: 3, remaining: ['A'] }),
+      (s: ReturnType<typeof createLotteryStage>) =>
+        s.reveal({ pick: 3, team: 'B', balls: 2, oddsPct: 33.3, remaining: [] }),
+      (s: ReturnType<typeof createLotteryStage>) =>
+        s.finish({
+          order: [{ pick: 1, team: 'C' }],
+          verify: { secretSeed: 's', salt: 'm', drawSeed: 's|m', commitment: 'hash' },
+        }),
+      (s: ReturnType<typeof createLotteryStage>) => s.abort({ reason: 'stop' }),
+    ]) {
+      const stage = createLotteryStage();
+      stage.lobby(LOBBY);
+      advance(stage);
+      expect(stage.snapshot().phase).not.toBe('lobby');
+      expect(stage.snapshot().lobby).toBeUndefined();
+    }
+  });
+});
+
+describe('clear() — disarming a lobby (#198)', () => {
+  it('returns an armed lobby to idle and emits the fresh snapshot', () => {
     const stage = createLotteryStage();
     stage.lobby({ ...LOBBY, guildId: 'guild-a' });
-    // Second guild arms a lobby while guild-a is still in lobby phase — lobby is safe to overwrite.
-    expect(() => stage.lobby({ ...LOBBY, guildId: 'guild-b' })).not.toThrow();
-    expect(stage.snapshot().lobby?.guildId).toBe('guild-b');
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+
+    stage.clear({ guildId: 'guild-a' });
+
+    const snap = stage.snapshot();
+    expect(snap.phase).toBe('idle');
+    expect(snap.lobby).toBeUndefined();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({ type: 'lottery-state', snapshot: { phase: 'idle', reveals: [] } });
+  });
+
+  it('never tears down a committed run, whatever the phase or guild', () => {
+    for (const phase of ['waiting', 'revealing', 'finished'] as const) {
+      const stage = createLotteryStage();
+      stage.start({ ...START, guildId: 'guild-a' });
+      if (phase !== 'waiting') stage.beat({ pick: 3, remaining: ['A'] });
+      if (phase === 'finished') {
+        stage.finish({
+          order: [{ pick: 1, team: 'C' }],
+          verify: { secretSeed: 's', salt: 'm', drawSeed: 's|m', commitment: 'hash' },
+        });
+      }
+      stage.clear({ guildId: 'guild-a' });
+      stage.clear({});
+      expect(stage.snapshot().phase).toBe(phase);
+      expect(stage.snapshot().start?.commitment).toBe('hash');
+    }
+  });
+
+  it('ignores a mismatched guild, so one league cannot disarm another', () => {
+    const stage = createLotteryStage();
+    stage.lobby({ ...LOBBY, guildId: 'guild-a' });
+    stage.clear({ guildId: 'guild-b' });
+    stage.clear({});
+    expect(stage.snapshot().phase).toBe('lobby');
+    expect(stage.snapshot().lobby?.guildId).toBe('guild-a');
+  });
+
+  it('is an idempotent no-op from idle', () => {
+    const stage = createLotteryStage();
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+    stage.clear({});
+    stage.clear({ guildId: 'guild-a' });
+    expect(stage.snapshot().phase).toBe('idle');
+    expect(events).toEqual([]);
   });
 });
 
@@ -175,6 +266,38 @@ describe('lottery payload guards', () => {
     expect('value' in parseLotteryLobby(JSON.stringify({ ...LOBBY, commitment: undefined }))).toBe(
       true,
     );
+    // A stray commitment key must not survive onto the stage — the lobby is pre-commitment.
+    const stray = parseLotteryLobby(JSON.stringify({ ...LOBBY, commitment: 'leaked' }));
+    expect('value' in stray && 'commitment' in stray.value).toBe(false);
+  });
+
+  it('parseLotteryLobby requires positive integer counts that agree with the rows', () => {
+    // A lobby is armed at setup and can sit on screen for days, so nonsense counts are visible
+    // far longer than a bad start ever is.
+    for (const bad of [
+      { teamCount: 0 },
+      { teamCount: -5 },
+      { teamCount: 2.5 },
+      { totalBalls: 0 },
+      { totalBalls: -1 },
+      { rows: [{ team: 'A', balls: -3, firstPct: 50, top3Pct: 100 }] },
+      { rows: [{ team: 'A', balls: 1.5, firstPct: 50, top3Pct: 100 }] },
+      { totalBalls: 999 }, // disagrees with sum(rows.balls) === 6
+    ]) {
+      expect('error' in parseLotteryLobby(JSON.stringify({ ...LOBBY, ...bad }))).toBe(true);
+    }
+  });
+
+  it('parseLotteryClear takes an optional guild scope and nothing else', () => {
+    expect(parseLotteryClear('{}')).toEqual({ value: {} });
+    expect(parseLotteryClear(JSON.stringify({ guildId: 'g1' }))).toEqual({
+      value: { guildId: 'g1' },
+    });
+    // Junk fields are dropped rather than rejected — this is a fire-and-forget cleanup route.
+    expect(parseLotteryClear(JSON.stringify({ guildId: 'g1', nope: 1 }))).toEqual({
+      value: { guildId: 'g1' },
+    });
+    expect('error' in parseLotteryClear('{bad')).toBe(true);
   });
 
   it('parseLotteryStart accepts a full payload and rejects partial ones', () => {

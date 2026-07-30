@@ -88,6 +88,12 @@ export interface LotteryLobby {
   guildId?: string;
 }
 
+/** Disarms an armed lobby (#198) — see {@link LotteryStage.clear}. */
+export interface LotteryClear {
+  /** Only this guild's lobby is disarmed; omitted ⇒ matches a lobby armed without a guild. */
+  guildId?: string;
+}
+
 export type LotteryPhase = 'idle' | 'lobby' | 'waiting' | 'revealing' | 'finished' | 'aborted';
 
 /** What a (late-)joining client needs to fully reconstruct the presentation. */
@@ -126,11 +132,22 @@ export interface LotteryStage {
   snapshot(): LotterySnapshot;
   /**
    * Arm the pre-commitment lobby (#198) — visible from `setup` onward so members can join
-   * the Activity before `begin` is called. Clears any previous run's state. Throws
-   * {@link StageBusyError} when a *different* guild's reveal is mid-flight; the lobby phase
-   * (pre-commitment) is always safe to overwrite within the same guild.
+   * the Activity before `begin` is called. Clears any previous (finished/aborted) run's state.
+   * Throws {@link StageBusyError} from `waiting`/`revealing`: once a commitment exists the stage
+   * is showing a committed ceremony, and re-arming a lobby would erase its `start` and reveals,
+   * leaving viewers on a board with no commitment line. Guild-agnostic on purpose — the two bot
+   * callers (`setup`, `minigame`) only ever fire pre-commitment, so a lobby arriving mid-reveal
+   * is always a race or a stale retry, never something to honour.
    */
   lobby(lobby: LotteryLobby): void;
+  /**
+   * Disarm an armed lobby, returning the stage to `idle` (#198). Deliberately narrow: a no-op
+   * unless the phase is `lobby` and the guild matches, so it can never tear down a committed
+   * run. The bot calls it on every path that leaves a lobby with no ceremony behind it — an
+   * abort before `begin`, or a `begin` that runs in channel mode. Without it a stale lobby would
+   * shadow the draft dashboard at the Activity root (see `routes.ts`) until the api restarted.
+   */
+  clear(clear: LotteryClear): void;
   /**
    * (Re)open the stage for a new ceremony — clears any previous run's state. Throws
    * {@link StageBusyError} when a *different* guild's reveal is mid-flight (see
@@ -162,6 +179,7 @@ function parseJson(body: string): Parsed<Record<string, unknown>> {
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isStrArray = (v: unknown): v is string[] => Array.isArray(v) && v.every(isStr);
+const isPosInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0;
 
 /** Guard for `POST /api/lottery/start`. */
 export function parseLotteryStart(body: string): Parsed<LotteryStart> {
@@ -286,7 +304,12 @@ export function parseLotteryAbort(body: string): Parsed<LotteryAbort> {
   return { value: { reason: isStr(r.reason) ? r.reason : 'The ceremony was aborted.' } };
 }
 
-/** Guard for `POST /api/lottery/lobby`. */
+/**
+ * Guard for `POST /api/lottery/lobby`. Stricter on counts than {@link parseLotteryStart}: a lobby
+ * is armed from `setup` and can sit on screen for days, so a nonsense `teamCount`/`totalBalls`
+ * would be visible far longer than a bad `start` ever is. Counts must be positive integers and
+ * `totalBalls` must equal the row sum, which is exactly how the bot derives it.
+ */
 export function parseLotteryLobby(body: string): Parsed<LotteryLobby> {
   const parsed = parseJson(body);
   if ('error' in parsed) return parsed;
@@ -297,20 +320,23 @@ export function parseLotteryLobby(body: string): Parsed<LotteryLobby> {
           !!row &&
           typeof row === 'object' &&
           isStr((row as LotteryOddsRow).team) &&
-          isNum((row as LotteryOddsRow).balls) &&
+          isPosInt((row as LotteryOddsRow).balls) &&
           isNum((row as LotteryOddsRow).firstPct) &&
           isNum((row as LotteryOddsRow).top3Pct),
       )
     : undefined;
   if (
     !isStr(r.title) ||
-    !isNum(r.teamCount) ||
-    !isNum(r.totalBalls) ||
+    !isPosInt(r.teamCount) ||
+    !isPosInt(r.totalBalls) ||
     !rows ||
     rows.length === 0 ||
     rows.length !== (r.rows as unknown[]).length
   ) {
-    return { error: 'lobby needs title, teamCount, totalBalls, rows[]' };
+    return { error: 'lobby needs title, positive teamCount/totalBalls, rows[]' };
+  }
+  if (r.totalBalls !== rows.reduce((sum, row) => sum + row.balls, 0)) {
+    return { error: 'lobby totalBalls must equal the sum of rows[].balls' };
   }
   return {
     value: {
@@ -321,6 +347,14 @@ export function parseLotteryLobby(body: string): Parsed<LotteryLobby> {
       ...(isStr(r.guildId) ? { guildId: r.guildId } : {}),
     },
   };
+}
+
+/** Guard for `POST /api/lottery/clear` — an optional guild scope is the whole payload. */
+export function parseLotteryClear(body: string): Parsed<LotteryClear> {
+  const parsed = parseJson(body);
+  if ('error' in parsed) return parsed;
+  const r = parsed.value;
+  return { value: isStr(r.guildId) ? { guildId: r.guildId } : {} };
 }
 
 export function createLotteryStage(): LotteryStage {
@@ -340,14 +374,13 @@ export function createLotteryStage(): LotteryStage {
   return {
     snapshot: () => ({ phase, lobby, start, pendingBeat, reveals: [...reveals], finish, abort }),
     lobby(next) {
-      // Same busy-check as start(): don't clobber a different guild's live ceremony. The lobby
-      // phase (pre-commitment) is always safe to overwrite — no fairness invariants are in play.
-      if (
-        (phase === 'waiting' || phase === 'revealing') &&
-        start?.guildId &&
-        next.guildId &&
-        start.guildId !== next.guildId
-      ) {
+      // Stricter than start()'s check, and deliberately not guild-scoped: a committed run owns the
+      // stage outright. Overwriting `waiting`/`revealing` here would blank `start` (and therefore
+      // the commitment line and odds table) while the pacing bot keeps POSTing beats, so a late
+      // joiner would land on a board with no commitment. The bot only arms a lobby from GAME_OPEN,
+      // so this rejection can only ever fire on a raced or retried POST — the 409 is the whole
+      // point. Finished/aborted/idle/lobby all re-arm freely (pre-commitment, nothing to protect).
+      if (phase === 'waiting' || phase === 'revealing') {
         throw new StageBusyError();
       }
       phase = 'lobby';
@@ -358,6 +391,23 @@ export function createLotteryStage(): LotteryStage {
       finish = undefined;
       abort = undefined;
       emit({ type: 'lottery-lobby', lobby: next });
+    },
+    clear(next) {
+      // Narrow by design: only an armed lobby is disarmable, so this can never tear down a
+      // committed run even if a stale bot fires it late. Silent no-op otherwise — the callers are
+      // fire-and-forget cleanup paths that have nothing useful to do with a rejection.
+      if (phase !== 'lobby') return;
+      if ((lobby?.guildId ?? undefined) !== (next.guildId ?? undefined)) return;
+      phase = 'idle';
+      lobby = undefined;
+      start = undefined;
+      pendingBeat = undefined;
+      reveals = [];
+      finish = undefined;
+      abort = undefined;
+      // Reuse the snapshot event: clients already repaint wholesale from it, so returning to the
+      // idle screen needs no new client branch.
+      emit({ type: 'lottery-state', snapshot: { phase, reveals: [] } });
     },
     start(next) {
       // One live ceremony at a time: never let a second guild clobber an armed or mid-flight
@@ -381,25 +431,32 @@ export function createLotteryStage(): LotteryStage {
       abort = undefined;
       emit({ type: 'lottery-start', start: next });
     },
+    // Each of these leaves the lobby phase behind, so they clear `lobby` — otherwise a snapshot
+    // could carry both a live `lobby` and a `finished`/`aborted` phase, contradicting the field's
+    // documented "set when phase is 'lobby'" contract and painting a stale screen for late joiners.
     beat(beat) {
       phase = 'revealing';
+      lobby = undefined;
       pendingBeat = beat;
       emit({ type: 'lottery-beat', beat });
     },
     reveal(reveal) {
       phase = 'revealing';
+      lobby = undefined;
       pendingBeat = undefined;
       reveals.push(reveal);
       emit({ type: 'lottery-reveal', reveal });
     },
     finish(next) {
       phase = 'finished';
+      lobby = undefined;
       pendingBeat = undefined;
       finish = next;
       emit({ type: 'lottery-finish', finish: next });
     },
     abort(next) {
       phase = 'aborted';
+      lobby = undefined;
       pendingBeat = undefined;
       abort = next;
       emit({ type: 'lottery-abort', abort: next });

@@ -242,6 +242,14 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       show('waiting', true);
       show('stage', false);
       byId('waiting-sub').textContent = 'The commissioner has not opened the stage.';
+      // Wipe anything a previous phase painted. This matters more now that a lobby can be armed
+      // days before the draw (#198): an api restart, or a `clear` after a cancelled setup, drops
+      // an open iframe back to idle, and a leftover odds table under "not opened yet" reads as a
+      // live ceremony that no longer exists.
+      byId('title').textContent = 'The Lottery Machine';
+      byId('commit').textContent = '';
+      clear(byId('odds-rows'));
+      clear(byId('hopper'));
       break;
     case 'lobby':
       // Pre-commitment lobby (#198): show odds without the commitment hash.
