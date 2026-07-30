@@ -3,11 +3,24 @@ import {
   createLotteryStage,
   parseLotteryBeat,
   parseLotteryFinish,
+  parseLotteryLobby,
   parseLotteryReveal,
   parseLotteryStart,
   type LotteryEvent,
+  type LotteryLobby,
   type LotteryStart,
 } from '../lotteryStage.js';
+
+const LOBBY: LotteryLobby = {
+  title: '2026 Draft Lottery',
+  teamCount: 3,
+  totalBalls: 6,
+  rows: [
+    { team: 'C', balls: 3, firstPct: 50, top3Pct: 100 },
+    { team: 'B', balls: 2, firstPct: 33.3, top3Pct: 100 },
+    { team: 'A', balls: 1, firstPct: 16.7, top3Pct: 100 },
+  ],
+};
 
 const START: LotteryStart = {
   title: '2026 Draft Lottery',
@@ -96,7 +109,74 @@ describe('createLotteryStage', () => {
   });
 });
 
+describe('lobby phase (#198)', () => {
+  it('lobby() arms the stage in lobby phase and emits lottery-lobby', () => {
+    const stage = createLotteryStage();
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+
+    stage.lobby(LOBBY);
+
+    expect(stage.snapshot().phase).toBe('lobby');
+    expect(stage.snapshot().lobby?.title).toBe(LOBBY.title);
+    expect(stage.snapshot().start).toBeUndefined();
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('lottery-lobby');
+  });
+
+  it('lobby → start transition: start clears lobby and moves to waiting', () => {
+    const stage = createLotteryStage();
+    stage.lobby(LOBBY);
+    stage.start(START);
+
+    const snap = stage.snapshot();
+    expect(snap.phase).toBe('waiting');
+    expect(snap.lobby).toBeUndefined();
+    expect(snap.start?.title).toBe(START.title);
+  });
+
+  it('lobby() includes lobby in the snapshot for late joiners', () => {
+    const stage = createLotteryStage();
+    stage.lobby(LOBBY);
+    const snap = stage.snapshot();
+    expect(snap.lobby?.rows).toHaveLength(3);
+    expect(snap.reveals).toEqual([]);
+  });
+
+  it('lobby() is blocked by a different guild mid-reveal, not by another lobby', () => {
+    const stage = createLotteryStage();
+    stage.start({ ...START, guildId: 'guild-a' });
+    stage.beat({ pick: 3, remaining: ['A', 'B', 'C'] }); // now 'revealing'
+    expect(() => stage.lobby({ ...LOBBY, guildId: 'guild-b' })).toThrow('another live ceremony');
+    // Same guild is always allowed even mid-reveal.
+    expect(() => stage.lobby({ ...LOBBY, guildId: 'guild-a' })).not.toThrow();
+  });
+
+  it('a lobby from a different guild may overwrite a stale lobby (pre-commitment)', () => {
+    const stage = createLotteryStage();
+    stage.lobby({ ...LOBBY, guildId: 'guild-a' });
+    // Second guild arms a lobby while guild-a is still in lobby phase — lobby is safe to overwrite.
+    expect(() => stage.lobby({ ...LOBBY, guildId: 'guild-b' })).not.toThrow();
+    expect(stage.snapshot().lobby?.guildId).toBe('guild-b');
+  });
+});
+
 describe('lottery payload guards', () => {
+  it('parseLotteryLobby accepts a full payload and rejects partial ones', () => {
+    const ok = parseLotteryLobby(JSON.stringify(LOBBY));
+    expect('value' in ok && ok.value.rows).toHaveLength(3);
+    expect('error' in parseLotteryLobby('{bad')).toBe(true);
+    expect('error' in parseLotteryLobby(JSON.stringify({ ...LOBBY, rows: [] }))).toBe(true);
+    expect('error' in parseLotteryLobby(JSON.stringify({ ...LOBBY, title: '' }))).toBe(true);
+    expect('error' in parseLotteryLobby(JSON.stringify({ ...LOBBY, rows: [{ team: 'X' }] }))).toBe(
+      true,
+    );
+    // Unlike start, lobby has no commitment/delayMs — verify they're not required.
+    expect('value' in parseLotteryLobby(JSON.stringify({ ...LOBBY, commitment: undefined }))).toBe(
+      true,
+    );
+  });
+
   it('parseLotteryStart accepts a full payload and rejects partial ones', () => {
     const ok = parseLotteryStart(JSON.stringify(START));
     expect('value' in ok && ok.value.rows).toHaveLength(3);

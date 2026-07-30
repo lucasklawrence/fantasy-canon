@@ -123,6 +123,18 @@ export interface StageOddsRow {
  * `/api/lottery/*` payloads.
  */
 export interface RevealStage {
+  /**
+   * Arm the pre-commitment lobby (#198) — visible from `setup` onward so members can join
+   * the Activity before `begin` is called. Must be called best-effort (never awaited on the
+   * hot path); the stage accepts the same busy-check semantics as `start`.
+   */
+  lobby(lobby: {
+    title: string;
+    teamCount: number;
+    totalBalls: number;
+    rows: StageOddsRow[];
+    guildId?: string;
+  }): Promise<void>;
   start(start: {
     title: string;
     commitment: string;

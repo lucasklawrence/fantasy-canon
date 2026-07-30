@@ -27,6 +27,12 @@ describe('createHttpRevealStage', () => {
       fetchImpl: impl,
     });
 
+    await stage.lobby({
+      title: 'L',
+      teamCount: 2,
+      totalBalls: 3,
+      rows: [{ team: 'A', balls: 1, firstPct: 33.3, top3Pct: 100 }],
+    });
     await stage.start({
       title: 'L',
       commitment: 'h',
@@ -44,6 +50,7 @@ describe('createHttpRevealStage', () => {
     await stage.abort({ reason: 'r' });
 
     expect(calls.map((c) => c.url)).toEqual([
+      'http://127.0.0.1:9999/api/lottery/lobby',
       'http://127.0.0.1:9999/api/lottery/start',
       'http://127.0.0.1:9999/api/lottery/beat',
       'http://127.0.0.1:9999/api/lottery/reveal',

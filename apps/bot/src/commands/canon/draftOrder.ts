@@ -40,6 +40,7 @@ import {
   getCeremony,
   interruptedDisclosureContent,
   markPreviewPosted,
+  oddsRows,
   requestAbort,
   runCeremony,
   setCeremony,
@@ -333,6 +334,21 @@ export async function handleDraftOrderSetupSubcommand(
     markPreviewPosted(session);
     setCeremony(session);
 
+    // Best-effort: arm the Activity lobby (#198) so members can join before `begin`.
+    // Failures are logged but never propagate — the ceremony state is already committed above.
+    const lobbyRows = oddsRows(session);
+    void stageFromEnv()
+      .lobby({
+        title: session.title,
+        teamCount: session.config.teams.length,
+        totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
+        rows: lobbyRows,
+        guildId,
+      })
+      .catch((error: unknown) => {
+        console.error('[draftorder] failed to arm the Activity lobby:', error);
+      });
+
     await interaction.editReply({
       content: [
         `Odds preview posted — the bag is frozen at ${teams.length} teams. ` +
@@ -550,6 +566,22 @@ export async function handleDraftOrderMinigameSubcommand(
       .catch(() => undefined);
   } finally {
     session.miniGameActive = false;
+    // Best-effort: re-arm the Activity lobby so the odds reflect the updated bag.
+    // Guard: only re-arm if the session is still live and hasn't moved past GAME_OPEN.
+    if (getCeremony(guildId) === session && session.state === 'GAME_OPEN') {
+      const lobbyRows = oddsRows(session);
+      void stageFromEnv()
+        .lobby({
+          title: session.title,
+          teamCount: session.config.teams.length,
+          totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
+          rows: lobbyRows,
+          guildId,
+        })
+        .catch((error: unknown) => {
+          console.error('[draftorder] failed to re-arm the Activity lobby after minigame:', error);
+        });
+    }
   }
 }
 

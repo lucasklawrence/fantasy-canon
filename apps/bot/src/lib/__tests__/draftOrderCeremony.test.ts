@@ -34,6 +34,7 @@ function collectorStage(failing: { start?: boolean } = {}): {
   return {
     calls,
     stage: {
+      lobby: record('lobby'),
       start: record('start', failing.start),
       beat: record('beat'),
       reveal: record('reveal'),
