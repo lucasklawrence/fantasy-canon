@@ -419,8 +419,11 @@ describe('activity reveal stage (#169)', () => {
       stage,
     });
 
-    // Only the failed start reached the stage; the channel got the full card ceremony.
-    expect(calls.map(([m]) => m)).toEqual(['start']);
+    // The failed start, then a `clear` (#198) — the channel got the full card ceremony, so a lobby
+    // left armed by `setup` must not keep advertising a draw that already happened. No beats or
+    // reveals reach a stage that never opened.
+    expect(calls.map(([m]) => m)).toEqual(['start', 'clear']);
+    expect(calls.find(([m]) => m === 'clear')?.[1]).toEqual({ guildId: 'guild-1' });
     expect(posts.filter((p) => p.kind === 'beat')).toHaveLength(12);
     expect(posts.filter((p) => p.kind === 'reveal')).toHaveLength(12);
     expect(session.state).toBe('FINALIZED');

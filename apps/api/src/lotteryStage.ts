@@ -377,9 +377,15 @@ export function createLotteryStage(): LotteryStage {
       // Stricter than start()'s check, and deliberately not guild-scoped: a committed run owns the
       // stage outright. Overwriting `waiting`/`revealing` here would blank `start` (and therefore
       // the commitment line and odds table) while the pacing bot keeps POSTing beats, so a late
-      // joiner would land on a board with no commitment. The bot only arms a lobby from GAME_OPEN,
-      // so this rejection can only ever fire on a raced or retried POST — the 409 is the whole
-      // point. Finished/aborted/idle/lobby all re-arm freely (pre-commitment, nothing to protect).
+      // joiner would land on a board with no commitment. Finished/aborted/idle/lobby all re-arm
+      // freely — nothing committed is on screen to protect.
+      //
+      // Known trade-off: this also removes the accidental self-healing a laxer check gave us. If
+      // the stage is stranded mid-reveal (the bot died between `start` and `finish`, so no
+      // `finish`/`abort` ever arrives), every later `setup` now 409s and the lobby stays
+      // unavailable until the api restarts — where before, a same-guild lobby would have re-armed
+      // over it. Recovering that properly needs stage-side reconciliation (a TTL, or the bot
+      // reconciling at startup), not a weaker guard here.
       if (phase === 'waiting' || phase === 'revealing') {
         throw new StageBusyError();
       }

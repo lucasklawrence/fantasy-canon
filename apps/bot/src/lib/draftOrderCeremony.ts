@@ -729,6 +729,12 @@ export async function runCeremony(
           },
         }),
       );
+    } else if (options.stage) {
+      // Activity mode whose `start` failed: the reveal ran in-channel and the order is now public,
+      // but the lobby `setup` armed (#198) may still be up — advertising pre-draw odds for a draw
+      // that already happened, and shadowing the draft dashboard at the Activity root. Disarm it.
+      // Guild-scoped and lobby-only, so it cannot disturb whatever made `start` fail.
+      await safeStage(() => (options.stage as RevealStage).clear({ guildId: session.guildId }));
     }
     return session.draws;
   } catch (error) {
