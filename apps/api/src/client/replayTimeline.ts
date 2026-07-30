@@ -85,21 +85,41 @@ export function buildReplayTimeline(snapshot: LotterySnapshot): ReplayStep[] {
  */
 export type CatchUpVerdict = 'buffer' | 'ignore' | 'cancel';
 
-/** What the catch-up is currently replaying, for the echo check. */
+/** What the catch-up is currently replaying, for the echo and identity checks. */
 export interface CatchUpContext {
   /** Reveal count the running catch-up already knows about (source + everything buffered). */
   known: number;
   /** The finish it has already buffered, if the ceremony ended mid-catch-up. */
   finish?: LotteryFinish;
+  /**
+   * The commitment of the ceremony being caught up on. Reveal counts alone cannot tell a re-run
+   * apart from the original — a restarted draw reports `revealing` with its own (possibly shorter)
+   * history — so a mismatch here is the only reliable "this is a different ceremony" signal.
+   */
+  commitment?: string;
 }
 
-function sameFinishOrder(a: LotteryFinish | undefined, b: LotteryFinish | undefined): boolean {
+/** Two finishes describe the same sealed result. Shared so both modes' echo rules cannot drift. */
+export function sameFinishOrder(
+  a: LotteryFinish | undefined,
+  b: LotteryFinish | undefined,
+): boolean {
   return (
     !!a &&
     !!b &&
     a.verify.commitment === b.verify.commitment &&
     JSON.stringify(a.order) === JSON.stringify(b.order)
   );
+}
+
+/** Absolute `atMs` schedule → per-step gaps, for a chained playback cursor. */
+export function toPendingSteps(timeline: ReplayStep[]): { delayMs: number; event: LotteryEvent }[] {
+  let prev = 0;
+  return timeline.map((step) => {
+    const delayMs = Math.max(0, step.atMs - prev);
+    prev = step.atMs;
+    return { delayMs, event: step.event };
+  });
 }
 
 /**
@@ -136,16 +156,32 @@ export function classifyDuringCatchUp(
       const snapshot = event.snapshot;
       // A snapshot that opens a different ceremony, or reports one that ended badly, is news.
       if (snapshot.phase !== 'revealing' && snapshot.phase !== 'finished') return 'cancel';
-      // Otherwise it describes the same run. It carries no new picks and no new finish ⇒ pure
-      // echo from the polling fallback. If it *has* advanced past us, the incremental events are
-      // still coming over the same transport, so let those carry it rather than repainting —
-      // repainting mid-catch-up would blow the board away and defeat the whole feature.
+      // A re-run reports `revealing` too, and its history can be shorter than ours — so counts
+      // cannot distinguish it. The commitment can: a mismatch means we are animating a ceremony
+      // that no longer exists, and must stop rather than splice its picks onto ours.
+      if (
+        context.commitment !== undefined &&
+        snapshot.start !== undefined &&
+        snapshot.start.commitment !== context.commitment
+      ) {
+        return 'cancel';
+      }
+      // History going backwards without a commitment to prove otherwise is also not our run.
+      if (snapshot.reveals.length < context.known) return 'cancel';
+      // Otherwise it describes the same run. No new picks and no new finish ⇒ pure echo from the
+      // polling fallback. If it *has* advanced past us, buffer the remainder so a poll-only
+      // client still merges — repainting mid-catch-up would blow the board away instead.
       if (snapshot.reveals.length > context.known) return 'buffer';
       if (snapshot.finish && !sameFinishOrder(snapshot.finish, context.finish)) return 'buffer';
       return 'ignore';
     }
-    default:
+    default: {
+      // Exhaustive today; the `never` binding turns a future 8th event variant into a compile
+      // error rather than a silent 'cancel'.
+      const unreachable: never = event;
+      void unreachable;
       return 'cancel';
+    }
   }
 }
 
@@ -159,7 +195,16 @@ export function catchUpTailFromSnapshot(
   context: CatchUpContext,
 ): LotteryEvent[] {
   const tail: LotteryEvent[] = [];
-  for (const reveal of snapshot.reveals.slice(context.known)) {
+  // Each reveal gets its drum-roll, exactly as `buildReplayTimeline` pairs them. Without the beat
+  // the hopper stops spinning and the pull animation never fires, so the fallback transport would
+  // visibly degrade the moment playback crossed from the built timeline into this tail.
+  for (let i = context.known; i < snapshot.reveals.length; i += 1) {
+    const reveal = snapshot.reveals[i];
+    const previous = snapshot.reveals[i - 1];
+    // A beat's `remaining` includes the team about to be drawn — that's whatever the previous
+    // reveal left in the hopper, or (no previous) this reveal's leftovers plus its own team.
+    const remaining = previous ? previous.remaining : [reveal.team, ...reveal.remaining];
+    tail.push({ type: 'lottery-beat', beat: { pick: reveal.pick, remaining } });
     tail.push({ type: 'lottery-reveal', reveal });
   }
   if (snapshot.finish && !sameFinishOrder(snapshot.finish, context.finish)) {

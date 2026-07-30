@@ -3,6 +3,7 @@ import {
   buildReplayTimeline,
   catchUpTailFromSnapshot,
   classifyDuringCatchUp,
+  toPendingSteps,
   REPLAY_DWELL_MS,
   REPLAY_MAX_STEP_MS,
   replayStepMs,
@@ -208,12 +209,13 @@ describe('classifyDuringCatchUp (#203)', () => {
 });
 
 describe('catchUpTailFromSnapshot (#203)', () => {
-  it('emits only the reveals the catch-up has not accounted for', () => {
+  it('emits only the picks the catch-up has not accounted for', () => {
     const tail = catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, MID);
-    expect(tail.map((e) => e.type)).toEqual(['lottery-reveal', 'lottery-reveal']);
-    expect(tail).toEqual([
-      { type: 'lottery-reveal', reveal: REVEALS[1] },
-      { type: 'lottery-reveal', reveal: REVEALS[2] },
+    // Picks 2 and 1 only — pick 3 is already known. Each carries its drum-roll (see the
+    // drum-rolls describe below for why the beat matters).
+    expect(tail.flatMap((e) => (e.type === 'lottery-reveal' ? [e.reveal] : []))).toEqual([
+      REVEALS[1],
+      REVEALS[2],
     ]);
   });
 
@@ -229,5 +231,99 @@ describe('catchUpTailFromSnapshot (#203)', () => {
     expect(catchUpTailFromSnapshot(FINISHED, { known: REVEALS.length, finish: FINISH })).toEqual(
       [],
     );
+  });
+});
+
+describe('toPendingSteps (#203 pacing conversion)', () => {
+  it('reproduces the absolute schedule exactly as per-step gaps', () => {
+    // The #197 replay moved from absolute setTimeout(atMs) to a chained cursor so a catch-up can
+    // append to a running schedule. This pins that the observable pacing did not change.
+    const timeline = buildReplayTimeline(FINISHED);
+    const steps = toPendingSteps(timeline);
+    expect(steps.map((s) => s.delayMs)).toEqual([
+      0, // first step fires immediately, as setTimeout(fn, 0) did
+      REPLAY_MAX_STEP_MS, // beat → reveal: the drum-roll window
+      REPLAY_DWELL_MS, // reveal → next beat: the dwell
+      REPLAY_MAX_STEP_MS,
+      REPLAY_DWELL_MS,
+      REPLAY_MAX_STEP_MS,
+      REPLAY_DWELL_MS, // last drop → finale
+    ]);
+    // Cumulative gaps must land back on the original absolute times.
+    let t = 0;
+    steps.forEach((step, i) => {
+      t += step.delayMs;
+      expect(t).toBe(timeline[i].atMs);
+    });
+    expect(steps.map((s) => s.event)).toEqual(timeline.map((s) => s.event));
+  });
+
+  it('is empty for an empty timeline', () => {
+    expect(toPendingSteps([])).toEqual([]);
+  });
+});
+
+describe('catch-up ceremony identity (#203)', () => {
+  const RERUN_START: LotteryStart = { ...START, commitment: 'different-hash' };
+
+  it('cancels when a revealing snapshot belongs to a different ceremony', () => {
+    // A re-run reports `revealing` with its own history, so reveal counts cannot tell it apart —
+    // only the commitment can. Without this the new run's picks splice onto the old replay.
+    const snapshot: LotterySnapshot = {
+      phase: 'revealing',
+      start: RERUN_START,
+      reveals: REVEALS,
+    };
+    expect(
+      classifyDuringCatchUp({ type: 'lottery-state', snapshot }, { known: 1, commitment: 'hash' }),
+    ).toBe('cancel');
+  });
+
+  it('still buffers when the commitment matches', () => {
+    const snapshot: LotterySnapshot = { phase: 'revealing', start: START, reveals: REVEALS };
+    expect(
+      classifyDuringCatchUp({ type: 'lottery-state', snapshot }, { known: 1, commitment: 'hash' }),
+    ).toBe('buffer');
+  });
+
+  it('cancels when history goes backwards, even with no commitment to compare', () => {
+    const snapshot: LotterySnapshot = { phase: 'revealing', reveals: REVEALS.slice(0, 1) };
+    expect(classifyDuringCatchUp({ type: 'lottery-state', snapshot }, { known: 3 })).toBe('cancel');
+  });
+});
+
+describe('catchUpTailFromSnapshot drum-rolls (#203)', () => {
+  it('pairs every tail reveal with its beat, so the fallback keeps the full animation', () => {
+    // Reveal-only tails would stop the hopper spinning and skip the pull — a visible fidelity
+    // cliff the moment playback crossed from the built timeline into the tail.
+    const tail = catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, { known: 1 });
+    expect(tail.map((e) => e.type)).toEqual([
+      'lottery-beat',
+      'lottery-reveal',
+      'lottery-beat',
+      'lottery-reveal',
+    ]);
+  });
+
+  it("reconstructs each tail beat's remaining from the previous reveal", () => {
+    const tail = catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, { known: 1 });
+    const beats = tail.flatMap((e) => (e.type === 'lottery-beat' ? [e.beat] : []));
+    expect(beats[0]).toEqual({ pick: 2, remaining: REVEALS[0].remaining });
+    expect(beats[1]).toEqual({ pick: 1, remaining: REVEALS[1].remaining });
+  });
+
+  it('from known:0 the first beat still includes the team about to be drawn', () => {
+    const tail = catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, { known: 0 });
+    const first = tail[0];
+    expect(first.type === 'lottery-beat' && first.beat.remaining).toEqual([
+      REVEALS[0].team,
+      ...REVEALS[0].remaining,
+    ]);
+  });
+
+  it('yields nothing when the snapshot is shorter than what the catch-up knows', () => {
+    expect(
+      catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS.slice(0, 1) }, { known: 3 }),
+    ).toEqual([]);
   });
 });
