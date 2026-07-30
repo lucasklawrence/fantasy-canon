@@ -2,7 +2,7 @@
  * Draft-order lottery ceremony orchestration (#164, ADR 0006).
  *
  * Pure-ish flow logic: no discord.js imports. The command layer injects an {@link CeremonyIo}
- * that posts to the channel and a sleep, so the whole ceremony — commit → paced worst-to-first
+ * that posts to the channel and a sleep, so the whole ceremony — commit → paced ball-by-ball
  * reveal → board → seed reveal — is unit-testable with an instant clock and a post collector.
  *
  * Fairness protocol (ADR 0006 + the #174 hardening):
@@ -107,6 +107,15 @@ export interface RunCeremonyOptions {
    * remains the single pacer; the stage is presentation-only.
    */
   stage?: RevealStage;
+  /**
+   * Reveal order for the paced ball-by-ball sequence (#196).
+   *   - `'worst-to-first'` (default) — reveal pick N down to pick 1; suspense builds to the #1 pick.
+   *   - `'first-to-last'` — reveal pick 1 first, then 2…N; drama shifts to who falls last.
+   *
+   * The underlying draw (and the commitment it binds) is the same either way; this only controls
+   * which pick is announced first. The Activity stage and channel cards are both order-agnostic.
+   */
+  direction?: 'worst-to-first' | 'first-to-last';
 }
 
 /** One row of the stage's pre-reveal odds table (matches the api's `LotteryOddsRow`). */
@@ -307,7 +316,7 @@ const HYPE_TEMPLATES: ((f: {
   (f) =>
     `⏳ Lottery night approaches. ${f.totalBalls} balls are already sealed in the hopper for **${f.title}** — nobody can touch them now.`,
   (f) =>
-    `🍿 Reminder: **${f.title}** settles it live, worst to first. ${f.teamCount} destinies, one draw, zero do-overs.`,
+    `🍿 Reminder: **${f.title}** settles it live, one ball at a time. ${f.teamCount} destinies, one draw, zero do-overs.`,
 ];
 
 /**
@@ -383,7 +392,7 @@ function verificationContent(session: CeremonySession): string {
     '**Verify it yourself:**',
     `1. Rebuild the commitment: sha256 of \`{"algorithm":"${DRAW_ALGORITHM}","seed":"<secret>","baseBallCount":${config.baseBallCount ?? 1},"teams":[{teamId, balls}…]}\` with balls \`${ballList}\` — it must equal the hash on the commitment post.`,
     '2. Replay the draw: `verifyHardenedDraw(secret, salt, config)` from `@fantasy-canon/core` (each draw hashes `sha256(drawSeed:drawIndex)`, first 4 bytes → big-endian uint32 → mod bag size, drawn team leaves the bag).',
-    '3. The replayed order must match the picks revealed above, worst to first.',
+    '3. The replayed draw order must match the picks revealed above.',
   ].join('\n');
 }
 
@@ -403,10 +412,15 @@ function revealData(
   draws: LotteryDraw[],
   odds: TeamPickOdds[],
   pick: number,
+  direction: 'worst-to-first' | 'first-to-last',
 ): RevealData {
   const draw = draws.find((d) => d.pick === pick) as LotteryDraw;
   const oddsByTeam = new Map(odds.map((o) => [o.teamId, o]));
-  const unrevealedDraws = draws.filter((d) => d.pick <= pick).sort((a, b) => a.pick - b.pick);
+  // Unrevealed draws: worst-to-first counts down (picks ≤ current still pending);
+  // first-to-last counts up (picks ≥ current still pending). Sort ascending for stable display.
+  const unrevealedDraws = draws
+    .filter((d) => (direction === 'worst-to-first' ? d.pick <= pick : d.pick >= pick))
+    .sort((a, b) => a.pick - b.pick);
   const remaining = unrevealedDraws.map((d) => displayName(session, d.teamId));
   const remainingAfter = unrevealedDraws
     .filter((d) => d.teamId !== draw.teamId)
@@ -546,7 +560,7 @@ async function postAbortDisclosure(session: CeremonySession, io: CeremonyIo): Pr
 }
 
 /**
- * Run the ceremony end to end: commitment → paced worst-to-first reveal → final board →
+ * Run the ceremony end to end: commitment → paced ball-by-ball reveal → final board →
  * seed reveal. Resolves with the draws on success; throws {@link CeremonyAborted} after
  * posting the abort disclosure if the commissioner aborts.
  */
@@ -632,10 +646,16 @@ export async function runCeremony(
       }
     };
 
-    // REVEAL — worst to first: to the Activity stage when open, else as channel card posts.
-    for (let pick = session.config.teams.length; pick >= 1; pick -= 1) {
+    // REVEAL — ordered by direction option (default: worst-to-first).
+    const direction = options.direction ?? 'worst-to-first';
+    const teamCount = session.config.teams.length;
+    const pickSequence =
+      direction === 'worst-to-first'
+        ? Array.from({ length: teamCount }, (_, i) => teamCount - i)
+        : Array.from({ length: teamCount }, (_, i) => i + 1);
+    for (const pick of pickSequence) {
       throwIfAborted(session);
-      const data = revealData(session, session.draws, odds, pick);
+      const data = revealData(session, session.draws, odds, pick, direction);
       const stage = liveStage;
       if (stage) {
         await safeStage(() => stage.beat({ pick, remaining: data.remaining }));

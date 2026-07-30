@@ -2,7 +2,7 @@
  * `/canon draftorder` — the draft-order lottery ceremony (#164, ADR 0006).
  *
  * Two-step flow: `setup` posts the public odds preview and freezes the bag; `begin` posts the
- * commitment and runs the paced worst-to-first reveal on regular channel messages (never
+ * commitment and runs the paced ball-by-ball reveal on regular channel messages (never
  * interaction responses — the ceremony outlives any interaction token). `abort` follows the
  * ADR 0006 disclosure policy; `status` is an ephemeral peek. Between them, the optional
  * `minigame` (#166) runs the reaction round while the bag is still mutable — its results and
@@ -385,9 +385,13 @@ export async function handleDraftOrderBeginSubcommand(
 
   const delaySeconds = interaction.options.getInteger('delay') ?? DEFAULT_REVEAL_DELAY_SECONDS;
   const stageMode = interaction.options.getString('stage') ?? 'channel';
+  const direction = (interaction.options.getString('direction') ?? 'worst-to-first') as
+    'worst-to-first' | 'first-to-last';
 
+  const directionNote =
+    direction === 'first-to-last' ? ' Revealing pick #1 first (first-to-last).' : '';
   await interaction.reply({
-    content: `Sealing the bag — commitment posts now, first reveal ~${delaySeconds}s after its drum roll.${stageMode === 'activity' ? ' The reveal streams in the Lottery Machine Activity.' : ''} Abort with \`/canon draftorder abort\` (the seed gets revealed either way).`,
+    content: `Sealing the bag — commitment posts now, first reveal ~${delaySeconds}s after its drum roll.${stageMode === 'activity' ? ' The reveal streams in the Lottery Machine Activity.' : ''}${directionNote} Abort with \`/canon draftorder abort\` (the seed gets revealed either way).`,
     flags: MessageFlags.Ephemeral,
   });
 
@@ -450,6 +454,7 @@ export async function handleDraftOrderBeginSubcommand(
   // 15-minute token. Errors land in the channel via the abort disclosure + the log.
   void runCeremony(session, channelIo(channel), {
     delayMs: delaySeconds * 1000,
+    direction,
     store: createFileCeremonyStore(),
     stage: stageMode === 'activity' ? stageFromEnv() : undefined,
   }).catch((error) => {
