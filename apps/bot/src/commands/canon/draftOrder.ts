@@ -794,6 +794,9 @@ async function reconcileStage(
   if (hasRunningCeremony()) return;
   try {
     const snapshot = await stage.state();
+    // Re-check after the async fetch (same pattern as the disclosure loop): a `begin` that
+    // started during the GET must not have its fresh ceremony torn down over a stale snapshot.
+    if (hasRunningCeremony()) return;
     if (snapshot.phase === 'lobby') {
       // Targeted disarm via the existing lobby-only, guild-scoped route — never touches a
       // committed run even if a race arms one between the GET and this POST.

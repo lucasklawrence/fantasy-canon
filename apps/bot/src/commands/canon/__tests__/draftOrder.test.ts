@@ -727,6 +727,32 @@ describe('recoverInterruptedCeremonies (#176)', () => {
     }
   });
 
+  it('re-checks for a live ceremony after the state fetch — a racing begin wins (#205)', async () => {
+    const { stage, aborted, cleared } = fakeStage({
+      phase: 'revealing',
+      start: { commitment: 'stale-hash' },
+    });
+    const racing: InspectableRevealStage = {
+      ...stage,
+      state: () => {
+        // A begin lands while the reconciler's GET is in flight — the stale snapshot must lose.
+        const live = createCeremony('guild-9', 'Racing', { teams: [{ teamId: 'a' }] }, new Map());
+        live.state = 'LOTTERY_RUNNING';
+        setCeremony(live);
+        return stage.state();
+      },
+    };
+
+    await recoverInterruptedCeremonies(
+      fakeClient(() => Promise.resolve(null)),
+      createMemoryCeremonyStore(),
+      racing,
+    );
+
+    expect(aborted).toHaveLength(0);
+    expect(cleared).toHaveLength(0);
+  });
+
   it('survives an unreachable stage at boot — disclosure still completes (#205)', async () => {
     const store = createMemoryCeremonyStore();
     store.saveCommitted(pendingRecord());
