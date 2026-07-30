@@ -698,7 +698,7 @@ export const canonCommand = new SlashCommandBuilder()
       .addSubcommand((sub) =>
         sub
           .setName('begin')
-          .setDescription('Post the commitment and run the worst-to-first reveal')
+          .setDescription('Post the commitment and run the ball-by-ball reveal')
           .addIntegerOption((opt) =>
             opt
               .setName('delay')
@@ -713,6 +713,21 @@ export const canonCommand = new SlashCommandBuilder()
               .addChoices(
                 { name: 'channel — card posts in this channel', value: 'channel' },
                 { name: 'activity — the Lottery Machine (Embedded App)', value: 'activity' },
+              ),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('direction')
+              .setDescription('Reveal order (default: worst-to-first — suspense builds to pick #1)')
+              .addChoices(
+                {
+                  name: 'worst-to-first — reveal from pick 12 down to pick 1 (default)',
+                  value: 'worst-to-first',
+                },
+                {
+                  name: 'first-to-last — reveal pick #1 first, then 2…N',
+                  value: 'first-to-last',
+                },
               ),
           ),
       )
