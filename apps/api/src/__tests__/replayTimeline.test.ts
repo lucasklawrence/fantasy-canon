@@ -327,3 +327,31 @@ describe('catchUpTailFromSnapshot drum-rolls (#203)', () => {
     ).toEqual([]);
   });
 });
+
+describe('catch-up stale vs different-run disambiguation (#203)', () => {
+  const shorter: LotterySnapshot = {
+    phase: 'revealing',
+    start: START,
+    reveals: REVEALS.slice(0, 1),
+  };
+
+  it('ignores a shorter snapshot when the commitment proves it is our own run', () => {
+    // Overlapping polls are routine on the fallback transport: a later response can land before
+    // an earlier one. Cancelling would discard the catch-up and repaint the board backwards.
+    expect(
+      classifyDuringCatchUp(
+        { type: 'lottery-state', snapshot: shorter },
+        { known: 3, commitment: 'hash' },
+      ),
+    ).toBe('ignore');
+  });
+
+  it('still cancels a shorter snapshot when identity cannot be established', () => {
+    expect(
+      classifyDuringCatchUp(
+        { type: 'lottery-state', snapshot: { phase: 'revealing', reveals: REVEALS.slice(0, 1) } },
+        { known: 3 },
+      ),
+    ).toBe('cancel');
+  });
+});

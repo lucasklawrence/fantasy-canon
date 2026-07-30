@@ -159,15 +159,15 @@ export function classifyDuringCatchUp(
       // A re-run reports `revealing` too, and its history can be shorter than ours — so counts
       // cannot distinguish it. The commitment can: a mismatch means we are animating a ceremony
       // that no longer exists, and must stop rather than splice its picks onto ours.
-      if (
-        context.commitment !== undefined &&
-        snapshot.start !== undefined &&
-        snapshot.start.commitment !== context.commitment
-      ) {
-        return 'cancel';
+      const identified = context.commitment !== undefined && snapshot.start !== undefined;
+      if (identified && snapshot.start?.commitment !== context.commitment) return 'cancel';
+      if (snapshot.reveals.length < context.known) {
+        // Shorter history: a different (shorter) run if we cannot prove otherwise — but when the
+        // commitment matches it is our own run, and this is just a stale or out-of-order delivery.
+        // Overlapping polls make that routine on the fallback transport, and cancelling on one
+        // would throw away the catch-up and repaint the board a pick backwards.
+        return identified ? 'ignore' : 'cancel';
       }
-      // History going backwards without a commitment to prove otherwise is also not our run.
-      if (snapshot.reveals.length < context.known) return 'cancel';
       // Otherwise it describes the same run. No new picks and no new finish ⇒ pure echo from the
       // polling fallback. If it *has* advanced past us, buffer the remainder so a poll-only
       // client still merges — repainting mid-catch-up would blow the board away instead.

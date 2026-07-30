@@ -671,6 +671,9 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       show('abort', true);
       byId('abort-reason').textContent = snapshot.abort?.reason ?? 'The ceremony was aborted.';
       setStatus('aborted', 'err');
+      // The board (and the button inside it) stays up, so retract the offer explicitly — an inert
+      // "catch up" control sitting on a fairness-critical failure screen is its own problem.
+      updateReplayAffordance();
       break;
   }
 }
@@ -691,10 +694,16 @@ function applyEvent(event: LotteryEvent): void {
       renderSnapshot({ phase: 'waiting', start: event.start, reveals: [] });
       break;
     case 'lottery-beat':
+      // The draw is running. The server only pushes a full `lottery-state` on WS connect, so for
+      // a client that was already watching (the whole lobby, per #198) these incremental events
+      // are the *only* signal that `waiting` became `revealing` — without this the catch-up offer
+      // would never appear for anyone except a strict mid-ceremony joiner.
+      livePhase = 'revealing';
       setStatus('live reveal', 'live');
       renderDrum(event.beat.pick, event.beat.remaining);
       break;
     case 'lottery-reveal':
+      livePhase = 'revealing';
       reveals.push(event.reveal);
       renderDrop(event.reveal);
       renderBoard(reveals);
