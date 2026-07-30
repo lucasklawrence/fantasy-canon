@@ -721,7 +721,7 @@ export const canonCommand = new SlashCommandBuilder()
               .setDescription('Reveal order (default: worst-to-first — suspense builds to pick #1)')
               .addChoices(
                 {
-                  name: 'worst-to-first — reveal from pick 12 down to pick 1 (default)',
+                  name: 'worst-to-first — reveal last pick down to pick 1 (default)',
                   value: 'worst-to-first',
                 },
                 {
