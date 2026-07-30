@@ -111,6 +111,31 @@ describe('runCeremony', () => {
     expect(beatPicks).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
   });
 
+  it('reveals first-to-last when direction:first-to-last is set', async () => {
+    const session = makeSession();
+    const { io, posts } = collectorIo();
+
+    await runCeremony(session, io, {
+      delayMs: 0,
+      sleep: instantSleep,
+      seedSource: () => 'seed',
+      direction: 'first-to-last',
+    });
+
+    const kinds = posts.map((p) => p.kind);
+    // Same structure as worst-to-first, just pick order flipped.
+    expect(kinds).toEqual([
+      'commitment',
+      ...Array.from({ length: 12 }, () => ['beat', 'reveal']).flat(),
+      'board',
+      'seed-reveal',
+    ]);
+    const beatPicks = posts
+      .filter((p) => p.kind === 'beat')
+      .map((p) => Number(/#(\d+)/.exec(p.content ?? '')?.[1]));
+    expect(beatPicks).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  });
+
   it('announced order equals verifyDraw for the committed configuration (draw seed = secret|commitMessageId)', async () => {
     const session = makeSession();
     const { io } = collectorIo();
@@ -386,7 +411,7 @@ describe('activity reveal stage (#169)', () => {
     expect(start.teamCount).toBe(12);
     expect(start.rows).toHaveLength(12);
 
-    // Beats pace worst-to-first and the finish carries the full order + verify info.
+    // Default direction (worst-to-first): beats count down 12…1; finish carries full order + verify info.
     const beatPicks = calls
       .filter(([m]) => m === 'beat')
       .map(([, p]) => (p as { pick: number }).pick);
@@ -405,6 +430,47 @@ describe('activity reveal stage (#169)', () => {
     expect(finish.verify.secretSeed).toBe('stage-secret');
     expect(finish.verify.salt).toBe('msg-1');
     expect(finish.verify.drawSeed).toBe(composeDrawSeed('stage-secret', 'msg-1'));
+  });
+
+  it('streams beats first-to-last when direction:first-to-last is set; remaining list shrinks correctly', async () => {
+    const session = makeSession();
+    const { io } = collectorIo();
+    const { stage, calls } = collectorStage();
+
+    await runCeremony(session, io, {
+      delayMs: 0,
+      sleep: instantSleep,
+      seedSource: () => 'ftl-secret',
+      stage,
+      direction: 'first-to-last',
+    });
+
+    // Stage: start → 12×(beat, reveal) → finish.
+    expect(calls.map(([m]) => m)).toEqual([
+      'start',
+      ...Array.from({ length: 12 }, () => ['beat', 'reveal']).flat(),
+      'finish',
+    ]);
+
+    // Beats count up 1…12, not 12…1.
+    const beatPicks = calls
+      .filter(([m]) => m === 'beat')
+      .map(([, p]) => (p as { pick: number }).pick);
+    expect(beatPicks).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+
+    // The first beat (pick 1) must have all 12 teams still in the hopper.
+    const firstBeat = calls.find(([m]) => m === 'beat')?.[1] as {
+      pick: number;
+      remaining: string[];
+    };
+    expect(firstBeat.remaining).toHaveLength(12);
+
+    // The last reveal (pick 12) must have an empty remaining-after list.
+    const lastReveal = [...calls].reverse().find(([m]) => m === 'reveal')?.[1] as {
+      pick: number;
+      remaining: string[];
+    };
+    expect(lastReveal.remaining).toHaveLength(0);
   });
 
   it('falls back to the in-channel reveal when the stage cannot even start', async () => {
