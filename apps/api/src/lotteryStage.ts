@@ -84,7 +84,11 @@ export interface LotteryLobby {
   teamCount: number;
   totalBalls: number;
   rows: LotteryOddsRow[];
-  /** Originating guild — same busy-check semantics as {@link LotteryStart.guildId}. */
+  /**
+   * Originating guild, echoed into events and snapshots, and matched by {@link LotteryStage.clear}
+   * so one league cannot disarm another's lobby. Unlike {@link LotteryStart.guildId} it does *not*
+   * gate the busy check — {@link LotteryStage.lobby} refuses a committed run guild-agnostically.
+   */
   guildId?: string;
 }
 
