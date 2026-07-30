@@ -4,18 +4,21 @@
  *
  * Pure presentation: every state change arrives from the backend stage (WS push, polling
  * fallback), which the bot paces — this client never draws, times, or decides anything. It
- * renders the full drama: waiting-room odds table → hopper spin + drum-roll → ball drop with a
- * per-pick odds flash → the growing order board → final board + seed-verify panel (or the abort
- * banner). Inside Discord it runs the shared SDK handshake and `/.proxy` transport; standalone
- * (dev) it skips the SDK — same split as the draft board client.
+ * renders the full drama: waiting-room odds table → hopper spin + drum-roll → the pull (a ball
+ * drawn through the chute, timed against the beat window, #195) → ball drop with a per-pick odds
+ * flash → the growing order board → final board + seed-verify panel (or the abort banner).
+ * Inside Discord it runs the shared SDK handshake and `/.proxy` transport; standalone (dev) it
+ * skips the SDK — same split as the draft board client.
  */
 
 import type {
   LotteryEvent,
+  LotteryFinish,
   LotteryReveal,
   LotterySnapshot,
   LotteryStart,
 } from '../lotteryStage.js';
+import { buildReplayTimeline, REPLAY_MAX_STEP_MS, replayStepMs } from './replayTimeline.js';
 import { runHandshake } from './sdk.js';
 import { apiPath, isDiscordActivity, proxyBase, wsUrl } from './transport.js';
 
@@ -95,6 +98,7 @@ function paintBoardList(
 }
 
 function renderWaiting(start: LotteryStart): void {
+  currentStart = start; // remembered for pull scheduling (delayMs) across later phases
   byId('title').textContent = start.title;
   byId('waiting-sub').textContent =
     `${start.teamCount} teams · ${start.totalBalls} balls in the hopper`;
@@ -122,26 +126,98 @@ function renderWaiting(start: LotteryStart): void {
 /** Cosmetic only — ball positions/timings are random because they represent nothing. */
 function fillHopper(totalBalls: number): void {
   const hopper = byId('hopper');
-  clear(hopper);
-  const count = Math.min(totalBalls, 36);
+  // Keep the #suck-ball pull element (static markup) — only the decorative balls are rebuilt.
+  for (const stale of [...hopper.querySelectorAll('.ball')]) stale.remove();
+  const count = Math.min(totalBalls, 48);
   for (let i = 0; i < count; i += 1) {
-    const ball = el('div', 'ball');
+    // Two keyframe variants + randomized period/size via custom props (see lotteryPage.ts CSS)
+    // so the pile reads as physical tumbling, not one synchronized wobble.
+    const ball = el('div', i % 2 === 0 ? 'ball' : 'ball alt');
     ball.style.left = `${8 + Math.random() * 75}%`;
-    ball.style.top = `${35 + Math.random() * 50}%`;
-    ball.style.animationDelay = `${-Math.random() * 1.2}s`;
-    const scale = 0.7 + Math.random() * 0.5;
-    ball.style.transform = `scale(${scale})`;
+    ball.style.top = `${30 + Math.random() * 55}%`;
+    ball.style.animationDelay = `${-Math.random() * 1.6}s`;
+    ball.style.setProperty('--jig', `${(0.9 + Math.random() * 0.9).toFixed(2)}s`);
+    ball.style.setProperty('--s', (0.55 + Math.random() * 0.45).toFixed(2));
     hopper.appendChild(ball);
   }
 }
 
-function renderDrum(pick: number, remaining: string[]): void {
+// --- the pull (#195): a ball leaves the hopper through the chute during the drum-roll window ---
+
+/** Suck-to-chute + tube descent (must track the `suck`/`tube` keyframe timings in the CSS). */
+const PULL_MS = 1000;
+let pullTimer: ReturnType<typeof setTimeout> | null = null;
+/** Beat pick the pull is armed for — poll repaints of the same beat must not restart it. */
+let armedPick: number | null = null;
+/** Last reveal actually animated — repeat paints of the same reveal only refresh text. */
+let lastDropPick: number | null = null;
+// The live pacing, kept for scheduling the pull against the beat window.
+let currentStart: LotteryStart | undefined;
+
+/**
+ * Schedule the pull so the ball reaches the chute exit just before the reveal lands: the bot
+ * paces `beat → delayMs → reveal`, so the pull starts at `windowMs - PULL_MS`. Network jitter is
+ * fine either way — the ball waits pulsing at the exit, or the reveal fast-forwards past the pull.
+ */
+function armPull(pick: number, windowMs: number): void {
+  if (armedPick === pick) return;
+  cancelPull();
+  armedPick = pick;
+  const lead = Math.max(0, windowMs - PULL_MS - 150);
+  pullTimer = setTimeout(() => {
+    byId('machine-left').classList.add('pulling');
+    byId('chute').classList.add('active');
+  }, lead);
+}
+
+function cancelPull(): void {
+  if (pullTimer) {
+    clearTimeout(pullTimer);
+    pullTimer = null;
+  }
+  armedPick = null;
+  byId('machine-left').classList.remove('pulling');
+  byId('chute').classList.remove('active');
+}
+
+/** Swap a node for a bare clone — the only way to retrigger its CSS animations. */
+function replaceNode(id: string): HTMLElement {
+  const old = byId(id);
+  const fresh = old.cloneNode(false) as HTMLElement;
+  old.replaceWith(fresh);
+  return fresh;
+}
+
+/**
+ * FLIP handoff: the drop ball starts at the chute exit (where the pulled ball just arrived) and
+ * springs to its resting spot — the pull and the reveal read as one continuous motion.
+ */
+function flipFromChute(ball: HTMLElement, from: DOMRect): void {
+  const to = ball.getBoundingClientRect();
+  if (!to.width || !from.width) {
+    ball.classList.add('fall'); // measurement failed — fall back to the plain drop-in
+    return;
+  }
+  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+  const dy = from.bottom - 7 - (to.top + to.height / 2);
+  ball.style.transform = `translate(${dx}px, ${dy}px) scale(.14)`;
+  // Double rAF: the start transform must paint before the transition begins.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      ball.classList.add('flip');
+      ball.style.transform = '';
+    });
+  });
+}
+
+function renderDrum(pick: number, remaining: string[], windowMs?: number): void {
   show('waiting', false);
   show('stage', true);
   show('drop', false);
   byId('drum').classList.remove('hidden');
   byId('hopper').classList.add('spinning');
   byId('drum-now').textContent = `Drawing pick #${pick}…`;
+  armPull(pick, windowMs ?? currentStart?.delayMs ?? 4000);
   const chips = byId('drum-remaining');
   clear(chips);
   for (const team of remaining) chips.appendChild(el('span', 'chip', team));
@@ -151,14 +227,25 @@ function renderDrop(reveal: LotteryReveal): void {
   show('stage', true);
   byId('hopper').classList.remove('spinning');
   show('drop', true);
-  // Re-trigger the CSS drop animation for every reveal by replacing the ball node.
-  const oldBall = byId('drop-pick');
-  const fresh = oldBall.cloneNode(false) as HTMLElement;
-  oldBall.replaceWith(fresh);
-  fresh.textContent = `#${reveal.pick}`;
-  byId('drop-team').textContent = reveal.team;
-  byId('drop-odds').textContent =
-    `${reveal.balls} ball${reveal.balls === 1 ? '' : 's'} · ${reveal.oddsPct.toFixed(1)}% chance at this slot`;
+  const rerun = lastDropPick !== reveal.pick;
+  lastDropPick = reveal.pick;
+  // Measure the chute exit BEFORE tearing down the pull so the handoff starts where it ended.
+  const chuteRect = byId('chute').getBoundingClientRect();
+  cancelPull();
+  const oddsText = `${reveal.balls} ball${reveal.balls === 1 ? '' : 's'} · ${reveal.oddsPct.toFixed(1)}% chance at this slot`;
+  if (rerun) {
+    // Replace the animated nodes to retrigger their CSS animations for this reveal.
+    const ball = replaceNode('drop-pick');
+    ball.textContent = `#${reveal.pick}`;
+    replaceNode('drop-team').textContent = reveal.team;
+    replaceNode('drop-odds').textContent = oddsText;
+    flipFromChute(ball, chuteRect);
+  } else {
+    // A polling repaint of an already-shown reveal refreshes text without re-animating.
+    byId('drop-pick').textContent = `#${reveal.pick}`;
+    byId('drop-team').textContent = reveal.team;
+    byId('drop-odds').textContent = oddsText;
+  }
   const chips = byId('drum-remaining');
   clear(chips);
   for (const team of reveal.remaining) chips.appendChild(el('span', 'chip', team));
@@ -170,6 +257,7 @@ function renderDrop(reveal: LotteryReveal): void {
 let celebrated = false;
 
 function renderFinish(snapshot: LotterySnapshot): void {
+  cancelPull();
   show('waiting', false);
   show('stage', false);
   if (snapshot.finish) {
@@ -187,10 +275,115 @@ function renderFinish(snapshot: LotterySnapshot): void {
     show('verify', true);
   }
   setStatus('final order sealed', 'live');
+  // Capture the replay source (#197): the full published history this render was built from.
+  // The event path passes no `start`, so fall back to the one remembered from `lottery-start`.
+  const start = snapshot.start ?? currentStart;
+  finishedSnapshot = {
+    phase: 'finished',
+    reveals: [...snapshot.reveals],
+    ...(start ? { start } : {}),
+    ...(snapshot.finish ? { finish: snapshot.finish } : {}),
+  };
+  show('replay-btn', snapshot.reveals.length > 0 || !!snapshot.finish);
   if (!celebrated) {
     celebrated = true;
     confetti();
   }
+}
+
+// --- replay (#197): re-run the published reveal locally; live events always win ---
+
+let finishedSnapshot: LotterySnapshot | null = null;
+let replayTimers: number[] = [];
+let replaying = false;
+let replayWindowMs = REPLAY_MAX_STEP_MS;
+
+function sameFinish(a: LotteryFinish | undefined, b: LotteryFinish | undefined): boolean {
+  return (
+    !!a &&
+    !!b &&
+    a.verify.commitment === b.verify.commitment &&
+    JSON.stringify(a.order) === JSON.stringify(b.order)
+  );
+}
+
+/**
+ * During a replay, a repaint of the same finished ceremony (the polling fallback re-serving the
+ * snapshot, a WS reconnect state push) is an echo — ignored, the replay runs on. Anything else
+ * (a new start, an abort, a different finish) is real news: the caller cancels the replay and
+ * applies it. Replay is a lens, not a fork.
+ */
+function isReplayEcho(event: LotteryEvent): boolean {
+  if (event.type === 'lottery-state') {
+    return (
+      event.snapshot.phase === 'finished' &&
+      sameFinish(event.snapshot.finish, finishedSnapshot?.finish)
+    );
+  }
+  if (event.type === 'lottery-finish') return sameFinish(event.finish, finishedSnapshot?.finish);
+  return false;
+}
+
+function applyReplayStep(event: LotteryEvent): void {
+  switch (event.type) {
+    case 'lottery-beat':
+      renderDrum(event.beat.pick, event.beat.remaining, replayWindowMs);
+      setStatus('replaying the reveal', 'live');
+      break;
+    case 'lottery-reveal':
+      reveals.push(event.reveal);
+      renderDrop(event.reveal);
+      renderBoard(reveals);
+      break;
+    case 'lottery-finish':
+      // End the replay first so renderFinish paints the sealed state (status, confetti) normally.
+      stopReplay();
+      renderFinish({ phase: 'finished', reveals, finish: event.finish });
+      break;
+    default:
+      break;
+  }
+}
+
+function startReplay(): void {
+  const source = finishedSnapshot;
+  if (!source || replaying) return;
+  const timeline = buildReplayTimeline(source);
+  if (timeline.length === 0) return;
+  replaying = true;
+  replayWindowMs = replayStepMs(source);
+  celebrated = false; // the finale deserves its confetti again
+  lastDropPick = null;
+  reveals = [];
+  show('board', false);
+  show('verify', false);
+  show('waiting', false);
+  show('replay-btn', false);
+  show('replay-skip', true);
+  show('stage', true);
+  show('drop', false);
+  setStatus('replaying the reveal', 'live');
+  for (const step of timeline) {
+    replayTimers.push(window.setTimeout(() => applyReplayStep(step.event), step.atMs));
+  }
+}
+
+function stopReplay(): void {
+  for (const timer of replayTimers) clearTimeout(timer);
+  replayTimers = [];
+  replaying = false;
+  show('replay-skip', false);
+  cancelPull();
+}
+
+/** Skip straight back to the sealed final state (the "final state wins" control). */
+function skipReplay(): void {
+  const source = finishedSnapshot;
+  if (!source) return;
+  stopReplay();
+  celebrated = true; // skipping isn't a finale moment — no second confetti burst
+  reveals = [...source.reveals];
+  renderSnapshot(source);
 }
 
 function confetti(): void {
@@ -215,7 +408,13 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
     show('board', false);
     show('verify', false);
     show('abort', false);
+    // A new ceremony invalidates the previous run's replay source — the button must not
+    // resurface on the growing board offering a replay of the *last* lottery.
+    show('replay-btn', false);
+    finishedSnapshot = null;
     celebrated = false;
+    lastDropPick = null;
+    cancelPull();
   }
   switch (snapshot.phase) {
     case 'idle':
@@ -245,6 +444,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       renderFinish(snapshot);
       break;
     case 'aborted':
+      cancelPull();
       show('waiting', false);
       show('stage', false);
       show('abort', true);
@@ -289,6 +489,12 @@ function poll(base: string): void {
   fetch(apiPath(base, '/api/lottery/state'), { cache: 'no-store' })
     .then((r) => r.json())
     .then((snapshot: LotterySnapshot) => {
+      if (replaying) {
+        // An identical finished snapshot is just the fallback repainting — the replay runs on.
+        if (snapshot.phase === 'finished' && sameFinish(snapshot.finish, finishedSnapshot?.finish))
+          return;
+        stopReplay(); // anything else is real news, and live state wins
+      }
       reveals = [...snapshot.reveals];
       renderSnapshot(snapshot);
     })
@@ -324,6 +530,10 @@ function connect(base: string): void {
   ws.onmessage = (ev: MessageEvent): void => {
     try {
       const event = JSON.parse(String(ev.data)) as LotteryEvent;
+      if (replaying) {
+        if (isReplayEcho(event)) return; // same finished ceremony — the replay runs on
+        stopReplay(); // anything else is real news, and live events win
+      }
       if (event.type === 'lottery-state') reveals = [...event.snapshot.reveals];
       applyEvent(event);
     } catch {
@@ -344,6 +554,8 @@ function connect(base: string): void {
 }
 
 async function boot(): Promise<void> {
+  byId('replay-btn').addEventListener('click', startReplay);
+  byId('replay-skip').addEventListener('click', skipReplay);
   const inDiscord = isDiscordActivity(window.location);
   const base = proxyBase(inDiscord);
   if (inDiscord) {
