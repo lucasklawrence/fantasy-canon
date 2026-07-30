@@ -428,7 +428,15 @@ function scheduleNextStep(): void {
   if (stepTimer !== null) return;
   const next = pendingSteps[0];
   if (!next) {
-    if (playbackMode === 'catchup') handOffToLive();
+    if (playbackMode === 'catchup') {
+      handOffToLive();
+    } else {
+      // A replay whose source carried no finish (a snapshot captured mid-reveal) ends by simply
+      // running out. Without this it would stay "playing" — skip control up, replay button
+      // hidden — until some unrelated live event happened along to cancel it.
+      stopPlayback();
+      updateReplayAffordance();
+    }
     return;
   }
   stepTimer = window.setTimeout(() => {
@@ -527,6 +535,14 @@ function flushCatchUpRevealsIntoBoard(): void {
   }
 }
 
+/** Is this pick already on the board or sitting in the queue? */
+function catchUpHasPick(pick: number): boolean {
+  return (
+    reveals.some((r) => r.pick === pick) ||
+    pendingSteps.some((s) => s.event.type === 'lottery-reveal' && s.event.reveal.pick === pick)
+  );
+}
+
 /** Queue a live event onto the tail of a running catch-up, at the compressed cadence. */
 function bufferCatchUpEvent(event: LotteryEvent): void {
   switch (event.type) {
@@ -534,6 +550,11 @@ function bufferCatchUpEvent(event: LotteryEvent): void {
       pendingSteps.push({ delayMs: REPLAY_DWELL_MS, event });
       break;
     case 'lottery-reveal':
+      // Polling and the WebSocket have no cross-transport ordering guarantee, and both are briefly
+      // live around a reconnect — so the same published pick can reach us twice, once inside a
+      // snapshot-derived tail and once as its own frame. Picks are unique, so dedupe on that
+      // rather than trusting arrival order.
+      if (catchUpHasPick(event.reveal.pick)) return;
       catchUpKnown += 1;
       pendingSteps.push({ delayMs: replayWindowMs, event });
       break;
