@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { composeDrawSeed, computeCommitment, verifyHardenedDraw } from '@fantasy-canon/core';
 import {
+  applyLobbyAdjustments,
+  applyMiniGameBonuses,
+  buildAdjustedPreviewPost,
   buildPreviewPost,
   CeremonyAborted,
   CeremonyIo,
@@ -287,6 +290,105 @@ describe('setup surfaces', () => {
     expect(posts).toHaveLength(0);
     expect(session.state).toBe('GAME_OPEN');
     expect(session.secretSeed).toBeUndefined();
+  });
+
+  it('odds rows carry the team id the Activity edits target (#210)', () => {
+    const session = createCeremony('guild-1', 'Lottery', CONFIG, NAMES);
+    expect(
+      oddsRows(session)
+        .map((row) => row.teamId)
+        .sort(),
+    ).toEqual(TEAMS.map((t) => t.teamId).sort());
+  });
+});
+
+describe('applyLobbyAdjustments (#210)', () => {
+  /**
+   * `createCeremony` stores the caller's team objects by reference, and these adjustments mutate
+   * them — so every test here gets its own copy rather than editing the shared `TEAMS` fixture out
+   * from under the rest of the file.
+   */
+  function adjustableSession() {
+    const teams = TEAMS.map((team) => ({ ...team }));
+    const session = createCeremony('guild-1', '2026 Draft Lottery', { ...CONFIG, teams }, NAMES);
+    markPreviewPosted(session);
+    return session;
+  }
+
+  it('folds in-Activity ball edits into the bag and reports what changed', () => {
+    const session = adjustableSession();
+    const before = new Map(oddsRows(session).map((row) => [row.teamId, row.balls]));
+
+    const applied = applyLobbyAdjustments(session, [
+      { teamId: 't1', balls: 6 },
+      { teamId: 't12', balls: 1 },
+    ]);
+
+    expect(applied).toEqual([
+      { teamId: 't1', team: 'Team 1', from: before.get('t1'), to: 6 },
+      { teamId: 't12', team: 'Team 12', from: before.get('t12'), to: 1 },
+    ]);
+    const after = new Map(oddsRows(session).map((row) => [row.teamId, row.balls]));
+    expect(after.get('t1')).toBe(6);
+    // The adjusted count is a *total*: t12's two mini-game bonus balls are folded in, not added on
+    // top — the commissioner tapped the number they saw in the odds table.
+    expect(after.get('t12')).toBe(1);
+  });
+
+  it('is a no-op for unchanged, unknown, and empty adjustments', () => {
+    const session = adjustableSession();
+    expect(applyLobbyAdjustments(session, [])).toEqual([]);
+    // A stale id from a ceremony this one replaced must never block a draw.
+    expect(applyLobbyAdjustments(session, [{ teamId: 'gone', balls: 4 }])).toEqual([]);
+    // Same count as it already has ⇒ nothing to report, so no spurious "adjusted" preview post.
+    expect(applyLobbyAdjustments(session, [{ teamId: 't1', balls: 1 }])).toEqual([]);
+  });
+
+  it('clears the mini-game bookkeeping for an adjusted team so a re-run cannot double-count', () => {
+    const session = adjustableSession();
+    applyMiniGameBonuses(session, { t1: 2, t2: 1 });
+    expect(oddsRows(session).find((r) => r.teamId === 't1')?.balls).toBe(3);
+
+    applyLobbyAdjustments(session, [{ teamId: 't1', balls: 5 }]);
+    expect(session.miniGameBonuses?.t1).toBeUndefined();
+
+    // Re-running the round awards on top of the commissioner's new base, not the old one.
+    applyMiniGameBonuses(session, { t1: 2 });
+    expect(oddsRows(session).find((r) => r.teamId === 't1')?.balls).toBe(7);
+    // The untouched team's bookkeeping still nets out to the same total.
+    expect(oddsRows(session).find((r) => r.teamId === 't2')?.balls).toBe(1);
+  });
+
+  it('leaves the bag untouched when the projected result would be invalid', () => {
+    const session = adjustableSession();
+    const before = oddsRows(session).map((row) => row.balls);
+
+    // A ball count the stage's guard would never pass. It has to fail *before* anything mutates:
+    // `begin` treats a failed drain as "commit what setup froze", so a half-applied bag would put
+    // counts nobody ever published under the commitment.
+    expect(() =>
+      applyLobbyAdjustments(session, [
+        { teamId: 't1', balls: 5 },
+        { teamId: 't2', balls: -1 },
+      ]),
+    ).toThrow();
+    expect(oddsRows(session).map((row) => row.balls)).toEqual(before);
+  });
+
+  it('refuses to touch a bag that is no longer mutable', () => {
+    const session = createCeremony('guild-1', 'Lottery', CONFIG, NAMES); // still CREATED
+    expect(() => applyLobbyAdjustments(session, [{ teamId: 't1', balls: 4 }])).toThrow('GAME_OPEN');
+  });
+
+  it('the adjusted preview names every change and re-renders the odds card', async () => {
+    const session = adjustableSession();
+    const applied = applyLobbyAdjustments(session, [{ teamId: 't1', balls: 6 }]);
+    const post = await buildAdjustedPreviewPost(session, applied);
+    expect(post.kind).toBe('preview');
+    expect(post.content).toContain('Team 1');
+    expect(post.content).toContain('6 ball(s)');
+    expect(post.content).toContain('commitment posts next');
+    expect(post.image?.data.length).toBeGreaterThan(0);
   });
 });
 

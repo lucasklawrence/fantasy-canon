@@ -7,6 +7,15 @@
 import { deterministicIndex } from './rng.js';
 import type { DraftOrderTeamInput, LotteryDraw, LotteryInput } from './types.js';
 
+/**
+ * Hard cap on a single team's ball count. The bag is materialized ball-by-ball, so an unbounded
+ * count is a foot-gun; 30 sits above any sane standings weight for a 12-team league and below the
+ * point where the bag or the odds DP gets uncomfortable. Lives here because every surface that
+ * lets a human set a ball count must agree on it — the bot's `balls:` override (#164) and the
+ * commissioner's in-Activity stepper (#210) both clamp to this number.
+ */
+export const MAX_TEAM_BALLS = 30;
+
 /** A ball's id: `teamId:ballNumber` (ball numbers are 1-based within a team). */
 export function encodeBallId(teamId: string, ballNumber: number): string {
   return `${teamId}:${ballNumber}`;

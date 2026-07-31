@@ -26,6 +26,7 @@ import {
   computeDraftOrder,
   computePickOdds,
   DraftOrderState,
+  DraftOrderTeamInput,
   DRAW_ALGORITHM,
   LotteryConfig,
   LotteryDraw,
@@ -120,6 +121,8 @@ export interface RunCeremonyOptions {
 
 /** One row of the stage's pre-reveal odds table (matches the api's `LotteryOddsRow`). */
 export interface StageOddsRow {
+  /** Stable ceremony team id — what an in-Activity ball edit targets (#210). */
+  teamId?: string;
   team: string;
   balls: number;
   firstPct: number;
@@ -143,6 +146,17 @@ export interface RevealStage {
     totalBalls: number;
     rows: StageOddsRow[];
     guildId?: string;
+    /**
+     * Discord user ids allowed to adjust this lobby from inside the Activity (#210) — the member
+     * who ran `setup`. Omitted ⇒ the lobby is read-only, which is the safe default.
+     */
+    commissionerIds?: string[];
+    /**
+     * Keep (and re-apply) pending in-Activity edits instead of dropping them. Set only when
+     * re-arming a lobby derived *without* draining them first — otherwise the commissioner's
+     * edits would silently revert on the next re-arm.
+     */
+    keepAdjustments?: boolean;
   }): Promise<void>;
   /**
    * Disarm the lobby (#198), returning the stage to idle. Must be called on every path that
@@ -264,10 +278,12 @@ function pct(probability: number): number {
   return probability * 100;
 }
 
-/** Odds rows for the preview card, longest odds last (best ball count first). */
-export function oddsRows(
-  session: CeremonySession,
-): { team: string; balls: number; firstPct: number; top3Pct: number }[] {
+/**
+ * Odds rows for the preview card, longest odds last (best ball count first). `teamId` rides along
+ * for the Activity stage: an in-Activity edit (#210) has to name a team by something stabler than
+ * its display name. The renderer ignores the extra field.
+ */
+export function oddsRows(session: CeremonySession): StageOddsRow[] {
   const odds = computePickOdds(session.config.teams, session.config.baseBallCount);
   const byTeam = new Map(odds.map((o) => [o.teamId, o]));
   return session.config.teams
@@ -275,6 +291,7 @@ export function oddsRows(
       const teamOdds = byTeam.get(team.teamId) as TeamPickOdds;
       const top3 = teamOdds.probabilities.slice(0, 3).reduce((sum, p) => sum + p, 0);
       return {
+        teamId: team.teamId,
         team: displayName(session, team.teamId),
         balls: ballCountForTeam(team, session.config.baseBallCount ?? 1),
         firstPct: pct(teamOdds.probabilities[0]),
@@ -282,6 +299,136 @@ export function oddsRows(
       };
     })
     .sort((a, b) => b.balls - a.balls || a.team.localeCompare(b.team));
+}
+
+/** One adjustment folded into the bag by {@link applyLobbyAdjustments}, for the audit post. */
+export interface AppliedAdjustment {
+  teamId: string;
+  team: string;
+  from: number;
+  to: number;
+}
+
+/** Everything {@link applyLobbyAdjustments} can change, captured for {@link restoreBag}. */
+export interface BagSnapshot {
+  ballsByTeam: Map<string, { baseBalls?: number; bonusBalls?: number }>;
+  miniGameBonuses?: Record<string, number>;
+}
+
+/**
+ * Capture the mutable ball state of a bag so a caller can undo an {@link applyLobbyAdjustments}
+ * that it could not follow through on (#210). Needed because the drain's audit post — rendering
+ * a card, then sending it to Discord — can fail *after* the bag is edited, and `begin` would
+ * otherwise commit ball counts that were never publicly previewed (ADR 0006).
+ */
+export function captureBag(session: CeremonySession): BagSnapshot {
+  return {
+    ballsByTeam: new Map(
+      session.config.teams.map((team) => [
+        team.teamId,
+        { baseBalls: team.baseBalls, bonusBalls: team.bonusBalls },
+      ]),
+    ),
+    ...(session.miniGameBonuses ? { miniGameBonuses: { ...session.miniGameBonuses } } : {}),
+  };
+}
+
+/** Restore a bag captured by {@link captureBag}, in place (team object identities are kept). */
+export function restoreBag(session: CeremonySession, snapshot: BagSnapshot): void {
+  for (const team of session.config.teams) {
+    const previous = snapshot.ballsByTeam.get(team.teamId);
+    if (!previous) continue;
+    team.baseBalls = previous.baseBalls;
+    team.bonusBalls = previous.bonusBalls;
+  }
+  session.miniGameBonuses = snapshot.miniGameBonuses ? { ...snapshot.miniGameBonuses } : undefined;
+}
+
+/**
+ * Fold the commissioner's in-Activity ball edits (#210) into the authoritative bag, returning the
+ * ones that actually changed something (so the caller can name them in the fresh public preview
+ * ADR 0006 requires after any bag change).
+ *
+ * Only legal while the bag is still mutable — `GAME_OPEN`, before the commitment binds it — which
+ * is the whole reason in-Activity editing is fairness-safe. The adjusted count is a *total*: it
+ * becomes the team's `baseBalls` with `bonusBalls` zeroed, because the number the commissioner
+ * saw and tapped in the odds table was the total. Zeroing the mini-game's recorded contribution
+ * for that team too keeps {@link applyMiniGameBonuses}'s "subtract the previous round first"
+ * bookkeeping honest if a round is re-run afterwards.
+ *
+ * Unknown team ids are ignored rather than thrown: the stage is a separate process that may be
+ * holding edits from a ceremony this one replaced, and a stale id must never block a draw.
+ */
+export function applyLobbyAdjustments(
+  session: CeremonySession,
+  adjustments: { teamId: string; balls: number }[],
+): AppliedAdjustment[] {
+  if (adjustments.length === 0) return [];
+  if (session.state !== 'GAME_OPEN') {
+    throw new Error(`Lobby adjustments can only be applied in GAME_OPEN (state: ${session.state})`);
+  }
+  const planned: { team: DraftOrderTeamInput; change: AppliedAdjustment }[] = [];
+  for (const adjustment of adjustments) {
+    const team = session.config.teams.find((t) => t.teamId === adjustment.teamId);
+    if (!team) continue;
+    const from = ballCountForTeam(team, session.config.baseBallCount ?? 1);
+    if (from === adjustment.balls) continue;
+    planned.push({
+      team,
+      change: {
+        teamId: adjustment.teamId,
+        team: displayName(session, adjustment.teamId),
+        from,
+        to: adjustment.balls,
+      },
+    });
+  }
+  if (planned.length === 0) return [];
+
+  // Validate the *projected* bag before touching the session — same eager re-validation
+  // `applyMiniGameBonuses` does, but on a copy. Mutating as we go would leave a half-applied bag
+  // behind on a throw, and `begin`'s caller treats a failed drain as "commit what setup froze" —
+  // so a partial mutation would put a bag nobody ever published under the commitment.
+  const projected = session.config.teams.map((team) => {
+    const change = planned.find((entry) => entry.team === team);
+    return change ? { ...team, baseBalls: change.change.to, bonusBalls: 0 } : team;
+  });
+  computePickOdds(projected, session.config.baseBallCount);
+
+  for (const { team, change } of planned) {
+    team.baseBalls = change.to;
+    team.bonusBalls = 0;
+    if (session.miniGameBonuses) delete session.miniGameBonuses[change.teamId];
+  }
+  return planned.map((entry) => entry.change);
+}
+
+/**
+ * The fresh public odds preview that has to precede a commitment whose bag changed after the last
+ * preview (ADR 0006). Named per adjustment so the channel — still the audit trail — records what
+ * the commissioner changed in the Activity and what the commitment is about to bind.
+ */
+export async function buildAdjustedPreviewPost(
+  session: CeremonySession,
+  applied: AppliedAdjustment[],
+): Promise<CeremonyPost> {
+  const image = await renderLotteryOddsCard({
+    title: session.title,
+    subtitle: `${session.config.teams.length} teams • ${totalBalls(session.config)} balls in the hopper`,
+    rows: oddsRows(session),
+  });
+  const changes = applied
+    .map((change) => `• **${change.team}**: ${change.from} → ${change.to} ball(s)`)
+    .join('\n');
+  return {
+    kind: 'preview',
+    content: [
+      `🛠 **${session.title}** — the commissioner adjusted the hopper from the Lottery Machine:`,
+      changes,
+      'These are the final odds. The commitment posts next and binds exactly this bag.',
+    ].join('\n'),
+    image: { name: 'lottery-odds-adjusted.png', data: image },
+  };
 }
 
 /** The public odds-preview post for the setup phase. */

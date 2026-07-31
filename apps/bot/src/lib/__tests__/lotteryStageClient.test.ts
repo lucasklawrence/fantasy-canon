@@ -113,6 +113,31 @@ describe('createHttpRevealStage', () => {
     const down = createHttpRevealStage({ baseUrl: 'http://x', fetchImpl: failing.impl });
     await expect(down.state()).rejects.toThrow('503');
   });
+
+  it('state() re-validates the pending in-Activity ball edits it hands the bag (#210)', async () => {
+    const { impl } = fakeFetch({
+      json: {
+        phase: 'lobby',
+        lobby: { guildId: 'g1' },
+        adjustments: [
+          { teamId: 't1', balls: 6 },
+          { teamId: 't2', balls: 0 }, // a team with no balls could never be drawn
+          { teamId: 't3', balls: 2.5 },
+          { teamId: 't4' },
+          { teamId: 42, balls: 3 },
+          'nope',
+        ],
+      },
+    });
+    const stage = createHttpRevealStage({ baseUrl: 'http://x', fetchImpl: impl });
+    // These numbers become ball counts in a bag a commitment binds, and the stage accepts them
+    // from the public Activity client — only the well-formed one survives the trip.
+    expect((await stage.state()).adjustments).toEqual([{ teamId: 't1', balls: 6 }]);
+
+    const none = fakeFetch({ json: { phase: 'lobby', adjustments: [] } });
+    const empty = createHttpRevealStage({ baseUrl: 'http://x', fetchImpl: none.impl });
+    expect((await empty.state()).adjustments).toBeUndefined();
+  });
 });
 
 describe('stageFromEnv', () => {

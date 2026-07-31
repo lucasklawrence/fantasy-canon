@@ -13,132 +13,64 @@
  * unit-tests without I/O (the WS fan-out lives in `server.ts`, same split as `DraftHub`). Late
  * joiners GET `/api/lottery/state` (or receive it on WS connect) and replay `snapshot()`, which
  * carries the full reveal history so a mid-ceremony join can paint the board-so-far.
+ *
+ * The one exception to "dumb relay" is {@link LotteryStage.adjust} (#210): the commissioner can
+ * nudge a team's ball count from inside the Activity while the lobby is armed. That still draws
+ * nothing — it edits the *pre-commitment* preview and records a pending {@link LotteryAdjustment}
+ * the bot drains into its authoritative bag before it commits (ADR 0007). Odds are recomputed
+ * here with core's `computePickOdds`, the same function the bot uses, so the table the league
+ * watches and the bag the commitment binds never disagree on the math.
+ *
+ * The payload shapes live in `lotteryTypes.ts` — see the note there on why the browser client
+ * imports them from that module rather than this one. They are re-exported here so every existing
+ * server-side consumer keeps its single import.
  */
 
-/** One row of the pre-reveal odds table (mirrors the bot's odds-card rows). */
-export interface LotteryOddsRow {
-  team: string;
-  balls: number;
-  firstPct: number;
-  top3Pct: number;
-}
+import { computePickOdds, MAX_TEAM_BALLS } from '@fantasy-canon/core';
+import type {
+  LotteryAbort,
+  LotteryAbortRequest,
+  LotteryAdjustment,
+  LotteryBeat,
+  LotteryClear,
+  LotteryEvent,
+  LotteryFinish,
+  LotteryLobby,
+  LotteryLobbyRequest,
+  LotteryOddsRow,
+  LotteryPhase,
+  LotteryReveal,
+  LotterySnapshot,
+  LotteryStart,
+} from './lotteryTypes.js';
 
-/** Opens the stage: everything the waiting room needs before the first ball drops. */
-export interface LotteryStart {
-  title: string;
-  /** The public sha256 commitment the bot posted in-channel — shown for auditability. */
-  commitment: string;
-  teamCount: number;
-  totalBalls: number;
-  /** Bot's reveal pacing, so the client can size its drum-roll animation. */
-  delayMs: number;
-  rows: LotteryOddsRow[];
-  /**
-   * Originating guild. The single process-wide stage serves one live ceremony at a time; a
-   * different guild's `start` during a live reveal is rejected (that bot falls back to its
-   * in-channel reveal) so two ceremonies can never interleave on shared screens.
-   */
-  guildId?: string;
-}
-
-/** Drum-roll: the next pick is about to be revealed. */
-export interface LotteryBeat {
-  pick: number;
-  /** Teams still in the hopper (display names), including the one about to be drawn. */
-  remaining: string[];
-}
-
-/** The ball drop: `pick` goes to `team`. */
-export interface LotteryReveal {
-  pick: number;
-  team: string;
-  balls: number;
-  oddsPct: number;
-  /** Teams still undrawn after this reveal. */
-  remaining: string[];
-}
-
-/** The wrap-up: final order + the seed-reveal verify info (public by now, per ADR 0006). */
-export interface LotteryFinish {
-  order: { pick: number; team: string }[];
-  verify: {
-    secretSeed: string;
-    /** The commitment post's message id — the #174 salt. */
-    salt: string;
-    drawSeed: string;
-    commitment: string;
-  };
-}
-
-export interface LotteryAbort {
-  /** Human-readable line (the bot's disclosure summary); the full disclosure lives in-channel. */
-  reason: string;
-}
-
-/**
- * The abort *request* (#205): `ifCommitment` makes the abort conditional — a no-op unless the
- * stage is still showing that committed run. The bot's boot reconciler sends it so a stale
- * snapshot can never abort a fresh ceremony that replaced the stranded one mid-flight. Stripped
- * before broadcast; clients only ever see {@link LotteryAbort}.
- */
-export interface LotteryAbortRequest extends LotteryAbort {
-  ifCommitment?: string;
-}
-
-/**
- * Pre-commitment lobby (#198): arms the waiting room from `setup` onward so members can
- * join the Activity before `begin` is called. No commitment yet — shown as a placeholder.
- */
-export interface LotteryLobby {
-  title: string;
-  teamCount: number;
-  totalBalls: number;
-  rows: LotteryOddsRow[];
-  /**
-   * Originating guild, echoed into events and snapshots, and matched by {@link LotteryStage.clear}
-   * so one league cannot disarm another's lobby. Unlike {@link LotteryStart.guildId} it does *not*
-   * gate the busy check — {@link LotteryStage.lobby} refuses a committed run guild-agnostically.
-   */
-  guildId?: string;
-}
-
-/** Disarms an armed lobby (#198) — see {@link LotteryStage.clear}. */
-export interface LotteryClear {
-  /** Only this guild's lobby is disarmed; omitted ⇒ matches a lobby armed without a guild. */
-  guildId?: string;
-}
-
-export type LotteryPhase = 'idle' | 'lobby' | 'waiting' | 'revealing' | 'finished' | 'aborted';
-
-/** What a (late-)joining client needs to fully reconstruct the presentation. */
-export interface LotterySnapshot {
-  phase: LotteryPhase;
-  /** Set when phase is `'lobby'` — the pre-commitment waiting room state. */
-  lobby?: LotteryLobby;
-  start?: LotteryStart;
-  /** The most recent drum-roll not yet resolved by a reveal (a client joining mid-beat shows it). */
-  pendingBeat?: LotteryBeat;
-  /** Every reveal so far, in reveal order (worst pick first). */
-  reveals: LotteryReveal[];
-  finish?: LotteryFinish;
-  abort?: LotteryAbort;
-}
-
-/** The events fanned out over the WS, tagged for the client. */
-export type LotteryEvent =
-  | { type: 'lottery-state'; snapshot: LotterySnapshot }
-  | { type: 'lottery-lobby'; lobby: LotteryLobby }
-  | { type: 'lottery-start'; start: LotteryStart }
-  | { type: 'lottery-beat'; beat: LotteryBeat }
-  | { type: 'lottery-reveal'; reveal: LotteryReveal }
-  | { type: 'lottery-finish'; finish: LotteryFinish }
-  | { type: 'lottery-abort'; abort: LotteryAbort };
+export * from './lotteryTypes.js';
 
 /** Thrown by {@link LotteryStage.start} when another guild's reveal is currently live. */
 export class StageBusyError extends Error {
   constructor() {
     super('the stage is showing another live ceremony');
     this.name = 'StageBusyError';
+  }
+}
+
+/**
+ * Thrown by {@link LotteryStage.adjust} when the stage is not an editable pre-commitment lobby.
+ * The whole safety argument for in-Activity editing is that it can only touch a bag no commitment
+ * binds yet (ADR 0006 fairness, ADR 0007), so this is a hard refusal, not a retry hint.
+ */
+export class StageNotEditableError extends Error {
+  constructor(message = 'only a pre-commitment lobby can be adjusted') {
+    super(message);
+    this.name = 'StageNotEditableError';
+  }
+}
+
+/** Thrown by {@link LotteryStage.adjust} when no lobby row carries the requested `teamId`. */
+export class UnknownTeamError extends Error {
+  constructor(teamId: string) {
+    super(`no team ${teamId} in this lobby`);
+    this.name = 'UnknownTeamError';
   }
 }
 
@@ -153,7 +85,20 @@ export interface LotteryStage {
    * callers (`setup`, `minigame`) only ever fire pre-commitment, so a lobby arriving mid-reveal
    * is always a race or a stale retry, never something to honour.
    */
-  lobby(lobby: LotteryLobby): void;
+  lobby(lobby: LotteryLobbyRequest): void;
+  /**
+   * Apply a commissioner's in-Activity ball edit (#210) and re-broadcast the lobby with recomputed
+   * odds. Legal only while an armed lobby is on screen — throws {@link StageNotEditableError}
+   * otherwise, and {@link UnknownTeamError} when no row carries that `teamId`. Authorization is
+   * the caller's job: `routes.ts` verifies the Discord token server-side and checks
+   * {@link LotteryStage.isCommissioner} first.
+   */
+  adjust(adjustment: LotteryAdjustment): void;
+  /**
+   * Is this Discord user id allowed to {@link LotteryStage.adjust}? False whenever no lobby is
+   * armed, so a stale token can never edit a committed or finished run.
+   */
+  isCommissioner(userId: string): boolean;
   /**
    * Disarm an armed lobby, returning the stage to `idle` (#198). Deliberately narrow: a no-op
    * unless the phase is `lobby` and the guild matches, so it can never tear down a committed
@@ -330,7 +275,7 @@ export function parseLotteryAbort(body: string): Parsed<LotteryAbortRequest> {
  * would be visible far longer than a bad `start` ever is. Counts must be positive integers and
  * `totalBalls` must equal the row sum, which is exactly how the bot derives it.
  */
-export function parseLotteryLobby(body: string): Parsed<LotteryLobby> {
+export function parseLotteryLobby(body: string): Parsed<LotteryLobbyRequest> {
   const parsed = parseJson(body);
   if ('error' in parsed) return parsed;
   const r = parsed.value;
@@ -342,7 +287,10 @@ export function parseLotteryLobby(body: string): Parsed<LotteryLobby> {
           isStr((row as LotteryOddsRow).team) &&
           isPosInt((row as LotteryOddsRow).balls) &&
           isNum((row as LotteryOddsRow).firstPct) &&
-          isNum((row as LotteryOddsRow).top3Pct),
+          isNum((row as LotteryOddsRow).top3Pct) &&
+          // Present-but-not-a-string would be stored as-is and then never match an `adjust`
+          // targeting it, leaving the row silently un-editable for the whole lobby (#210).
+          ((row as LotteryOddsRow).teamId === undefined || isStr((row as LotteryOddsRow).teamId)),
       )
     : undefined;
   if (
@@ -365,8 +313,27 @@ export function parseLotteryLobby(body: string): Parsed<LotteryLobby> {
       totalBalls: r.totalBalls,
       rows,
       ...(isStr(r.guildId) ? { guildId: r.guildId } : {}),
+      ...(isStrArray(r.commissionerIds) ? { commissionerIds: r.commissionerIds } : {}),
+      ...(r.keepAdjustments === true ? { keepAdjustments: true } : {}),
     },
   };
+}
+
+/**
+ * Guard for `POST /api/lottery/adjust` (#210). Strictest parser here, because this is the only
+ * body that arrives from the *public* Activity client rather than the bot: `balls` must be an
+ * integer inside the same 1..{@link MAX_TEAM_BALLS} window the bot's `balls:` override enforces,
+ * so a hostile client cannot hand the odds DP a 10-million-ball bag.
+ */
+export function parseLotteryAdjust(body: string): Parsed<LotteryAdjustment> {
+  const parsed = parseJson(body);
+  if ('error' in parsed) return parsed;
+  const r = parsed.value;
+  if (!isStr(r.teamId)) return { error: 'adjust needs a teamId' };
+  if (!isPosInt(r.balls) || r.balls > MAX_TEAM_BALLS) {
+    return { error: `adjust needs balls between 1 and ${MAX_TEAM_BALLS}` };
+  }
+  return { value: { teamId: r.teamId, balls: r.balls } };
 }
 
 /** Guard for `POST /api/lottery/clear` — an optional guild scope is the whole payload. */
@@ -377,9 +344,62 @@ export function parseLotteryClear(body: string): Parsed<LotteryClear> {
   return { value: isStr(r.guildId) ? { guildId: r.guildId } : {} };
 }
 
+/**
+ * Rebuild a lobby's rows with `balls` overridden per {@link LotteryAdjustment} and the `firstPct`/
+ * `top3Pct` columns recomputed from scratch. Uses core's `computePickOdds` — the exact function
+ * behind the bot's odds card — so an edited table is arithmetically identical to what the bot
+ * would publish for the same bag.
+ *
+ * Row *order* is preserved on purpose: the bot sorts by ball count, but re-sorting under the
+ * commissioner's finger while they tap a stepper is a UX trap. The next bot-armed lobby (or the
+ * `start` that commits) restores the sorted order.
+ *
+ * Throws {@link StageNotEditableError} when the rows can't support exact odds — a row without a
+ * `teamId`, duplicate ids, or a bag wider than core's exact-odds cap.
+ */
+function applyAdjustments(
+  rows: LotteryOddsRow[],
+  balls: ReadonlyMap<string, number>,
+): LotteryOddsRow[] {
+  const next = rows.map((row) => ({
+    ...row,
+    balls: (row.teamId !== undefined ? balls.get(row.teamId) : undefined) ?? row.balls,
+  }));
+  const teams = next.map((row) => {
+    if (row.teamId === undefined) {
+      throw new StageNotEditableError(
+        'this lobby was armed without team ids, so it cannot be edited',
+      );
+    }
+    return { teamId: row.teamId, baseBalls: row.balls, bonusBalls: 0 };
+  });
+  let odds;
+  try {
+    // computePickOdds rejects duplicate ids and caps the team count; either means this lobby was
+    // never adjustable, so surface it as "not editable" rather than a 500.
+    odds = computePickOdds(teams);
+  } catch (error) {
+    throw new StageNotEditableError(
+      `this lobby cannot be adjusted: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  return next.map((row, index) => {
+    const probabilities = odds[index].probabilities;
+    return {
+      ...row,
+      firstPct: probabilities[0] * 100,
+      top3Pct: probabilities.slice(0, 3).reduce((sum, p) => sum + p, 0) * 100,
+    };
+  });
+}
+
 export function createLotteryStage(): LotteryStage {
   let phase: LotteryPhase = 'idle';
   let lobby: LotteryLobby | undefined;
+  /** Discord user ids allowed to adjust the armed lobby (#210); never broadcast. */
+  let commissionerIds: string[] = [];
+  /** Pending in-Activity edits, teamId → new total balls, drained by the bot at `begin`. */
+  let adjustments = new Map<string, number>();
   let start: LotteryStart | undefined;
   let pendingBeat: LotteryBeat | undefined;
   let reveals: LotteryReveal[] = [];
@@ -391,8 +411,34 @@ export function createLotteryStage(): LotteryStage {
     for (const listener of listeners) listener(event);
   }
 
+  /**
+   * Leave the lobby phase. Editors and pending edits are lobby-scoped — an adjustment that
+   * outlived its lobby could be drained into a bag the commissioner never saw it against, and a
+   * lingering `commissionerIds` would keep a write path open over a committed run.
+   */
+  function dropLobby(): void {
+    lobby = undefined;
+    commissionerIds = [];
+    adjustments = new Map();
+  }
+
   return {
-    snapshot: () => ({ phase, lobby, start, pendingBeat, reveals: [...reveals], finish, abort }),
+    snapshot: () => ({
+      phase,
+      lobby,
+      start,
+      pendingBeat,
+      reveals: [...reveals],
+      finish,
+      abort,
+      // Omitted entirely when empty so the common snapshot stays byte-identical to before (#210).
+      ...(adjustments.size > 0
+        ? {
+            adjustments: [...adjustments].map(([teamId, balls]) => ({ teamId, balls })),
+          }
+        : {}),
+    }),
+    isCommissioner: (userId) => phase === 'lobby' && commissionerIds.includes(userId),
     lobby(next) {
       // Stricter than start()'s check, and deliberately not guild-scoped: a committed run owns the
       // stage outright. Overwriting `waiting`/`revealing` here would blank `start` (and therefore
@@ -410,14 +456,57 @@ export function createLotteryStage(): LotteryStage {
       if (phase === 'waiting' || phase === 'revealing') {
         throw new StageBusyError();
       }
+      const { commissionerIds: editors = [], keepAdjustments = false, ...publicLobby } = next;
+      // `keepAdjustments` re-applies still-pending edits onto the fresh rows, so a bot re-arm that
+      // did *not* drain them (the mini-game path) republishes the odds the league is looking at
+      // instead of silently reverting them. A plain re-arm drops them: a new `setup` is a new bag.
+      //
+      // Resolved *before* any state is written, and never allowed to fail the re-arm: if the new
+      // rows can't carry exact odds (no team ids, duplicates, too many teams) the pending edits
+      // are dropped and the bot's rows stand. Arming a lobby is the bot's authoritative act — a
+      // stale client-side edit must not be able to 500 it, let alone half-apply it.
+      let carried =
+        keepAdjustments && adjustments.size > 0
+          ? new Map<string, number>(adjustments)
+          : new Map<string, number>();
+      let rows = publicLobby.rows;
+      if (carried.size > 0) {
+        try {
+          rows = applyAdjustments(publicLobby.rows, carried);
+        } catch {
+          carried = new Map();
+          rows = publicLobby.rows;
+        }
+      }
       phase = 'lobby';
-      lobby = next;
+      commissionerIds = [...editors];
+      adjustments = carried;
+      lobby = {
+        ...publicLobby,
+        rows,
+        totalBalls: rows.reduce((sum, row) => sum + row.balls, 0),
+      };
       start = undefined;
       pendingBeat = undefined;
       reveals = [];
       finish = undefined;
       abort = undefined;
-      emit({ type: 'lottery-lobby', lobby: next });
+      emit({ type: 'lottery-lobby', lobby });
+    },
+    adjust(next) {
+      if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
+      if (!lobby.rows.some((row) => row.teamId === next.teamId)) {
+        throw new UnknownTeamError(next.teamId);
+      }
+      const pending = new Map(adjustments).set(next.teamId, next.balls);
+      // applyAdjustments throws before anything is committed, so a lobby that can't carry exact
+      // odds leaves the stage exactly as it was.
+      const rows = applyAdjustments(lobby.rows, pending);
+      adjustments = pending;
+      lobby = { ...lobby, rows, totalBalls: rows.reduce((sum, row) => sum + row.balls, 0) };
+      // Same event the bot's re-arm emits: every connected client already repaints the odds table
+      // wholesale from it, so live viewers see the new bag without a new client branch.
+      emit({ type: 'lottery-lobby', lobby });
     },
     clear(next) {
       // Narrow by design: only an armed lobby is disarmable, so this can never tear down a
@@ -426,7 +515,7 @@ export function createLotteryStage(): LotteryStage {
       if (phase !== 'lobby') return;
       if ((lobby?.guildId ?? undefined) !== (next.guildId ?? undefined)) return;
       phase = 'idle';
-      lobby = undefined;
+      dropLobby();
       start = undefined;
       pendingBeat = undefined;
       reveals = [];
@@ -450,7 +539,9 @@ export function createLotteryStage(): LotteryStage {
         throw new StageBusyError();
       }
       phase = 'waiting';
-      lobby = undefined;
+      // The commitment binds the bot's bag, so any edit still pending here was made after the bot
+      // drained — it is deliberately discarded rather than left to be applied to a sealed bag.
+      dropLobby();
       start = next;
       pendingBeat = undefined;
       reveals = [];
@@ -463,20 +554,20 @@ export function createLotteryStage(): LotteryStage {
     // documented "set when phase is 'lobby'" contract and painting a stale screen for late joiners.
     beat(beat) {
       phase = 'revealing';
-      lobby = undefined;
+      dropLobby();
       pendingBeat = beat;
       emit({ type: 'lottery-beat', beat });
     },
     reveal(reveal) {
       phase = 'revealing';
-      lobby = undefined;
+      dropLobby();
       pendingBeat = undefined;
       reveals.push(reveal);
       emit({ type: 'lottery-reveal', reveal });
     },
     finish(next) {
       phase = 'finished';
-      lobby = undefined;
+      dropLobby();
       pendingBeat = undefined;
       finish = next;
       emit({ type: 'lottery-finish', finish: next });
@@ -493,7 +584,7 @@ export function createLotteryStage(): LotteryStage {
         return;
       }
       phase = 'aborted';
-      lobby = undefined;
+      dropLobby();
       pendingBeat = undefined;
       abort = publicAbort;
       emit({ type: 'lottery-abort', abort: publicAbort });

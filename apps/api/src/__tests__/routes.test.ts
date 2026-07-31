@@ -1,5 +1,5 @@
 import type { PlayerTier } from '@fantasy-canon/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDraftHub, type DraftHub } from '../hub.js';
 import { createLotteryStage, type LotterySnapshot } from '../lotteryStage.js';
 import {
@@ -27,6 +27,14 @@ function deps(h: DraftHub, over: Partial<RouteDeps> = {}): RouteDeps {
     clientScript: over.clientScript ?? ((): string | undefined => 'export const bundled = 1;'),
     exchangeToken:
       over.exchangeToken ?? ((code: string) => Promise.resolve({ accessToken: `tok-${code}` })),
+    // Stub identity: a token is "valid" iff it looks like `user-<id>`, so a test can present an
+    // arbitrary caller without a socket, and an unknown token exercises the rejection path.
+    identify:
+      over.identify ??
+      ((token: string) =>
+        token.startsWith('user-')
+          ? Promise.resolve({ id: token.slice('user-'.length) })
+          : Promise.reject(new Error('bad token'))),
     lottery: over.lottery ?? createLotteryStage(),
     lotteryScript: over.lotteryScript ?? ((): string | undefined => 'export const machine = 1;'),
     stageKey: over.stageKey ?? '',
@@ -55,6 +63,21 @@ const LOTTERY_LOBBY_BODY = JSON.stringify({
     { team: 'A', balls: 1, firstPct: 33.3, top3Pct: 100 },
   ],
 });
+
+/** An editable lobby (#210): team ids on every row plus the setup runner as commissioner. */
+const EDITABLE_LOBBY_BODY = JSON.stringify({
+  title: 'Lottery',
+  teamCount: 2,
+  totalBalls: 3,
+  guildId: 'g-a',
+  commissionerIds: ['commish'],
+  rows: [
+    { teamId: 't-b', team: 'B', balls: 2, firstPct: 66.7, top3Pct: 100 },
+    { teamId: 't-a', team: 'A', balls: 1, firstPct: 33.3, top3Pct: 100 },
+  ],
+});
+
+const asCommissioner = { authorization: 'Bearer user-commish' };
 
 function hub(): DraftHub {
   return createDraftHub({
@@ -362,6 +385,138 @@ describe('lottery routes (#169)', () => {
     });
     expect(ok.status).toBe(200);
     expect((await routeRequest('GET', '/api/lottery/state', '', d)).status).toBe(200);
+  });
+});
+
+describe('commissioner lobby edits (#210)', () => {
+  it('tells the caller whether they may edit, without ever leaking who the commissioner is', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+
+    const commish = await routeRequest('GET', '/api/lottery/me', '', d, asCommissioner);
+    expect(commish.status).toBe(200);
+    expect(JSON.parse(commish.body)).toEqual({ userId: 'commish', commissioner: true });
+
+    const member = await routeRequest('GET', '/api/lottery/me', '', d, {
+      authorization: 'Bearer user-someone-else',
+    });
+    expect(JSON.parse(member.body)).toEqual({ userId: 'someone-else', commissioner: false });
+
+    // The public snapshot is what every viewer polls — it must not carry the id list.
+    const state = await routeRequest('GET', '/api/lottery/state', '', d);
+    expect(state.body).not.toContain('commish');
+    expect(state.body).not.toContain('commissionerIds');
+  });
+
+  it('401s /me and /adjust without a usable bearer', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+    const body = JSON.stringify({ teamId: 't-a', balls: 4 });
+
+    expect((await routeRequest('GET', '/api/lottery/me', '', d)).status).toBe(401);
+    expect((await routeRequest('POST', '/api/lottery/adjust', body, d)).status).toBe(401);
+    // A token Discord rejects is the same 401 — the client's fix is identical either way.
+    const bad = await routeRequest('POST', '/api/lottery/adjust', body, d, {
+      authorization: 'Bearer nonsense',
+    });
+    expect(bad.status).toBe(401);
+  });
+
+  it('adjusts a team’s balls and recomputes the whole odds table', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+
+    const reply = await routeRequest(
+      'POST',
+      '/api/lottery/adjust',
+      JSON.stringify({ teamId: 't-a', balls: 3 }),
+      d,
+      asCommissioner,
+    );
+    expect(reply.status).toBe(200);
+
+    const snapshot = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    const rows = snapshot.lobby?.rows ?? [];
+    // Row order is preserved (B first, as armed) so a stepper doesn't jump under the finger.
+    expect(rows.map((r) => r.teamId)).toEqual(['t-b', 't-a']);
+    expect(rows.map((r) => r.balls)).toEqual([2, 3]);
+    // 2 vs 3 balls out of 5 — odds are recomputed from scratch, not carried over.
+    expect(rows[0].firstPct).toBeCloseTo(40, 5);
+    expect(rows[1].firstPct).toBeCloseTo(60, 5);
+    // …and the header count follows, so `totalBalls` never contradicts the rows.
+    expect(snapshot.lobby?.totalBalls).toBe(5);
+    // The edit is pending until the bot drains it at `begin`.
+    expect(snapshot.adjustments).toEqual([{ teamId: 't-a', balls: 3 }]);
+  });
+
+  it('403s a member who is not the commissioner, and 409s everyone once the bag is sealed', async () => {
+    const identify = vi.fn((token: string) => Promise.resolve({ id: token.slice('user-'.length) }));
+    const d = deps(hub(), { identify });
+    const body = JSON.stringify({ teamId: 't-a', balls: 4 });
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+
+    const outsider = await routeRequest('POST', '/api/lottery/adjust', body, d, {
+      authorization: 'Bearer user-rando',
+    });
+    expect(outsider.status).toBe(403);
+    expect(identify).toHaveBeenCalledTimes(1);
+
+    // A committed run is nobody's to edit — not even the commissioner's. This is the fairness
+    // guarantee: the commitment binds the bag (ADR 0006).
+    await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d);
+    const sealed = await routeRequest('POST', '/api/lottery/adjust', body, d, asCommissioner);
+    expect(sealed.status).toBe(409);
+    // …and it was rejected locally: identifying a caller costs a Discord round-trip against our
+    // rate limit, so an un-editable stage must never spend one.
+    expect(identify).toHaveBeenCalledTimes(1);
+  });
+
+  it('404s an unknown team and 400s a ball count outside 1..30', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+
+    const unknown = await routeRequest(
+      'POST',
+      '/api/lottery/adjust',
+      JSON.stringify({ teamId: 't-nope', balls: 2 }),
+      d,
+      asCommissioner,
+    );
+    expect(unknown.status).toBe(404);
+
+    for (const balls of [0, -1, 2.5, 31, 'four']) {
+      const reply = await routeRequest(
+        'POST',
+        '/api/lottery/adjust',
+        JSON.stringify({ teamId: 't-a', balls }),
+        d,
+        asCommissioner,
+      );
+      expect(reply.status).toBe(400);
+    }
+    // Nothing above got through: the lobby is exactly as it was armed.
+    const state = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(state.lobby?.totalBalls).toBe(3);
+    expect(state.adjustments).toBeUndefined();
+  });
+
+  it('never accepts the bot’s stage key in place of a bearer (the two auth paths stay disjoint)', async () => {
+    const d = deps(hub(), { stageKey: 'sekrit' });
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d, {
+      'x-stage-key': 'sekrit',
+    });
+    const withKey = await routeRequest(
+      'POST',
+      '/api/lottery/adjust',
+      JSON.stringify({ teamId: 't-a', balls: 2 }),
+      d,
+      { 'x-stage-key': 'sekrit' },
+    );
+    expect(withKey.status).toBe(401);
   });
 });
 

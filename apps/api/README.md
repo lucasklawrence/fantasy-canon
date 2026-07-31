@@ -38,6 +38,19 @@ Config (env): `FANTASY_LEAGUE_SIZE` (12), `FANTASY_MY_SLOT` (1), `FANTASY_API_PO
 | `POST /api/reset` | Clear the board.                                                                         |
 | `WS /api/ws`      | Push channel — a fresh envelope on connect and on every pick.                            |
 
+The lottery-machine stage (#169) adds `/api/lottery/*`. Its POSTs are **bot-only**, guarded by the
+`FANTASY_STAGE_KEY` shared secret (`x-stage-key`) — except the two commissioner routes, which take
+the Activity's own Discord access token as `Authorization: Bearer …` and resolve it server-side
+(ADR 0007). The stage key is never accepted for those, and a bearer is never accepted for a bot route.
+
+| Route                      | Auth                  | Purpose                                                       |
+| -------------------------- | --------------------- | ------------------------------------------------------------- |
+| `GET /api/lottery/state`   | public                | The shared presentation snapshot; also pushed on WS connect.  |
+| `GET /api/lottery/me`      | bearer                | Whether the caller may edit the armed lobby.                  |
+| `POST /api/lottery/adjust` | bearer (commissioner) | Nudge one team's ball count in a pre-commitment lobby (#210). |
+| `POST /api/lottery/*`      | `x-stage-key`         | `lobby`/`clear`/`start`/`beat`/`reveal`/`finish`/`abort`.     |
+| `WS /api/lottery/ws`       | public                | Reveal beats and lobby updates, fanned out to every viewer.   |
+
 ## Layout
 
 - `hub.ts` — in-memory `DraftHub` (session + pool + subscribers); the reusable core, no transport.

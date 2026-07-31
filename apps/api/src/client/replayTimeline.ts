@@ -15,7 +15,7 @@
  *     here and pure so the merge rules are testable without a DOM.
  */
 
-import type { LotteryEvent, LotteryFinish, LotterySnapshot } from '../lotteryStage.js';
+import type { LotteryEvent, LotteryFinish, LotterySnapshot } from '../lotteryTypes.js';
 
 /**
  * Replay pacing cap per drum-roll. The live window (`start.delayMs`) is sized for first-watch

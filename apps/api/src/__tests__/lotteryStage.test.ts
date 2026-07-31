@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   createLotteryStage,
   parseLotteryAbort,
+  parseLotteryAdjust,
   parseLotteryBeat,
   parseLotteryClear,
   parseLotteryFinish,
   parseLotteryLobby,
   parseLotteryReveal,
   parseLotteryStart,
+  StageNotEditableError,
+  UnknownTeamError,
   type LotteryEvent,
   type LotteryLobby,
+  type LotteryLobbyRequest,
   type LotteryStart,
 } from '../lotteryStage.js';
 
@@ -21,6 +25,19 @@ const LOBBY: LotteryLobby = {
     { team: 'C', balls: 3, firstPct: 50, top3Pct: 100 },
     { team: 'B', balls: 2, firstPct: 33.3, top3Pct: 100 },
     { team: 'A', balls: 1, firstPct: 16.7, top3Pct: 100 },
+  ],
+};
+
+/** An editable lobby (#210): stable team ids + the `setup` runner allowed to adjust it. */
+const EDITABLE: LotteryLobbyRequest = {
+  title: '2026 Draft Lottery',
+  teamCount: 3,
+  totalBalls: 6,
+  commissionerIds: ['commish'],
+  rows: [
+    { teamId: 't-c', team: 'C', balls: 3, firstPct: 50, top3Pct: 100 },
+    { teamId: 't-b', team: 'B', balls: 2, firstPct: 33.3, top3Pct: 100 },
+    { teamId: 't-a', team: 'A', balls: 1, firstPct: 16.7, top3Pct: 100 },
   ],
 };
 
@@ -280,7 +297,163 @@ describe('clear() — disarming a lobby (#198)', () => {
   });
 });
 
+describe('adjust() — commissioner lobby edits (#210)', () => {
+  it('recomputes the whole odds table and totals, keeping the armed row order', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+
+    stage.adjust({ teamId: 't-a', balls: 4 });
+
+    const lobby = stage.snapshot().lobby as LotteryLobby;
+    expect(lobby.rows.map((r) => r.teamId)).toEqual(['t-c', 't-b', 't-a']);
+    expect(lobby.rows.map((r) => r.balls)).toEqual([3, 2, 4]);
+    expect(lobby.totalBalls).toBe(9);
+    // 3/2/4 of 9 balls — every row's odds move, not just the edited one.
+    expect(lobby.rows[0].firstPct).toBeCloseTo((3 / 9) * 100, 5);
+    expect(lobby.rows[2].firstPct).toBeCloseTo((4 / 9) * 100, 5);
+    // Fanned out as the ordinary lobby event, so clients need no new branch.
+    expect(events).toEqual([{ type: 'lottery-lobby', lobby }]);
+  });
+
+  it('records edits as pending until the bot drains them, one entry per team', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    stage.adjust({ teamId: 't-a', balls: 4 });
+    stage.adjust({ teamId: 't-a', balls: 5 }); // re-tapping the same row replaces, never appends
+    stage.adjust({ teamId: 't-b', balls: 1 });
+    expect(stage.snapshot().adjustments).toEqual([
+      { teamId: 't-a', balls: 5 },
+      { teamId: 't-b', balls: 1 },
+    ]);
+  });
+
+  it('refuses anything but an armed lobby, and an unknown team', () => {
+    const stage = createLotteryStage();
+    expect(() => stage.adjust({ teamId: 't-a', balls: 2 })).toThrow(StageNotEditableError);
+
+    stage.lobby(EDITABLE);
+    expect(() => stage.adjust({ teamId: 't-nope', balls: 2 })).toThrow(UnknownTeamError);
+
+    // Once a commitment exists the bag is sealed — this is the ADR 0006 fairness boundary.
+    stage.start(START);
+    expect(() => stage.adjust({ teamId: 't-a', balls: 2 })).toThrow(StageNotEditableError);
+  });
+
+  it('refuses a lobby armed without team ids rather than guessing which row to edit', () => {
+    const stage = createLotteryStage();
+    stage.lobby({ ...LOBBY, commissionerIds: ['commish'] });
+    expect(() => stage.adjust({ teamId: 't-a', balls: 2 })).toThrow(UnknownTeamError);
+  });
+
+  it('scopes commissioners to the armed lobby', () => {
+    const stage = createLotteryStage();
+    expect(stage.isCommissioner('commish')).toBe(false); // idle: nobody may edit
+
+    stage.lobby(EDITABLE);
+    expect(stage.isCommissioner('commish')).toBe(true);
+    expect(stage.isCommissioner('someone-else')).toBe(false);
+
+    // Committing closes the write path outright.
+    stage.start(START);
+    expect(stage.isCommissioner('commish')).toBe(false);
+
+    // So does disarming, and so does a lobby armed by a bot that sends no commissioner list —
+    // read-only is the safe default.
+    const fresh = createLotteryStage();
+    fresh.lobby(EDITABLE);
+    fresh.clear({});
+    expect(fresh.isCommissioner('commish')).toBe(false);
+    fresh.lobby(LOBBY);
+    expect(fresh.isCommissioner('commish')).toBe(false);
+  });
+
+  it('drops pending edits on a re-arm, and keeps + re-applies them with keepAdjustments', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    stage.adjust({ teamId: 't-a', balls: 4 });
+
+    // A plain re-arm is a fresh `setup`: a brand-new bag makes the old edit meaningless.
+    stage.lobby(EDITABLE);
+    expect(stage.snapshot().adjustments).toBeUndefined();
+    expect(stage.snapshot().lobby?.totalBalls).toBe(6);
+
+    // The mini-game re-arm derives rows from a session that has not absorbed the edit yet, so it
+    // asks the stage to carry it — otherwise the odds would silently revert mid-lobby.
+    stage.adjust({ teamId: 't-a', balls: 4 });
+    stage.lobby({ ...EDITABLE, keepAdjustments: true });
+    expect(stage.snapshot().adjustments).toEqual([{ teamId: 't-a', balls: 4 }]);
+    expect(stage.snapshot().lobby?.rows.map((r) => r.balls)).toEqual([3, 2, 4]);
+    expect(stage.snapshot().lobby?.totalBalls).toBe(9);
+  });
+
+  it('re-arms cleanly even when a pending edit cannot be re-applied to the new rows', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    stage.adjust({ teamId: 't-a', balls: 4 });
+
+    // The mini-game re-arm asks to keep edits, but this bot sent rows with no team ids — so the
+    // edit can't be placed. Arming a lobby is the bot's authoritative act: it must still succeed,
+    // dropping the un-appliable edit rather than throwing and stranding the stage on the old one.
+    expect(() => stage.lobby({ ...LOBBY, keepAdjustments: true })).not.toThrow();
+    const snapshot = stage.snapshot();
+    expect(snapshot.phase).toBe('lobby');
+    expect(snapshot.adjustments).toBeUndefined();
+    expect(snapshot.lobby?.rows.map((r) => r.balls)).toEqual([3, 2, 1]);
+    expect(snapshot.lobby?.totalBalls).toBe(6);
+  });
+
+  it('never broadcasts the commissioner list or leaves edits behind on a committed run', () => {
+    const stage = createLotteryStage();
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+    stage.lobby(EDITABLE);
+    stage.adjust({ teamId: 't-a', balls: 4 });
+
+    const broadcast = events[0] as { type: 'lottery-lobby'; lobby: LotteryLobby };
+    expect(broadcast.lobby).not.toHaveProperty('commissionerIds');
+    expect(broadcast.lobby).not.toHaveProperty('keepAdjustments');
+
+    // A late edit is discarded by the commitment rather than surviving to be applied to a sealed
+    // bag — the bot drained before it called start().
+    stage.start(START);
+    expect(stage.snapshot().adjustments).toBeUndefined();
+  });
+});
+
 describe('lottery payload guards', () => {
+  it('parseLotteryAdjust clamps to a sane, integral ball count', () => {
+    const ok = parseLotteryAdjust(JSON.stringify({ teamId: 't-a', balls: 7 }));
+    expect(ok).toEqual({ value: { teamId: 't-a', balls: 7 } });
+    for (const balls of [0, -1, 1.5, 31, '3', null]) {
+      expect('error' in parseLotteryAdjust(JSON.stringify({ teamId: 't-a', balls }))).toBe(true);
+    }
+    expect('error' in parseLotteryAdjust(JSON.stringify({ balls: 3 }))).toBe(true);
+    expect('error' in parseLotteryAdjust('{bad')).toBe(true);
+  });
+
+  it('parseLotteryLobby reads the #210 steering fields and ignores junk ones', () => {
+    const parsed = parseLotteryLobby(
+      JSON.stringify({ ...EDITABLE, keepAdjustments: true, commissionerIds: ['a', 'b'] }),
+    );
+    expect('value' in parsed && parsed.value.commissionerIds).toEqual(['a', 'b']);
+    expect('value' in parsed && parsed.value.keepAdjustments).toBe(true);
+
+    const junk = parseLotteryLobby(
+      JSON.stringify({ ...EDITABLE, commissionerIds: [1, 2], keepAdjustments: 'yes' }),
+    );
+    expect('value' in junk && junk.value.commissionerIds).toBeUndefined();
+    expect('value' in junk && junk.value.keepAdjustments).toBeUndefined();
+  });
+
+  it('parseLotteryLobby rejects a row whose teamId is present but not a string', () => {
+    // Stored as-is it would never match an `adjust` targeting it, leaving that row silently
+    // un-editable for the lobby's whole life — better to fail the arm loudly.
+    const rows = [{ ...EDITABLE.rows[0], teamId: 42 }, ...EDITABLE.rows.slice(1)];
+    expect('error' in parseLotteryLobby(JSON.stringify({ ...EDITABLE, rows }))).toBe(true);
+  });
+
   it('parseLotteryLobby accepts a full payload and rejects partial ones', () => {
     const ok = parseLotteryLobby(JSON.stringify(LOBBY));
     expect('value' in ok && ok.value.rows).toHaveLength(3);

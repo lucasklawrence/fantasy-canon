@@ -1,0 +1,174 @@
+/**
+ * The lottery machine's **wire contract** (#169): every shape that crosses `/api/lottery/*` or the
+ * WebSocket, and nothing else.
+ *
+ * Split out of `lotteryStage.ts` on purpose. The browser client typechecks under a DOM-only,
+ * Node-types-free tsconfig (`src/client/tsconfig.json`), so anything it imports drags its whole
+ * import graph into that program. The stage itself now computes odds with `@fantasy-canon/core`,
+ * which reaches `node:crypto` — fine on the server, unresolvable in the browser program. Keeping
+ * the types in a module with **no imports at all** lets both halves share one definition of the
+ * protocol without the client ever seeing server code.
+ */
+
+/** One row of the pre-reveal odds table (mirrors the bot's odds-card rows). */
+export interface LotteryOddsRow {
+  /**
+   * Stable ceremony team id. Optional because `start`/`reveal` never need it, but a lobby without
+   * it cannot be adjusted from inside the Activity (#210) — display names are renameable, so
+   * targeting an edit by name would be ambiguous the moment two rows collide.
+   */
+  teamId?: string;
+  team: string;
+  balls: number;
+  firstPct: number;
+  top3Pct: number;
+}
+
+/** Opens the stage: everything the waiting room needs before the first ball drops. */
+export interface LotteryStart {
+  title: string;
+  /** The public sha256 commitment the bot posted in-channel — shown for auditability. */
+  commitment: string;
+  teamCount: number;
+  totalBalls: number;
+  /** Bot's reveal pacing, so the client can size its drum-roll animation. */
+  delayMs: number;
+  rows: LotteryOddsRow[];
+  /**
+   * Originating guild. The single process-wide stage serves one live ceremony at a time; a
+   * different guild's `start` during a live reveal is rejected (that bot falls back to its
+   * in-channel reveal) so two ceremonies can never interleave on shared screens.
+   */
+  guildId?: string;
+}
+
+/** Drum-roll: the next pick is about to be revealed. */
+export interface LotteryBeat {
+  pick: number;
+  /** Teams still in the hopper (display names), including the one about to be drawn. */
+  remaining: string[];
+}
+
+/** The ball drop: `pick` goes to `team`. */
+export interface LotteryReveal {
+  pick: number;
+  team: string;
+  balls: number;
+  oddsPct: number;
+  /** Teams still undrawn after this reveal. */
+  remaining: string[];
+}
+
+/** The wrap-up: final order + the seed-reveal verify info (public by now, per ADR 0006). */
+export interface LotteryFinish {
+  order: { pick: number; team: string }[];
+  verify: {
+    secretSeed: string;
+    /** The commitment post's message id — the #174 salt. */
+    salt: string;
+    drawSeed: string;
+    commitment: string;
+  };
+}
+
+export interface LotteryAbort {
+  /** Human-readable line (the bot's disclosure summary); the full disclosure lives in-channel. */
+  reason: string;
+}
+
+/**
+ * The abort *request* (#205): `ifCommitment` makes the abort conditional — a no-op unless the
+ * stage is still showing that committed run. The bot's boot reconciler sends it so a stale
+ * snapshot can never abort a fresh ceremony that replaced the stranded one mid-flight. Stripped
+ * before broadcast; clients only ever see {@link LotteryAbort}.
+ */
+export interface LotteryAbortRequest extends LotteryAbort {
+  ifCommitment?: string;
+}
+
+/**
+ * Pre-commitment lobby (#198): arms the waiting room from `setup` onward so members can
+ * join the Activity before `begin` is called. No commitment yet — shown as a placeholder.
+ */
+export interface LotteryLobby {
+  title: string;
+  teamCount: number;
+  totalBalls: number;
+  rows: LotteryOddsRow[];
+  /**
+   * Originating guild, echoed into events and snapshots, and matched by {@link LotteryStage.clear}
+   * so one league cannot disarm another's lobby. Unlike {@link LotteryStart.guildId} it does *not*
+   * gate the busy check — {@link LotteryStage.lobby} refuses a committed run guild-agnostically.
+   */
+  guildId?: string;
+}
+
+/**
+ * The lobby *request* (#210). `commissionerIds` and `keepAdjustments` steer the stage but are
+ * never broadcast — clients only ever see {@link LotteryLobby}, so the commissioner's Discord user
+ * id stays server-side (the client asks `GET /api/lottery/me` whether *it* is one).
+ */
+export interface LotteryLobbyRequest extends LotteryLobby {
+  /**
+   * Discord user ids allowed to {@link LotteryStage.adjust} this lobby — the member who ran
+   * `/canon draftorder setup`, which is already Manage-Server gated (ADR 0007). Absent or empty ⇒
+   * nobody can edit, which is the correct default for a bot that predates this field.
+   */
+  commissionerIds?: string[];
+  /**
+   * Keep pending adjustments and re-apply them onto these fresh rows instead of dropping them.
+   * The bot sets it when it re-arms a lobby it derived *without* draining (the #166 mini-game
+   * re-arm); a plain `setup` leaves it off, because a brand-new bag makes old edits meaningless.
+   */
+  keepAdjustments?: boolean;
+}
+
+/**
+ * One commissioner ball edit made from inside the Activity (#210), pending until the bot folds it
+ * into its authoritative bag at `begin`. Public in the snapshot on purpose: the odds table already
+ * shows the result, and naming the edited teams is what makes the change auditable rather than
+ * silent.
+ */
+export interface LotteryAdjustment {
+  teamId: string;
+  /** The team's new total ball count — exactly the number the odds table renders. */
+  balls: number;
+}
+
+/** Disarms an armed lobby (#198) — see {@link LotteryStage.clear}. */
+export interface LotteryClear {
+  /** Only this guild's lobby is disarmed; omitted ⇒ matches a lobby armed without a guild. */
+  guildId?: string;
+}
+
+export type LotteryPhase = 'idle' | 'lobby' | 'waiting' | 'revealing' | 'finished' | 'aborted';
+
+/** What a (late-)joining client needs to fully reconstruct the presentation. */
+export interface LotterySnapshot {
+  phase: LotteryPhase;
+  /** Set when phase is `'lobby'` — the pre-commitment waiting room state. */
+  lobby?: LotteryLobby;
+  start?: LotteryStart;
+  /** The most recent drum-roll not yet resolved by a reveal (a client joining mid-beat shows it). */
+  pendingBeat?: LotteryBeat;
+  /** Every reveal so far, in reveal order (worst pick first). */
+  reveals: LotteryReveal[];
+  finish?: LotteryFinish;
+  abort?: LotteryAbort;
+  /**
+   * In-Activity ball edits the bot has not folded into its bag yet (#210). Only ever populated in
+   * the `lobby` phase — this is how the bot drains them at `begin`, and how a viewer can see which
+   * rows the commissioner touched.
+   */
+  adjustments?: LotteryAdjustment[];
+}
+
+/** The events fanned out over the WS, tagged for the client. */
+export type LotteryEvent =
+  | { type: 'lottery-state'; snapshot: LotterySnapshot }
+  | { type: 'lottery-lobby'; lobby: LotteryLobby }
+  | { type: 'lottery-start'; start: LotteryStart }
+  | { type: 'lottery-beat'; beat: LotteryBeat }
+  | { type: 'lottery-reveal'; reveal: LotteryReveal }
+  | { type: 'lottery-finish'; finish: LotteryFinish }
+  | { type: 'lottery-abort'; abort: LotteryAbort };
