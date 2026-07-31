@@ -26,6 +26,11 @@ export function lotteryHtml(clientId: string): string {
   header { padding: 14px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   header h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: .4px; color: #f5d67b; }
   .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: #1b2130; color: #9aa4bd; }
+  /* The 🔊 toggle (#216) — the click that arms audio is also the browser's autoplay gesture. */
+  .pill.sound { cursor: pointer; font: inherit; font-size: 13px; border: 1px solid #2a3145;
+    line-height: 1; transition: background .2s, box-shadow .2s; }
+  .pill.sound:hover { background: #232c42; }
+  .pill.sound.on { border-color: rgba(245,214,123,.4); box-shadow: 0 0 8px rgba(245,214,123,.18); }
   .pill.live { background: #113526; color: #4ade80; }
   .pill.err { background: #3a1620; color: #f87171; }
   .commit { margin-left: auto; font-size: 11px; color: #5c657d; font-family: ui-monospace, monospace; }
@@ -171,6 +176,7 @@ export function lotteryHtml(clientId: string): string {
 <header>
   <h1 id="title">The Lottery Machine</h1>
   <span id="status" class="pill">connecting…</span>
+  <button id="sound-btn" class="pill sound" type="button" title="Sound is off — click to enable">&#128263;</button>
   <button id="replay-skip" class="pill skip hidden" type="button">&#9197; skip to result</button>
   <span class="commit" id="commit"></span>
 </header>

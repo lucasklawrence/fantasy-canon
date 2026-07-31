@@ -22,6 +22,7 @@ import type {
   LotteryStart,
 } from '../lotteryTypes.js';
 import { assignBallRanges, drawnBallFor, rangeLabel } from './ballAssignments.js';
+import { createCeremonyAudio } from './ceremonyAudio.js';
 import { createHopperSim, type HopperSim } from './hopperSim.js';
 import {
   createPlaybackCursor,
@@ -125,6 +126,17 @@ function hopper(): HopperSim {
   if (!hopperSim) hopperSim = createHopperSim(byId('hopper-canvas') as HTMLCanvasElement);
   return hopperSim;
 }
+
+// Ceremony sound (#216) — silent until the viewer arms it; the callback keeps the 🔊 pill honest
+// even when the stored preference re-arms audio from a page interaction rather than the button.
+const audio = createCeremonyAudio((enabled) => {
+  const btn = byId('sound-btn');
+  btn.textContent = enabled ? '🔊' : '🔇';
+  btn.classList.toggle('on', enabled);
+  btn.title = enabled ? 'Sound is on — click to mute' : 'Sound is off — click to enable';
+});
+/** Beat pick the roll is playing for — poll repaints of the same beat must not restart it. */
+let rolledPick: number | null = null;
 
 /** The odds table + hopper pile, shared by the lobby (#198) and the committed waiting room. */
 function renderOddsTable(
@@ -388,7 +400,14 @@ function renderDrum(pick: number, remaining: string[], windowMs?: number): void 
   byId('hopper').classList.add('spinning');
   hopper().agitate(true); // the boil (#211); .spinning still shakes the container
   byId('drum-now').textContent = `Drawing pick #${pick}…`;
-  armPull(pick, windowMs ?? currentStart?.delayMs ?? 4000);
+  const win = windowMs ?? currentStart?.delayMs ?? 4000;
+  armPull(pick, win);
+  // The roll spans the same window the pull is scheduled against; a poll repaint of the same
+  // beat must not restart the crescendo (same dedupe rule as `armPull`).
+  if (rolledPick !== pick) {
+    rolledPick = pick;
+    audio.drumRoll(win);
+  }
   const chips = byId('drum-remaining');
   clear(chips);
   for (const team of remaining) chips.appendChild(el('span', 'chip', team));
@@ -417,6 +436,10 @@ function renderDrop(reveal: LotteryReveal): void {
       : '';
   const oddsText = `${ballText}${reveal.balls} ball${reveal.balls === 1 ? '' : 's'} · ${reveal.oddsPct.toFixed(1)}% chance at this slot`;
   if (rerun) {
+    // The reveal is here — end the roll (early if the network beat the schedule) and land the hit.
+    // Poll repaints of an already-shown reveal stay silent, same rule as the animations below.
+    audio.stopRoll();
+    audio.hit();
     // Replace the animated nodes to retrigger their CSS animations for this reveal.
     const ball = replaceNode('drop-pick');
     ball.textContent = `#${reveal.pick}`;
@@ -442,6 +465,7 @@ let celebrated = false;
 function renderFinish(snapshot: LotterySnapshot): void {
   cancelPull();
   hopper().agitate(false); // stage is leaving the screen; let the pile settle and the loop park
+  audio.stopRoll(); // a finish can land mid-roll (a skip, or a finish with no drop before it)
   show('waiting', false);
   show('stage', false);
   if (snapshot.finish) {
@@ -475,6 +499,7 @@ function renderFinish(snapshot: LotterySnapshot): void {
   if (!celebrated) {
     celebrated = true;
     confetti();
+    audio.fanfare(); // same one-shot gate as the confetti — a poll repaint must not replay it
   }
 }
 
@@ -614,6 +639,7 @@ function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
   // person the feature exists for is the only one who never sees the confetti.
   celebrated = false;
   lastDropPick = null;
+  rolledPick = null; // playback replays the same pick numbers — each deserves its roll again
   reveals = [];
   show('board', false);
   show('verify', false);
@@ -660,7 +686,13 @@ function stopPlayback(options: { keepPull?: boolean } = {}): void {
   playbackMode = null;
   catchUpCommitment = undefined;
   show('replay-skip', false);
-  if (!options.keepPull) cancelPull();
+  // A skip or cancel mid-roll must not leave the crescendo playing. `keepPull` is the catch-up
+  // handoff landing mid-drum-roll of the live ceremony — the pull *and* the roll belong to the
+  // very pick the merge lands on, so both survive.
+  if (!options.keepPull) {
+    audio.stopRoll();
+    cancelPull();
+  }
 }
 
 /**
@@ -761,8 +793,10 @@ function updateReplayAffordance(): void {
  */
 function onVisibilityChange(): void {
   // The physics loop pauses whenever the tab hides, playback or not — rAF is throttled in hidden
-  // tabs anyway; parking it outright makes the resume clean and costs nothing.
+  // tabs anyway; parking it outright makes the resume clean and costs nothing. The roll stops
+  // outright too: nobody hears a drum roll for a hidden tab, and the next beat re-rolls.
   hopper().setRunning(!document.hidden);
+  if (document.hidden) audio.stopRoll();
   if (!cursor || !playbackMode) return;
   if (document.hidden) {
     if (onHiddenAction(playbackMode) === 'pause') {
@@ -835,10 +869,13 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
     finishedSnapshot = null;
     celebrated = false;
     lastDropPick = null;
+    rolledPick = null;
     cancelPull();
-    // Any exit from a drum-roll must kill the boil: only drop/finish turn it off otherwise, and
-    // idle() can never park the sim's loop while agitating — even over an empty pile.
+    // Any exit from a drum-roll must kill the boil — and the roll (#216) follows the same rule:
+    // only drop/finish end them otherwise, and idle() can never park the sim's loop while
+    // agitating, even over an empty pile.
     hopper().agitate(false);
+    audio.stopRoll();
   }
   switch (snapshot.phase) {
     case 'idle':
@@ -901,8 +938,9 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       cancelPull();
       // An abort mid-drum-roll arrives with the boil on, and no drop/finish will ever follow to
       // turn it off — without this the sim agitates a hidden pile at 60fps for as long as the
-      // iframe stays open on the abort screen.
+      // iframe stays open on the abort screen. Same for the roll: an abort must not drum on.
       hopper().agitate(false);
+      audio.stopRoll();
       show('waiting', false);
       show('stage', false);
       show('abort', true);
@@ -1071,6 +1109,7 @@ async function boot(): Promise<void> {
     else startCatchUp();
   });
   byId('replay-skip').addEventListener('click', skipReplay);
+  byId('sound-btn').addEventListener('click', () => audio.toggle());
   document.addEventListener('visibilitychange', onVisibilityChange);
   const inDiscord = isDiscordActivity(window.location);
   const base = proxyBase(inDiscord);
