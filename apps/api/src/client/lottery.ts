@@ -247,6 +247,29 @@ let currentLobby: LotteryLobby | undefined;
 /** The transport base (`/.proxy` inside Discord), captured at boot for the adjust POST. */
 let activityBase = '';
 
+/** In-flight/settled commissioner check, so a repainting lobby doesn't re-ask on every event. */
+let commissionerCheck: Promise<void> | null = null;
+
+/**
+ * Ask the backend whether *this* member may edit. Authoritative — the client can't derive it,
+ * since the commissioner list never leaves the server. A failure just leaves the machine
+ * read-only, which is the correct fallback for everyone but one person.
+ */
+async function checkCommissioner(): Promise<void> {
+  if (!accessToken) return;
+  try {
+    const res = await fetch(apiPath(activityBase, '/api/lottery/me'), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      commissioner = ((await res.json()) as { commissioner?: boolean }).commissioner === true;
+    }
+  } catch (error) {
+    console.error('[lottery] commissioner check failed', error);
+  }
+}
+
 /**
  * Pre-commitment lobby (#198): odds visible before the draw begins. Shows a placeholder in the
  * commit slot instead of the hash (which doesn't exist yet). For the commissioner (#210) the
@@ -260,6 +283,15 @@ function renderLobby(lobby: LotteryLobby): void {
   byId('commit').textContent = 'Commissioner will begin the draw soon…';
   renderOddsTable(lobby.rows, [], commissioner);
   show('edit-hint', commissioner);
+  // The answer is lobby-scoped server-side, so a client that booted while the stage was idle was
+  // told "not a commissioner" and would otherwise sit there read-only through the whole lobby —
+  // exactly the case where the commissioner already had the Activity open before running `setup`.
+  // Re-ask once per page, on the first lobby we see, and repaint if the answer flipped.
+  if (accessToken && !commissioner && !commissionerCheck) {
+    commissionerCheck = checkCommissioner().then(() => {
+      if (commissioner && currentLobby) renderLobby(currentLobby);
+    });
+  }
 }
 
 function renderWaiting(start: LotteryStart, drawnTeams: string[] = []): void {
@@ -1052,20 +1084,13 @@ async function boot(): Promise<void> {
       // Fall through — the reveal is public; still show it even if auth didn't complete.
     }
   }
-  // Ask the backend whether *this* member may edit (#210). The answer is authoritative — the
-  // client can't derive it, since the commissioner list never leaves the server. A failure just
-  // leaves the machine read-only, which is the correct fallback for everyone but one person.
+  // Whether this member may edit (#210). Only meaningful once a lobby is armed, so `renderLobby`
+  // re-asks if this one lands while the stage is still idle.
   if (accessToken) {
-    try {
-      const res = await fetch(apiPath(base, '/api/lottery/me'), {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        cache: 'no-store',
-      });
-      if (res.ok)
-        commissioner = ((await res.json()) as { commissioner?: boolean }).commissioner === true;
-    } catch (error) {
-      console.error('[lottery] commissioner check failed', error);
-    }
+    commissionerCheck = checkCommissioner();
+    await commissionerCheck;
+    // A boot-time "no" is not final — the lobby may not exist yet. Let the lobby path retry.
+    if (!commissioner) commissionerCheck = null;
   }
   connect(base);
 }

@@ -388,6 +388,22 @@ describe('adjust() — commissioner lobby edits (#210)', () => {
     expect(stage.snapshot().lobby?.totalBalls).toBe(9);
   });
 
+  it('re-arms cleanly even when a pending edit cannot be re-applied to the new rows', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    stage.adjust({ teamId: 't-a', balls: 4 });
+
+    // The mini-game re-arm asks to keep edits, but this bot sent rows with no team ids — so the
+    // edit can't be placed. Arming a lobby is the bot's authoritative act: it must still succeed,
+    // dropping the un-appliable edit rather than throwing and stranding the stage on the old one.
+    expect(() => stage.lobby({ ...LOBBY, keepAdjustments: true })).not.toThrow();
+    const snapshot = stage.snapshot();
+    expect(snapshot.phase).toBe('lobby');
+    expect(snapshot.adjustments).toBeUndefined();
+    expect(snapshot.lobby?.rows.map((r) => r.balls)).toEqual([3, 2, 1]);
+    expect(snapshot.lobby?.totalBalls).toBe(6);
+  });
+
   it('never broadcasts the commissioner list or leaves edits behind on a committed run', () => {
     const stage = createLotteryStage();
     const events: LotteryEvent[] = [];
@@ -429,6 +445,13 @@ describe('lottery payload guards', () => {
     );
     expect('value' in junk && junk.value.commissionerIds).toBeUndefined();
     expect('value' in junk && junk.value.keepAdjustments).toBeUndefined();
+  });
+
+  it('parseLotteryLobby rejects a row whose teamId is present but not a string', () => {
+    // Stored as-is it would never match an `adjust` targeting it, leaving that row silently
+    // un-editable for the lobby's whole life — better to fail the arm loudly.
+    const rows = [{ ...EDITABLE.rows[0], teamId: 42 }, ...EDITABLE.rows.slice(1)];
+    expect('error' in parseLotteryLobby(JSON.stringify({ ...EDITABLE, rows }))).toBe(true);
   });
 
   it('parseLotteryLobby accepts a full payload and rejects partial ones', () => {

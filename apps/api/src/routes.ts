@@ -311,6 +311,13 @@ async function adjustRoute(
   deps: RouteDeps,
   headers: Record<string, string | string[] | undefined>,
 ): Promise<HttpReply> {
+  // Cheap local rejection first. Identifying a caller costs a round-trip to Discord against *our*
+  // rate limit, and this route is reachable by anyone who can load the Activity host — so an
+  // unauthenticated spammer must not be able to turn junk bearers into Discord traffic. Whether a
+  // lobby is armed is already public via `/api/lottery/state`, so this leaks nothing.
+  if (deps.lottery.snapshot().phase !== 'lobby') {
+    return json(409, { error: 'no pre-commitment lobby is armed' });
+  }
   const caller = await identifyCaller(deps, headers);
   if ('reply' in caller) return caller.reply;
   if (!deps.lottery.isCommissioner(caller.user.id)) {

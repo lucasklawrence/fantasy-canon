@@ -287,7 +287,10 @@ export function parseLotteryLobby(body: string): Parsed<LotteryLobbyRequest> {
           isStr((row as LotteryOddsRow).team) &&
           isPosInt((row as LotteryOddsRow).balls) &&
           isNum((row as LotteryOddsRow).firstPct) &&
-          isNum((row as LotteryOddsRow).top3Pct),
+          isNum((row as LotteryOddsRow).top3Pct) &&
+          // Present-but-not-a-string would be stored as-is and then never match an `adjust`
+          // targeting it, leaving the row silently un-editable for the whole lobby (#210).
+          ((row as LotteryOddsRow).teamId === undefined || isStr((row as LotteryOddsRow).teamId)),
       )
     : undefined;
   if (
@@ -457,12 +460,27 @@ export function createLotteryStage(): LotteryStage {
       // `keepAdjustments` re-applies still-pending edits onto the fresh rows, so a bot re-arm that
       // did *not* drain them (the mini-game path) republishes the odds the league is looking at
       // instead of silently reverting them. A plain re-arm drops them: a new `setup` is a new bag.
-      const carried = keepAdjustments ? adjustments : new Map<string, number>();
+      //
+      // Resolved *before* any state is written, and never allowed to fail the re-arm: if the new
+      // rows can't carry exact odds (no team ids, duplicates, too many teams) the pending edits
+      // are dropped and the bot's rows stand. Arming a lobby is the bot's authoritative act — a
+      // stale client-side edit must not be able to 500 it, let alone half-apply it.
+      let carried =
+        keepAdjustments && adjustments.size > 0
+          ? new Map<string, number>(adjustments)
+          : new Map<string, number>();
+      let rows = publicLobby.rows;
+      if (carried.size > 0) {
+        try {
+          rows = applyAdjustments(publicLobby.rows, carried);
+        } catch {
+          carried = new Map();
+          rows = publicLobby.rows;
+        }
+      }
       phase = 'lobby';
       commissionerIds = [...editors];
       adjustments = carried;
-      const rows =
-        carried.size > 0 ? applyAdjustments(publicLobby.rows, carried) : publicLobby.rows;
       lobby = {
         ...publicLobby,
         rows,

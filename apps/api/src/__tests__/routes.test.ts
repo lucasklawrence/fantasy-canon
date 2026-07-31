@@ -1,5 +1,5 @@
 import type { PlayerTier } from '@fantasy-canon/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDraftHub, type DraftHub } from '../hub.js';
 import { createLotteryStage, type LotterySnapshot } from '../lotteryStage.js';
 import {
@@ -451,8 +451,9 @@ describe('commissioner lobby edits (#210)', () => {
     expect(snapshot.adjustments).toEqual([{ teamId: 't-a', balls: 3 }]);
   });
 
-  it('403s a member who is not the commissioner, and any caller once no lobby is armed', async () => {
-    const d = deps(hub());
+  it('403s a member who is not the commissioner, and 409s everyone once the bag is sealed', async () => {
+    const identify = vi.fn((token: string) => Promise.resolve({ id: token.slice('user-'.length) }));
+    const d = deps(hub(), { identify });
     const body = JSON.stringify({ teamId: 't-a', balls: 4 });
     await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
 
@@ -460,12 +461,16 @@ describe('commissioner lobby edits (#210)', () => {
       authorization: 'Bearer user-rando',
     });
     expect(outsider.status).toBe(403);
+    expect(identify).toHaveBeenCalledTimes(1);
 
     // A committed run is nobody's to edit — not even the commissioner's. This is the fairness
     // guarantee: the commitment binds the bag (ADR 0006).
     await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d);
     const sealed = await routeRequest('POST', '/api/lottery/adjust', body, d, asCommissioner);
-    expect(sealed.status).toBe(403);
+    expect(sealed.status).toBe(409);
+    // …and it was rejected locally: identifying a caller costs a Discord round-trip against our
+    // rate limit, so an un-editable stage must never spend one.
+    expect(identify).toHaveBeenCalledTimes(1);
   });
 
   it('404s an unknown team and 400s a ball count outside 1..30', async () => {

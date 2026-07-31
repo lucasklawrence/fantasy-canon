@@ -359,6 +359,22 @@ describe('applyLobbyAdjustments (#210)', () => {
     expect(oddsRows(session).find((r) => r.teamId === 't2')?.balls).toBe(1);
   });
 
+  it('leaves the bag untouched when the projected result would be invalid', () => {
+    const session = adjustableSession();
+    const before = oddsRows(session).map((row) => row.balls);
+
+    // A ball count the stage's guard would never pass. It has to fail *before* anything mutates:
+    // `begin` treats a failed drain as "commit what setup froze", so a half-applied bag would put
+    // counts nobody ever published under the commitment.
+    expect(() =>
+      applyLobbyAdjustments(session, [
+        { teamId: 't1', balls: 5 },
+        { teamId: 't2', balls: -1 },
+      ]),
+    ).toThrow();
+    expect(oddsRows(session).map((row) => row.balls)).toEqual(before);
+  });
+
   it('refuses to touch a bag that is no longer mutable', () => {
     const session = createCeremony('guild-1', 'Lottery', CONFIG, NAMES); // still CREATED
     expect(() => applyLobbyAdjustments(session, [{ teamId: 't1', balls: 4 }])).toThrow('GAME_OPEN');

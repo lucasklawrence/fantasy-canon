@@ -26,6 +26,7 @@ import {
   computeDraftOrder,
   computePickOdds,
   DraftOrderState,
+  DraftOrderTeamInput,
   DRAW_ALGORITHM,
   LotteryConfig,
   LotteryDraw,
@@ -331,26 +332,40 @@ export function applyLobbyAdjustments(
   if (session.state !== 'GAME_OPEN') {
     throw new Error(`Lobby adjustments can only be applied in GAME_OPEN (state: ${session.state})`);
   }
-  const applied: AppliedAdjustment[] = [];
+  const planned: { team: DraftOrderTeamInput; change: AppliedAdjustment }[] = [];
   for (const adjustment of adjustments) {
     const team = session.config.teams.find((t) => t.teamId === adjustment.teamId);
     if (!team) continue;
     const from = ballCountForTeam(team, session.config.baseBallCount ?? 1);
     if (from === adjustment.balls) continue;
-    team.baseBalls = adjustment.balls;
-    team.bonusBalls = 0;
-    if (session.miniGameBonuses) delete session.miniGameBonuses[adjustment.teamId];
-    applied.push({
-      teamId: adjustment.teamId,
-      team: displayName(session, adjustment.teamId),
-      from,
-      to: adjustment.balls,
+    planned.push({
+      team,
+      change: {
+        teamId: adjustment.teamId,
+        team: displayName(session, adjustment.teamId),
+        from,
+        to: adjustment.balls,
+      },
     });
   }
-  // Same eager re-validation `applyMiniGameBonuses` does: a bag that can't produce odds must fail
-  // here, not inside the commitment.
-  if (applied.length > 0) computePickOdds(session.config.teams, session.config.baseBallCount);
-  return applied;
+  if (planned.length === 0) return [];
+
+  // Validate the *projected* bag before touching the session — same eager re-validation
+  // `applyMiniGameBonuses` does, but on a copy. Mutating as we go would leave a half-applied bag
+  // behind on a throw, and `begin`'s caller treats a failed drain as "commit what setup froze" —
+  // so a partial mutation would put a bag nobody ever published under the commitment.
+  const projected = session.config.teams.map((team) => {
+    const change = planned.find((entry) => entry.team === team);
+    return change ? { ...team, baseBalls: change.change.to, bonusBalls: 0 } : team;
+  });
+  computePickOdds(projected, session.config.baseBallCount);
+
+  for (const { team, change } of planned) {
+    team.baseBalls = change.to;
+    team.bonusBalls = 0;
+    if (session.miniGameBonuses) delete session.miniGameBonuses[change.teamId];
+  }
+  return planned.map((entry) => entry.change);
 }
 
 /**
