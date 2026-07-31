@@ -80,7 +80,16 @@ export function createCeremonyAudio(onChange?: (enabled: boolean) => void): Cere
     return buffer;
   }
 
+  /** The stored-preference bootstrap listener, retired by the first explicit state change. */
+  let rearm: ((event: PointerEvent) => void) | null = null;
+
   function setEnabled(on: boolean): void {
+    // Any explicit choice supersedes the stored-preference bootstrap — without this, a viewer
+    // who toggled sound OFF could have a later stray click silently re-enable it.
+    if (rearm) {
+      document.removeEventListener('pointerdown', rearm);
+      rearm = null;
+    }
     enabled = on;
     try {
       localStorage.setItem(PREF_KEY, on ? '1' : '0');
@@ -98,11 +107,13 @@ export function createCeremonyAudio(onChange?: (enabled: boolean) => void): Cere
   }
 
   // A viewer who had sound on last time can't be un-muted without a gesture — so their first
-  // interaction anywhere on the page re-arms it. One shot, removed either way.
+  // interaction anywhere on the page re-arms it. One shot, removed either way. The sound button
+  // itself is exempt: its own click handler toggles, and re-arming on the same gesture's
+  // pointerdown would make that toggle flip the just-enabled sound straight back off.
   if (storedPref) {
-    const rearm = (): void => {
-      document.removeEventListener('pointerdown', rearm);
-      setEnabled(true);
+    rearm = (event: PointerEvent): void => {
+      if (event.target instanceof Element && event.target.closest('#sound-btn')) return;
+      setEnabled(true); // removes and clears the listener itself
     };
     document.addEventListener('pointerdown', rearm);
   }
@@ -147,18 +158,25 @@ export function createCeremonyAudio(onChange?: (enabled: boolean) => void): Cere
       gain.gain.linearRampToValueAtTime(ROLL_START_GAIN, now + plan.attackMs / 1000);
       gain.gain.linearRampToValueAtTime(ROLL_END_GAIN, now + plan.crescendoEndMs / 1000);
 
+      // The tremolo multiplies the envelope through its own stage (base 1 ± depth) instead of
+      // adding to it: a bipolar wobble summed onto a near-zero envelope swings the gain negative,
+      // which inverts the noise at full flutter amplitude rather than silencing it — the whisper
+      // opening would start loud and the crescendo would be defeated.
       const tremolo = audioCtx.createOscillator();
       tremolo.frequency.setValueAtTime(14, now);
       // The flutter quickens as the crescendo builds — 14Hz sticks becoming a 26Hz blur.
       tremolo.frequency.linearRampToValueAtTime(26, now + plan.crescendoEndMs / 1000);
+      const flutter = audioCtx.createGain();
+      flutter.gain.value = 1; // offset; the oscillator wobbles ±0.45 around it, staying positive
       const tremoloDepth = audioCtx.createGain();
-      tremoloDepth.gain.value = 0.35;
+      tremoloDepth.gain.value = 0.45;
       tremolo.connect(tremoloDepth);
-      tremoloDepth.connect(gain.gain);
+      tremoloDepth.connect(flutter.gain);
 
       source.connect(band);
       band.connect(gain);
-      gain.connect(master);
+      gain.connect(flutter);
+      flutter.connect(master);
       source.start(now);
       tremolo.start(now);
       source.stop(now + plan.autoStopMs / 1000); // failsafe: an abandoned roll ends itself
