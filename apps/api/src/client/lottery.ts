@@ -20,6 +20,8 @@ import type {
   LotterySnapshot,
   LotteryStart,
 } from '../lotteryStage.js';
+import { assignBallRanges, drawnBallFor, rangeLabel } from './ballAssignments.js';
+import { createHopperSim, type HopperSim } from './hopperSim.js';
 import {
   createPlaybackCursor,
   onHiddenAction,
@@ -116,18 +118,37 @@ function paintBoardList(
   show('board', visible);
 }
 
-/** The odds table + hopper fill, shared by the lobby (#198) and the committed waiting room. */
+// The physics hopper (#211). Lazy: the canvas is static markup, but boot order shouldn't matter.
+let hopperSim: HopperSim | null = null;
+function hopper(): HopperSim {
+  if (!hopperSim) hopperSim = createHopperSim(byId('hopper-canvas') as HTMLCanvasElement);
+  return hopperSim;
+}
+
+/** The odds table + hopper pile, shared by the lobby (#198) and the committed waiting room. */
 function renderOddsTable(
   oddsRows: { team: string; balls: number; firstPct: number; top3Pct: number }[],
-  totalBalls: number,
+  drawnTeams: string[] = [],
 ): void {
   const rows = byId('odds-rows');
   clear(rows);
+  const ranges = assignBallRanges(oddsRows);
   const maxBalls = Math.max(...oddsRows.map((r) => r.balls), 1);
-  for (const row of oddsRows) {
+  for (let i = 0; i < oddsRows.length; i += 1) {
+    const row = oddsRows[i];
     const tr = el('tr');
-    tr.appendChild(el('td', undefined, row.team));
-    tr.appendChild(el('td', 'num', String(row.balls)));
+    const teamCell = el('td');
+    // Swatch matches the team's ball color in the hopper, so "watch your balls" actually works.
+    const dot = el('span', 'swatch');
+    dot.style.background = `hsl(${ranges[i].hue} 60% 62%)`;
+    teamCell.appendChild(dot);
+    teamCell.appendChild(document.createTextNode(row.team));
+    tr.appendChild(teamCell);
+    const ballsCell = el('td', 'num', String(row.balls));
+    // The bag range ("#5–7") makes the numbers on the balls mean something checkable.
+    const label = rangeLabel(ranges[i]);
+    if (label) ballsCell.appendChild(el('span', 'brange', label));
+    tr.appendChild(ballsCell);
     const barCell = el('td');
     const bar = el('span', 'ballbar');
     bar.style.width = `${Math.max(8, Math.round((row.balls / maxBalls) * 90))}px`;
@@ -137,7 +158,7 @@ function renderOddsTable(
     tr.appendChild(el('td', 'num', `${row.top3Pct.toFixed(1)}%`));
     rows.appendChild(tr);
   }
-  fillHopper(totalBalls);
+  hopper().sync(oddsRows, drawnTeams);
 }
 
 /**
@@ -149,35 +170,16 @@ function renderLobby(lobby: LotteryLobby): void {
   byId('waiting-sub').textContent =
     `${lobby.teamCount} teams · ${lobby.totalBalls} balls in the hopper`;
   byId('commit').textContent = 'Commissioner will begin the draw soon…';
-  renderOddsTable(lobby.rows, lobby.totalBalls);
+  renderOddsTable(lobby.rows);
 }
 
-function renderWaiting(start: LotteryStart): void {
+function renderWaiting(start: LotteryStart, drawnTeams: string[] = []): void {
   currentStart = start; // remembered for pull scheduling (delayMs) across later phases
   byId('title').textContent = start.title;
   byId('waiting-sub').textContent =
     `${start.teamCount} teams · ${start.totalBalls} balls in the hopper`;
   byId('commit').textContent = `commitment ${start.commitment.slice(0, 16)}…`;
-  renderOddsTable(start.rows, start.totalBalls);
-}
-
-/** Cosmetic only — ball positions/timings are random because they represent nothing. */
-function fillHopper(totalBalls: number): void {
-  const hopper = byId('hopper');
-  // Keep the #suck-ball pull element (static markup) — only the decorative balls are rebuilt.
-  for (const stale of [...hopper.querySelectorAll('.ball')]) stale.remove();
-  const count = Math.min(totalBalls, 48);
-  for (let i = 0; i < count; i += 1) {
-    // Two keyframe variants + randomized period/size via custom props (see lotteryPage.ts CSS)
-    // so the pile reads as physical tumbling, not one synchronized wobble.
-    const ball = el('div', i % 2 === 0 ? 'ball' : 'ball alt');
-    ball.style.left = `${8 + Math.random() * 75}%`;
-    ball.style.top = `${30 + Math.random() * 55}%`;
-    ball.style.animationDelay = `${-Math.random() * 1.6}s`;
-    ball.style.setProperty('--jig', `${(0.9 + Math.random() * 0.9).toFixed(2)}s`);
-    ball.style.setProperty('--s', (0.55 + Math.random() * 0.45).toFixed(2));
-    hopper.appendChild(ball);
-  }
+  renderOddsTable(start.rows, drawnTeams);
 }
 
 // --- the pull (#195): a ball leaves the hopper through the chute during the drum-roll window ---
@@ -205,6 +207,8 @@ function armPull(pick: number, windowMs: number): void {
   pullTimer = setTimeout(() => {
     byId('machine-left').classList.add('pulling');
     byId('chute').classList.add('active');
+    // Extraction recoil (#211): the pile reacts to a ball being yanked toward the chute.
+    hopper().pulse();
   }, lead);
 }
 
@@ -257,6 +261,7 @@ function renderDrum(pick: number, remaining: string[], windowMs?: number): void 
   show('drop', false);
   byId('drum').classList.remove('hidden');
   byId('hopper').classList.add('spinning');
+  hopper().agitate(true); // the boil (#211); .spinning still shakes the container
   byId('drum-now').textContent = `Drawing pick #${pick}…`;
   armPull(pick, windowMs ?? currentStart?.delayMs ?? 4000);
   const chips = byId('drum-remaining');
@@ -267,13 +272,25 @@ function renderDrum(pick: number, remaining: string[], windowMs?: number): void 
 function renderDrop(reveal: LotteryReveal): void {
   show('stage', true);
   byId('hopper').classList.remove('spinning');
+  hopper().agitate(false);
+  // The drawn team's balls leave the pile — the hopper now shows the live bag for the next draw.
+  hopper().removeTeam(reveal.team);
   show('drop', true);
   const rerun = lastDropPick !== reveal.pick;
   lastDropPick = reveal.pick;
   // Measure the chute exit BEFORE tearing down the pull so the handoff starts where it ended.
   const chuteRect = byId('chute').getBoundingClientRect();
   cancelPull();
-  const oddsText = `${reveal.balls} ball${reveal.balls === 1 ? '' : 's'} · ${reveal.oddsPct.toFixed(1)}% chance at this slot`;
+  // Which ball came out (#211): cosmetic but stable — every viewer, poll repaint, and replay
+  // derives the same number from the public commitment. See `drawnBallFor`.
+  const range = currentStart
+    ? assignBallRanges(currentStart.rows).find((r) => r.team === reveal.team)
+    : undefined;
+  const ballText =
+    range && range.end >= range.start
+      ? `ball #${drawnBallFor(currentStart?.commitment ?? '', reveal.pick, range)} · `
+      : '';
+  const oddsText = `${ballText}${reveal.balls} ball${reveal.balls === 1 ? '' : 's'} · ${reveal.oddsPct.toFixed(1)}% chance at this slot`;
   if (rerun) {
     // Replace the animated nodes to retrigger their CSS animations for this reveal.
     const ball = replaceNode('drop-pick');
@@ -299,6 +316,7 @@ let celebrated = false;
 
 function renderFinish(snapshot: LotterySnapshot): void {
   cancelPull();
+  hopper().agitate(false); // stage is leaving the screen; let the pile settle and the loop park
   show('waiting', false);
   show('stage', false);
   if (snapshot.finish) {
@@ -463,6 +481,9 @@ function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
     browserClock,
   );
   replayWindowMs = replayStepMs(source);
+  // Playback re-runs the draw from pick one, so the pile must be full again; drops re-empty it.
+  const bagRows = source.start?.rows ?? currentStart?.rows;
+  if (bagRows) hopper().sync(bagRows, []);
   // Both modes re-arm the finale. A catch-up's `lottery-finish` is buffered and played by
   // `applyReplayStep`, so this *is* the viewer's finale — suppressing it here would mean the one
   // person the feature exists for is the only one who never sees the confetti.
@@ -614,6 +635,9 @@ function updateReplayAffordance(): void {
  * `onHiddenAction` owns that rule and explains why.
  */
 function onVisibilityChange(): void {
+  // The physics loop pauses whenever the tab hides, playback or not — rAF is throttled in hidden
+  // tabs anyway; parking it outright makes the resume clean and costs nothing.
+  hopper().setRunning(!document.hidden);
   if (!cursor || !playbackMode) return;
   if (document.hidden) {
     if (onHiddenAction(playbackMode) === 'pause') {
@@ -701,9 +725,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       byId('title').textContent = 'The Lottery Machine';
       byId('commit').textContent = '';
       clear(byId('odds-rows'));
-      // Only the decorative balls — `#suck-ball` is static markup the pull animation needs, and
-      // `byId` throws if it's gone (same reason `fillHopper` removes selectively).
-      for (const stale of [...byId('hopper').querySelectorAll('.ball')]) stale.remove();
+      hopper().sync([], []); // empty the pile — the canvas clears on the next frame
       break;
     case 'lobby':
       // Pre-commitment lobby (#198): show odds without the commitment hash.
@@ -719,7 +741,12 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       show('stage', false);
       break;
     case 'revealing':
-      if (snapshot.start) renderWaiting(snapshot.start);
+      // Drawn teams ride along so the pile reflects the live bag, not the full pre-draw one.
+      if (snapshot.start)
+        renderWaiting(
+          snapshot.start,
+          snapshot.reveals.map((r) => r.team),
+        );
       setStatus('live reveal', 'live');
       // A draw is running, so any sealed result we were holding belongs to a *previous* ceremony.
       // Left set, it would mislabel the button "Replay the reveal" and replay the old lottery over

@@ -47,6 +47,10 @@ export function lotteryHtml(clientId: string): string {
   table.odds td.num { text-align: right; font-variant-numeric: tabular-nums; color: #b9c1d4; }
   .ballbar { display: inline-block; height: 8px; border-radius: 4px;
     background: linear-gradient(90deg, #f5d67b, #e8a33d); vertical-align: middle; }
+  /* Ball identity in the odds table (#211): team color swatch + the team's bag numbers. */
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    margin-right: 7px; vertical-align: baseline; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+  .brange { color: #7c869e; font-size: 11px; margin-left: 6px; }
 
   /* the machine */
   .machine { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
@@ -54,15 +58,8 @@ export function lotteryHtml(clientId: string): string {
   .hopper { position: relative; width: 260px; height: 260px; margin: 10px auto 0; border-radius: 50%;
     border: 3px solid #2b3550; background: radial-gradient(circle at 35% 30%, #1c2338, #10141f 70%);
     overflow: hidden; box-shadow: inset 0 -18px 40px rgba(0,0,0,.5), 0 0 40px rgba(245,214,123,.06); }
-  /* Per-ball motion is randomized in JS via custom props: --s (size), --jig (period). The scale
-     lives inside the keyframes because an animation's transform replaces any inline transform. */
-  .hopper .ball { position: absolute; width: 34px; height: 34px; border-radius: 50%;
-    background: radial-gradient(circle at 32% 28%, #fff 0%, #f5d67b 35%, #c8912e 100%);
-    animation: jiggle-a var(--jig, 1.3s) cubic-bezier(.45,.05,.55,.95) infinite alternate;
-    box-shadow: 0 3px 6px rgba(0,0,0,.5); will-change: transform; }
-  .hopper .ball.alt { animation-name: jiggle-b; }
-  .hopper.spinning .ball { animation-duration: calc(var(--jig, 1.3s) * .3);
-    animation-timing-function: cubic-bezier(.3,.1,.7,.9); }
+  /* The ball pile is a physics sim on this canvas (#211, hopperSim.ts); the pull overlays it. */
+  #hopper-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   .hopper.spinning { animation: agitate .22s linear infinite; }
   /* The chute is a clear tube: the pulled ball is visible sliding down inside it. */
   .chute { position: relative; width: 20px; height: 46px; margin: -4px auto 0; overflow: hidden;
@@ -133,16 +130,6 @@ export function lotteryHtml(clientId: string): string {
     animation: confetti linear forwards; pointer-events: none; }
 
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
-  @keyframes jiggle-a {
-    0% { transform: translate(0,0) rotate(-8deg) scale(var(--s,1)) }
-    33% { transform: translate(4px,-8px) rotate(3deg) scale(var(--s,1)) }
-    66% { transform: translate(-5px,-3px) rotate(-3deg) scale(var(--s,1)) }
-    100% { transform: translate(6px,-11px) rotate(9deg) scale(var(--s,1)) } }
-  @keyframes jiggle-b {
-    0% { transform: translate(0,0) rotate(6deg) scale(var(--s,1)) }
-    30% { transform: translate(-6px,-9px) rotate(-4deg) scale(var(--s,1)) }
-    65% { transform: translate(3px,-14px) rotate(2deg) scale(var(--s,1)) }
-    100% { transform: translate(-4px,-2px) rotate(-7deg) scale(var(--s,1)) } }
   @keyframes agitate { 0%,100% { transform: translate(0,0) } 25% { transform: translate(1px,-1px) }
     50% { transform: translate(-1px,1px) } 75% { transform: translate(1px,1px) } }
   @keyframes suck { 0% { opacity: 0; transform: translate(0,0) scale(1) } 12% { opacity: 1 }
@@ -162,9 +149,10 @@ export function lotteryHtml(clientId: string): string {
   @keyframes confetti { to { transform: translateY(105vh) rotate(720deg); opacity: .7 } }
 
   @media (prefers-reduced-motion: reduce) {
-    .hopper .ball, .hopper.spinning, .pullball, #drop .dropball, #drop .team, #drop .odds,
+    .hopper.spinning, .pullball, #drop .dropball, #drop .team, #drop .odds,
     .confetti, #waiting .pulse, #drum .now { animation: none !important; transition: none !important; }
     #drop .dropball.flip { transition: none !important; }
+    /* The canvas pile honors this too — hopperSim renders a settled still frame, no loop. */
   }
 </style>
 </head>
@@ -190,7 +178,7 @@ export function lotteryHtml(clientId: string): string {
   <section class="card hidden" id="stage">
     <div class="machine">
       <div class="machine-left" id="machine-left">
-        <div class="hopper" id="hopper"><div class="pullball" id="suck-ball"></div></div>
+        <div class="hopper" id="hopper"><canvas id="hopper-canvas"></canvas><div class="pullball" id="suck-ball"></div></div>
         <div class="chute" id="chute"><div class="pullball" id="tube-ball"></div></div>
       </div>
       <div>
