@@ -102,13 +102,25 @@ describe('drawnBallFor', () => {
 });
 
 describe('ballRadius', () => {
-  it('shrinks as the bag grows and respects the clamps', () => {
-    const hopper = 126; // the 260px hopper's usable radius
+  const hopper = 126; // the 260px hopper's usable radius
+
+  it('shrinks as the bag grows and respects the cap', () => {
     const four = ballRadius(4, hopper);
     const seventyEight = ballRadius(78, hopper); // 12-team standings bag: 1+2+…+12
     expect(four).toBeGreaterThan(seventyEight);
     expect(four).toBeLessThanOrEqual(17);
-    expect(seventyEight).toBeGreaterThanOrEqual(6);
     expect(ballRadius(0, hopper)).toBe(0);
+  });
+
+  // The bot's overrides allow 30 base + 10 bonus per team — a 12-team bag of 480 balls. The
+  // radius must keep the whole bag physically packable (~42% area), not hold a legibility floor
+  // that would overflow the hopper and leave the sim permanently unsettled.
+  it('always fits the bag: total ball area stays within the packing budget', () => {
+    for (const count of [78, 200, 480]) {
+      const r = ballRadius(count, hopper);
+      const areaRatio = (count * Math.PI * r * r) / (Math.PI * hopper * hopper);
+      expect(areaRatio).toBeLessThanOrEqual(0.43);
+      expect(r).toBeGreaterThan(0);
+    }
   });
 });

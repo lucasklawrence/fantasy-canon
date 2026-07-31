@@ -711,6 +711,9 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
     celebrated = false;
     lastDropPick = null;
     cancelPull();
+    // Any exit from a drum-roll must kill the boil: only drop/finish turn it off otherwise, and
+    // idle() can never park the sim's loop while agitating — even over an empty pile.
+    hopper().agitate(false);
   }
   switch (snapshot.phase) {
     case 'idle':
@@ -725,10 +728,6 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       byId('title').textContent = 'The Lottery Machine';
       byId('commit').textContent = '';
       clear(byId('odds-rows'));
-      // Kill the boil before emptying: only drop/finish ever turn agitation off, so a clear that
-      // lands mid-drum-roll would otherwise leave the sim's loop boiling an empty pile forever —
-      // `idle()` can never be true while agitating, even with zero bodies.
-      hopper().agitate(false);
       hopper().sync([], []); // empty the pile — the canvas clears on the next frame
       break;
     case 'lobby':

@@ -70,11 +70,17 @@ export function drawnBallFor(commitment: string, pick: number, range: BallRange)
 
 /**
  * Ball radius that packs `count` balls into a circular hopper of `hopperRadius` at ~42% area
- * coverage — a settled pile with breathing room, not a solid disc. Clamped so a 4-ball test bag
- * doesn't render beach balls and a 100-ball bag stays legible.
+ * coverage — a settled pile with breathing room, not a solid disc. Capped so a 4-ball test bag
+ * doesn't render beach balls, but never floored above the fit: the bot's overrides allow bags in
+ * the hundreds (30 base + 10 bonus per team), and a floor that exceeds the packing size would ask
+ * the sim to settle a pile that physically cannot fit. Legibility degrades instead — the sprite
+ * painter drops the number below {@link NUMBER_MIN_RADIUS}, where it couldn't be read anyway.
  */
 export function ballRadius(count: number, hopperRadius: number): number {
   if (count <= 0) return 0;
   const packed = Math.sqrt((0.42 * hopperRadius * hopperRadius) / count);
-  return Math.min(17, Math.max(6, packed));
+  return Math.min(17, Math.max(2.5, packed));
 }
+
+/** Below this radius a ball's number is unreadable, so the sprite skips painting it. */
+export const NUMBER_MIN_RADIUS = 5.5;

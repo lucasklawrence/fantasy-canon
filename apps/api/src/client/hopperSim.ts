@@ -17,7 +17,7 @@
 
 import Matter from 'matter-js';
 
-import { assignBallRanges, ballRadius } from './ballAssignments.js';
+import { assignBallRanges, ballRadius, NUMBER_MIN_RADIUS } from './ballAssignments.js';
 
 const { Bodies, Body, Composite, Engine, Sleeping } = Matter;
 
@@ -72,11 +72,15 @@ function buildSprite(num: number, hue: number, radius: number, dpr: number): HTM
   ctx.arc(r, r, r, 0, Math.PI * 2);
   ctx.fill();
   // The number rides the sprite, so it tumbles with the body's rotation in the frame loop.
-  ctx.fillStyle = 'rgba(16, 18, 28, 0.88)';
-  ctx.font = `800 ${Math.max(7, r * 0.95)}px system-ui, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(String(num), r, r + 0.5);
+  // Skipped once the ball is too small to read — a hundreds-ball override bag keeps its colors
+  // (the team association survives) without smearing unreadable digits across the pile.
+  if (r >= NUMBER_MIN_RADIUS) {
+    ctx.fillStyle = 'rgba(16, 18, 28, 0.88)';
+    ctx.font = `800 ${Math.max(7, r * 0.95)}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(num), r, r + 0.5);
+  }
   return sprite;
 }
 
