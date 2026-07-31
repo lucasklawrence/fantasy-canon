@@ -725,6 +725,10 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       byId('title').textContent = 'The Lottery Machine';
       byId('commit').textContent = '';
       clear(byId('odds-rows'));
+      // Kill the boil before emptying: only drop/finish ever turn agitation off, so a clear that
+      // lands mid-drum-roll would otherwise leave the sim's loop boiling an empty pile forever —
+      // `idle()` can never be true while agitating, even with zero bodies.
+      hopper().agitate(false);
       hopper().sync([], []); // empty the pile — the canvas clears on the next frame
       break;
     case 'lobby':
@@ -768,6 +772,10 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       break;
     case 'aborted':
       cancelPull();
+      // An abort mid-drum-roll arrives with the boil on, and no drop/finish will ever follow to
+      // turn it off — without this the sim agitates a hidden pile at 60fps for as long as the
+      // iframe stays open on the abort screen.
+      hopper().agitate(false);
       show('waiting', false);
       show('stage', false);
       show('abort', true);
