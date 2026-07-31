@@ -13,8 +13,17 @@
 
 export const DISCORD_TOKEN_URL = 'https://discord.com/api/oauth2/token';
 
+/** Discord's "who is this token" endpoint — the `identify` scope's whole purpose. */
+export const DISCORD_USER_URL = 'https://discord.com/api/users/@me';
+
 export interface AccessToken {
   accessToken: string;
+}
+
+/** The slice of Discord's `/users/@me` the stage's authorization needs (#210). */
+export interface DiscordUser {
+  id: string;
+  username?: string;
 }
 
 export interface TokenExchangeConfig {
@@ -72,4 +81,47 @@ export async function exchangeCodeForToken(
     throw new Error('Discord token response had no access_token');
   }
   return { accessToken: payload.access_token };
+}
+
+/**
+ * Pull the caller's Discord user id out of an `Authorization: Bearer …` header — the *only*
+ * sanctioned way the backend learns who is calling (#210, ADR 0007). The Activity iframe is
+ * public code, so a client-supplied `userId` field would be a self-service commissioner badge;
+ * the id must always come from Discord's answer to a token we just presented.
+ *
+ * Injectable `fetchImpl` as everywhere else here, so this unit-tests without a socket.
+ */
+export async function fetchDiscordUser(
+  accessToken: string,
+  config: { fetchImpl: typeof fetch; userUrl?: string },
+): Promise<DiscordUser> {
+  const { fetchImpl, userUrl = DISCORD_USER_URL } = config;
+  const res = await fetchImpl(userUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Discord identify failed (${res.status})`);
+  }
+  const payload = (await res.json()) as { id?: unknown; username?: unknown };
+  if (typeof payload.id !== 'string' || !payload.id) {
+    throw new Error('Discord identify response had no user id');
+  }
+  return {
+    id: payload.id,
+    ...(typeof payload.username === 'string' ? { username: payload.username } : {}),
+  };
+}
+
+/**
+ * Read the bearer token out of request headers. Case-insensitive on the scheme (Node lowercases
+ * header *names* for us, but not values), and returns `undefined` for anything else — including
+ * the duplicate-header array shape `node:http` produces, which is never legitimate here.
+ */
+export function parseBearerToken(
+  headers: Record<string, string | string[] | undefined>,
+): string | undefined {
+  const raw = headers.authorization;
+  if (typeof raw !== 'string') return undefined;
+  const match = /^Bearer\s+(\S+)$/i.exec(raw.trim());
+  return match ? match[1] : undefined;
 }

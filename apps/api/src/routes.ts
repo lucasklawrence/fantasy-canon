@@ -22,6 +22,7 @@ import type { HubSnapshot } from './hub.js';
 import { lotteryHtml } from './lotteryPage.js';
 import {
   parseLotteryAbort,
+  parseLotteryAdjust,
   parseLotteryBeat,
   parseLotteryClear,
   parseLotteryFinish,
@@ -29,9 +30,11 @@ import {
   parseLotteryReveal,
   parseLotteryStart,
   StageBusyError,
+  StageNotEditableError,
+  UnknownTeamError,
   type LotteryStage,
 } from './lotteryStage.js';
-import { parseTokenRequest } from './token.js';
+import { parseBearerToken, parseTokenRequest, type DiscordUser } from './token.js';
 
 /** The snapshot plus a server-stamped timestamp — what `/api/state` and the WS push both carry. */
 export interface Envelope extends HubSnapshot {
@@ -55,6 +58,11 @@ export interface RouteDeps {
   clientScript: () => string | undefined;
   /** Exchange an OAuth code for an access token (server-side; injected so tests use a stub). */
   exchangeToken: (code: string) => Promise<{ accessToken: string }>;
+  /**
+   * Resolve an access token to its Discord user, server-side (#210). The commissioner check is
+   * only as trustworthy as this call — never derive the caller's id from the request body.
+   */
+  identify: (accessToken: string) => Promise<DiscordUser>;
   /** The lottery-machine reveal stage the bot paces via `POST /api/lottery/*` (#169). */
   lottery: LotteryStage;
   /** The lottery client bundle (`dist/client/lottery.js`), or `undefined` if `build:client` hasn't run. */
@@ -126,7 +134,7 @@ export async function routeRequest(
     return { status: 200, contentType: 'text/javascript; charset=utf-8', body: script };
   }
   if (path.startsWith('/api/lottery/')) {
-    return lotteryRoute(method, path, body, deps, headers);
+    return await lotteryRoute(method, path, body, deps, headers);
   }
   if (method === 'GET' && path === '/api/state') {
     return json(200, deps.getEnvelope());
@@ -159,6 +167,8 @@ export async function routeRequest(
  * `/api/lottery/*` — the bot-paced reveal stage (#169).
  *
  *   GET  /api/lottery/state   → {@link LotterySnapshot} (public — it's the shared presentation)
+ *   GET  /api/lottery/me      → is the bearer's Discord user the lobby's commissioner? (#210)
+ *   POST /api/lottery/adjust  → nudge a team's balls in the armed lobby (#210, commissioner only)
  *   POST /api/lottery/lobby   → arm the pre-commitment lobby from setup onward (#198, bot only)
  *   POST /api/lottery/clear   → disarm that lobby, back to idle (#198, bot only)
  *   POST /api/lottery/start   → open the stage (bot only)
@@ -167,20 +177,38 @@ export async function routeRequest(
  *   POST /api/lottery/finish  → final order + seed-reveal verify info (bot only)
  *   POST /api/lottery/abort   → the ceremony aborted (bot only)
  *
- * Bot-only routes require the `x-stage-key` header to match the configured key. With no key
- * configured they are open — acceptable only on the loopback dev bind; production must set one.
+ * **Two auth paths, deliberately disjoint** (ADR 0007). Bot-only routes require `x-stage-key`, a
+ * server-side secret that must never reach the public Activity client. `/api/lottery/me` and
+ * `/api/lottery/adjust` instead take the Activity's own Discord access token as a bearer, which
+ * the backend resolves to a user id via Discord (`deps.identify`) before checking it against the
+ * commissioner list the bot stamped onto the lobby. A stage key is never accepted for `adjust`
+ * and a bearer is never accepted for a bot route.
  */
-function lotteryRoute(
+async function lotteryRoute(
   method: string,
   path: string,
   body: string,
   deps: RouteDeps,
   headers: Record<string, string | string[] | undefined>,
-): HttpReply {
+): Promise<HttpReply> {
   if (method === 'GET' && path === '/api/lottery/state') {
     return json(200, deps.lottery.snapshot());
   }
+  if (method === 'GET' && path === '/api/lottery/me') {
+    const caller = await identifyCaller(deps, headers);
+    if ('reply' in caller) return caller.reply;
+    return json(200, {
+      userId: caller.user.id,
+      commissioner: deps.lottery.isCommissioner(caller.user.id),
+    });
+  }
   if (method !== 'POST') return json(404, { error: 'not found' });
+
+  // The commissioner's edit (#210) is the one POST that is *not* bot-only, so it resolves its own
+  // identity and returns before the shared `x-stage-key` gate below.
+  if (path === '/api/lottery/adjust') {
+    return await adjustRoute(body, deps, headers);
+  }
 
   if (deps.stageKey) {
     const sent = headers['x-stage-key'];
@@ -249,6 +277,57 @@ function lotteryRoute(
     default:
       return json(404, { error: 'not found' });
   }
+}
+
+/**
+ * Resolve `Authorization: Bearer …` to a Discord user, or the {@link HttpReply} to send instead.
+ * 401 covers both "no bearer" and "Discord rejected it" — from the client's side those are the
+ * same condition (re-run the handshake), and distinguishing them would leak token validity to
+ * anyone who can reach the endpoint.
+ */
+async function identifyCaller(
+  deps: RouteDeps,
+  headers: Record<string, string | string[] | undefined>,
+): Promise<{ user: DiscordUser } | { reply: HttpReply }> {
+  const token = parseBearerToken(headers);
+  if (!token) {
+    return { reply: json(401, { error: 'missing Authorization: Bearer <discord access token>' }) };
+  }
+  try {
+    return { user: await deps.identify(token) };
+  } catch {
+    return { reply: json(401, { error: 'could not identify the caller with Discord' }) };
+  }
+}
+
+/**
+ * `POST /api/lottery/adjust` (#210) — the commissioner nudges a team's ball count from inside the
+ * Activity. Guarded in order: identity (server-side, via Discord) → commissioner → phase → payload.
+ * The 403 is deliberately indistinguishable for "not a commissioner" and "no lobby armed", since
+ * `isCommissioner` is false in both cases and neither is something a caller can act on.
+ */
+async function adjustRoute(
+  body: string,
+  deps: RouteDeps,
+  headers: Record<string, string | string[] | undefined>,
+): Promise<HttpReply> {
+  const caller = await identifyCaller(deps, headers);
+  if ('reply' in caller) return caller.reply;
+  if (!deps.lottery.isCommissioner(caller.user.id)) {
+    return json(403, { error: 'only the commissioner who ran setup can adjust this lobby' });
+  }
+  const parsed = parseLotteryAdjust(body);
+  if ('error' in parsed) return json(400, { error: parsed.error });
+  try {
+    deps.lottery.adjust(parsed.value);
+  } catch (error) {
+    // A committed/finished run, or a lobby whose rows can't carry exact odds — either way the
+    // edit is refused outright rather than retried.
+    if (error instanceof StageNotEditableError) return json(409, { error: error.message });
+    if (error instanceof UnknownTeamError) return json(404, { error: error.message });
+    throw error;
+  }
+  return json(200, { ok: true, snapshot: deps.lottery.snapshot() });
 }
 
 type ParsedPicks = { picks: DraftPick[] } | { error: string };

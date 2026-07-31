@@ -836,7 +836,9 @@ export const CANON_ROUTES: Record<string, CanonSubcommandHandler> = {
   // draftorder
   'draftorder:setup': handleDraftOrderSetupSubcommand,
   'draftorder:minigame': handleDraftOrderMinigameSubcommand,
-  'draftorder:begin': handleDraftOrderBeginSubcommand,
+  // Wrapped: `begin` takes an injectable stage as its second parameter (tests pass a double), so
+  // it can't be registered directly against the `(interaction, context)` handler shape.
+  'draftorder:begin': (interaction) => handleDraftOrderBeginSubcommand(interaction),
   'draftorder:hype': handleDraftOrderHypeSubcommand,
   'draftorder:status': handleDraftOrderStatusSubcommand,
   'draftorder:abort': handleDraftOrderAbortSubcommand,

@@ -19,8 +19,13 @@ export function configuredClientId(): string {
   return window.__DRAFT_CONFIG__?.clientId ?? '';
 }
 
-/** Run the Discord OAuth handshake so the Activity is authenticated before it shows data. */
-export async function runHandshake(base: string): Promise<void> {
+/**
+ * Run the Discord OAuth handshake so the Activity is authenticated before it shows data, and
+ * return the access token. The token is the client's proof of identity for the backend's own
+ * authorized routes (#210): it goes back as `Authorization: Bearer …`, and the backend re-verifies
+ * it with Discord rather than trusting anything the page says about who is using it.
+ */
+export async function runHandshake(base: string): Promise<{ accessToken: string }> {
   const clientId = configuredClientId();
   const sdk = new DiscordSDK(clientId);
   await sdk.ready();
@@ -39,4 +44,5 @@ export async function runHandshake(base: string): Promise<void> {
   if (!res.ok) throw new Error(`token exchange failed (${res.status})`);
   const { access_token: accessToken } = (await res.json()) as { access_token: string };
   await sdk.commands.authenticate({ access_token: accessToken });
+  return { accessToken };
 }

@@ -12,13 +12,16 @@
 import type { RevealStage } from './draftOrderCeremony.js';
 
 /**
- * The slice of the stage's `GET /api/lottery/state` snapshot the boot reconciler (#205) needs:
- * enough to tell an armed lobby from a stranded committed run and to scope the cleanup.
+ * The slice of the stage's `GET /api/lottery/state` snapshot the bot reads back: enough for the
+ * boot reconciler (#205) to tell an armed lobby from a stranded committed run and scope the
+ * cleanup, plus the pending in-Activity ball edits `begin` drains before it commits (#210).
  */
 export interface StageStateSnapshot {
   phase: string;
   lobby?: { guildId?: string };
   start?: { commitment?: string; guildId?: string };
+  /** Commissioner ball edits made in the Activity that this bot has not folded into its bag yet. */
+  adjustments?: { teamId: string; balls: number }[];
 }
 
 /**
@@ -84,8 +87,21 @@ export function createHttpRevealStage(options: HttpRevealStageOptions): Inspecta
     const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
     const lobby = sub(raw.lobby);
     const start = sub(raw.start);
+    // Re-validated rather than trusted: these numbers become ball counts in a bag a commitment is
+    // about to bind, and the stage accepts them from the public Activity client.
+    const adjustments = Array.isArray(raw.adjustments)
+      ? raw.adjustments.flatMap((entry) => {
+          const row = sub(entry);
+          const teamId = row ? str(row.teamId) : undefined;
+          const balls = row && typeof row.balls === 'number' ? row.balls : undefined;
+          return teamId && balls !== undefined && Number.isInteger(balls) && balls > 0
+            ? [{ teamId, balls }]
+            : [];
+        })
+      : [];
     return {
       phase: str(raw.phase) ?? 'idle',
+      ...(adjustments.length > 0 ? { adjustments } : {}),
       ...(lobby
         ? { lobby: { ...(str(lobby.guildId) ? { guildId: lobby.guildId as string } : {}) } }
         : {}),

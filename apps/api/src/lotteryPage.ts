@@ -51,6 +51,17 @@ export function lotteryHtml(clientId: string): string {
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
     margin-right: 7px; vertical-align: baseline; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
   .brange { color: #7c869e; font-size: 11px; margin-left: 6px; }
+  /* Commissioner ball steppers (#210) — only rendered on a pre-commitment lobby, only for the
+     member who ran setup. 30px targets keep them tappable on the mobile Activity. */
+  td.edit { white-space: nowrap; }
+  .step { font: inherit; font-size: 15px; line-height: 1; width: 30px; height: 30px;
+    border-radius: 8px; border: 1px solid #2a3145; background: #1b2233; color: #cdd4e4;
+    cursor: pointer; vertical-align: middle; transition: background .15s, border-color .15s; }
+  .step:hover:enabled { background: #232c42; border-color: rgba(245,214,123,.4); }
+  .step:disabled { opacity: .3; cursor: default; }
+  .stepval { display: inline-block; min-width: 26px; text-align: center; font-weight: 700;
+    vertical-align: middle; }
+  #edit-hint { text-align: center; color: #f5d67b; font-size: 13px; margin: 10px 0 0; }
 
   /* the machine */
   .machine { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
@@ -173,6 +184,7 @@ export function lotteryHtml(clientId: string): string {
       <tbody id="odds-rows"></tbody>
     </table>
     <p class="pulse">Waiting for the commissioner to seal the bag…</p>
+    <p id="edit-hint" class="hidden">You're the commissioner &mdash; adjust the balls above before you run <code>/canon draftorder begin</code>. Everyone watching sees the odds update live, and the bot re-posts the final odds card in the channel before the commitment.</p>
   </section>
 
   <section class="card hidden" id="stage">

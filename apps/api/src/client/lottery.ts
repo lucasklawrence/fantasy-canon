@@ -15,11 +15,12 @@ import type {
   LotteryEvent,
   LotteryFinish,
   LotteryLobby,
+  LotteryOddsRow,
   LotteryPhase,
   LotteryReveal,
   LotterySnapshot,
   LotteryStart,
-} from '../lotteryStage.js';
+} from '../lotteryTypes.js';
 import { assignBallRanges, drawnBallFor, rangeLabel } from './ballAssignments.js';
 import { createHopperSim, type HopperSim } from './hopperSim.js';
 import {
@@ -127,8 +128,9 @@ function hopper(): HopperSim {
 
 /** The odds table + hopper pile, shared by the lobby (#198) and the committed waiting room. */
 function renderOddsTable(
-  oddsRows: { team: string; balls: number; firstPct: number; top3Pct: number }[],
+  oddsRows: LotteryOddsRow[],
   drawnTeams: string[] = [],
+  editable = false,
 ): void {
   const rows = byId('odds-rows');
   clear(rows);
@@ -144,7 +146,8 @@ function renderOddsTable(
     teamCell.appendChild(dot);
     teamCell.appendChild(document.createTextNode(row.team));
     tr.appendChild(teamCell);
-    const ballsCell = el('td', 'num', String(row.balls));
+    const ballsCell =
+      editable && row.teamId !== undefined ? stepperCell(row) : el('td', 'num', String(row.balls));
     // The bag range ("#5–7") makes the numbers on the balls mean something checkable.
     const label = rangeLabel(ranges[i]);
     if (label) ballsCell.appendChild(el('span', 'brange', label));
@@ -161,20 +164,110 @@ function renderOddsTable(
   hopper().sync(oddsRows, drawnTeams);
 }
 
+// --- commissioner editing (#210): only ever offered on a pre-commitment lobby ---
+
+/** Bounds mirror core's `MAX_TEAM_BALLS`; the backend re-checks, this just stops silly requests. */
+const MIN_EDIT_BALLS = 1;
+const MAX_EDIT_BALLS = 30;
+
+/** The bearer the backend re-verifies with Discord. Null outside the Activity (dev/standalone). */
+let accessToken: string | null = null;
+/** Answered by `GET /api/lottery/me`; false until proven otherwise, so the UI never guesses. */
+let commissioner = false;
+/** Team ids with an edit in flight — their steppers stay disabled until the WS echo lands. */
+const editsInFlight = new Set<string>();
+
+/**
+ * A `Balls` cell with −/+ steppers. One edit per row at a time: the buttons disable on click and
+ * come back when the recomputed lobby is broadcast back to us. Waiting for the echo instead of
+ * painting optimistically means the number on screen is always a number the server agreed to —
+ * which matters more here than snappiness, since this table is the published odds.
+ */
+function stepperCell(row: LotteryOddsRow): HTMLElement {
+  const teamId = row.teamId as string;
+  const cell = el('td', 'num edit');
+  const busy = editsInFlight.has(teamId);
+  const step = (delta: number): HTMLElement => {
+    const target = row.balls + delta;
+    const button = el('button', 'step', delta < 0 ? '−' : '+') as HTMLButtonElement;
+    button.type = 'button';
+    button.disabled = busy || target < MIN_EDIT_BALLS || target > MAX_EDIT_BALLS;
+    button.setAttribute(
+      'aria-label',
+      `${delta < 0 ? 'Remove a ball from' : 'Add a ball to'} ${row.team}`,
+    );
+    button.addEventListener('click', () => void sendAdjust(teamId, target));
+    return button;
+  };
+  cell.appendChild(step(-1));
+  cell.appendChild(el('span', 'stepval', String(row.balls)));
+  cell.appendChild(step(+1));
+  return cell;
+}
+
+/**
+ * Push one ball edit. The response body carries the fresh snapshot, but we deliberately let the
+ * WebSocket broadcast repaint instead — that way the commissioner sees exactly what everyone else
+ * sees, and a divergence between the two would be visible rather than hidden by a local paint.
+ */
+async function sendAdjust(teamId: string, balls: number): Promise<void> {
+  if (editsInFlight.has(teamId) || !accessToken) return;
+  editsInFlight.add(teamId);
+  repaintLobbyEdits();
+  try {
+    const res = await fetch(apiPath(activityBase, '/api/lottery/adjust'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ teamId, balls }),
+    });
+    if (!res.ok) {
+      // A 403/409 here means the ceremony moved on (committed, or someone else re-ran setup).
+      // Say so rather than leaving a dead-looking button.
+      setStatus(res.status === 409 ? 'the bag is sealed — edits closed' : 'edit rejected', 'err');
+    }
+  } catch {
+    setStatus('edit failed — backend offline', 'err');
+  } finally {
+    editsInFlight.delete(teamId);
+    repaintLobbyEdits();
+  }
+}
+
+/** Re-render the odds table in place so disabled/enabled steppers reflect what's in flight. */
+function repaintLobbyEdits(): void {
+  if (currentLobby) renderOddsTable(currentLobby.rows, [], commissioner);
+}
+
+/** The lobby currently on screen, kept so an in-flight change can repaint without a refetch. */
+let currentLobby: LotteryLobby | undefined;
+
+/** The transport base (`/.proxy` inside Discord), captured at boot for the adjust POST. */
+let activityBase = '';
+
 /**
  * Pre-commitment lobby (#198): odds visible before the draw begins. Shows a placeholder in the
- * commit slot instead of the hash (which doesn't exist yet).
+ * commit slot instead of the hash (which doesn't exist yet). For the commissioner (#210) the
+ * `Balls` column becomes editable — the only mutable surface in the whole machine.
  */
 function renderLobby(lobby: LotteryLobby): void {
+  currentLobby = lobby;
   byId('title').textContent = lobby.title;
   byId('waiting-sub').textContent =
     `${lobby.teamCount} teams · ${lobby.totalBalls} balls in the hopper`;
   byId('commit').textContent = 'Commissioner will begin the draw soon…';
-  renderOddsTable(lobby.rows);
+  renderOddsTable(lobby.rows, [], commissioner);
+  show('edit-hint', commissioner);
 }
 
 function renderWaiting(start: LotteryStart, drawnTeams: string[] = []): void {
   currentStart = start; // remembered for pull scheduling (delayMs) across later phases
+  // The commitment binds the bag: past this point nothing on screen is editable, so drop the
+  // lobby we were holding and retract the offer (#210).
+  currentLobby = undefined;
+  show('edit-hint', false);
   byId('title').textContent = start.title;
   byId('waiting-sub').textContent =
     `${start.teamCount} teams · ${start.totalBalls} balls in the hopper`;
@@ -728,6 +821,9 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       byId('title').textContent = 'The Lottery Machine';
       byId('commit').textContent = '';
       clear(byId('odds-rows'));
+      // No lobby ⇒ nothing to edit (#210); the stage refuses adjustments in this phase anyway.
+      currentLobby = undefined;
+      show('edit-hint', false);
       hopper().sync([], []); // empty the pile — the canvas clears on the next frame
       break;
     case 'lobby':
@@ -946,13 +1042,29 @@ async function boot(): Promise<void> {
   document.addEventListener('visibilitychange', onVisibilityChange);
   const inDiscord = isDiscordActivity(window.location);
   const base = proxyBase(inDiscord);
+  activityBase = base;
   if (inDiscord) {
     try {
-      await runHandshake(base);
+      ({ accessToken } = await runHandshake(base));
     } catch (error) {
       setStatus('Discord auth failed', 'err');
       console.error('[lottery] handshake failed', error);
       // Fall through — the reveal is public; still show it even if auth didn't complete.
+    }
+  }
+  // Ask the backend whether *this* member may edit (#210). The answer is authoritative — the
+  // client can't derive it, since the commissioner list never leaves the server. A failure just
+  // leaves the machine read-only, which is the correct fallback for everyone but one person.
+  if (accessToken) {
+    try {
+      const res = await fetch(apiPath(base, '/api/lottery/me'), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: 'no-store',
+      });
+      if (res.ok)
+        commissioner = ((await res.json()) as { commissioner?: boolean }).commissioner === true;
+    } catch (error) {
+      console.error('[lottery] commissioner check failed', error);
     }
   }
   connect(base);

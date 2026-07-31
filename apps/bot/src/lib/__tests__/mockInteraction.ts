@@ -13,6 +13,8 @@ export interface MockInteractionOptions {
   options?: Record<string, string | number>;
   /** guildId the handler sees; `null` simulates a DM. Defaults to `'guild-1'`. */
   guildId?: string | null;
+  /** Discord user id of the invoking member. Defaults to `'user-1'`. */
+  userId?: string;
 }
 
 export interface CapturedReply {
@@ -62,6 +64,9 @@ export function createMockInteraction(opts: MockInteractionOptions = {}): MockIn
 
   const interaction = {
     guildId,
+    // Always present on a real interaction — handlers read it to attribute an action to a member
+    // (e.g. the lottery's in-Activity commissioner, #210).
+    user: { id: opts.userId ?? 'user-1' },
     options: { getInteger, getString },
     reply: (payload: unknown) => capture('reply', payload),
     deferReply: (): Promise<unknown> => {

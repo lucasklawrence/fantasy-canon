@@ -17,10 +17,20 @@ import { WebSocketServer } from 'ws';
 import type { DraftHub } from './hub.js';
 import { createLotteryStage, type LotteryStage } from './lotteryStage.js';
 import { normalizePath, routeRequest, type Envelope } from './routes.js';
-import { exchangeCodeForToken } from './token.js';
+import { exchangeCodeForToken, fetchDiscordUser, type DiscordUser } from './token.js';
 
 /** Max request body we buffer — a draft board is tiny; this just bounds a hostile/runaway request. */
 const MAX_BODY_BYTES = 1_000_000;
+
+/**
+ * How long a verified `Bearer` → Discord user mapping is reused (#210). Every stepper tap is an
+ * authorized write, and Discord rate-limits `/users/@me`; a minute is short enough that a revoked
+ * token stops working promptly and long enough that a burst of edits costs one round-trip.
+ */
+const IDENTITY_TTL_MS = 60_000;
+
+/** Bounds the cache so a token-spraying client can't grow it without limit. */
+const IDENTITY_CACHE_MAX = 500;
 
 export interface ApiServerHandle {
   url: string;
@@ -85,6 +95,26 @@ export function startApiServer(
     return exchangeCodeForToken(code, { clientId, clientSecret, fetchImpl: fetch });
   };
 
+  // Short-TTL identity cache (#210): the commissioner's steppers fire one authorized write per
+  // tap, and re-asking Discord who they are on every tap would burn rate limit for no new
+  // information. Only successful lookups are cached — a failure must be re-attempted, never
+  // remembered as a denial.
+  const identityCache = new Map<string, { user: DiscordUser; expiresAt: number }>();
+  const identify = async (accessToken: string): Promise<DiscordUser> => {
+    const cached = identityCache.get(accessToken);
+    if (cached && cached.expiresAt > now().getTime()) return cached.user;
+    identityCache.delete(accessToken);
+    const user = await fetchDiscordUser(accessToken, { fetchImpl: fetch });
+    // Cheap bound: drop the oldest insertion (Map preserves insertion order) rather than carry a
+    // real LRU — entries expire in a minute anyway.
+    if (identityCache.size >= IDENTITY_CACHE_MAX) {
+      const oldest = identityCache.keys().next();
+      if (!oldest.done) identityCache.delete(oldest.value);
+    }
+    identityCache.set(accessToken, { user, expiresAt: now().getTime() + IDENTITY_TTL_MS });
+    return user;
+  };
+
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -128,6 +158,7 @@ export function startApiServer(
             clientId,
             clientScript: () => cachedScript,
             exchangeToken,
+            identify,
             lottery,
             lotteryScript: () => cachedLotteryScript,
             stageKey,

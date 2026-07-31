@@ -3,6 +3,7 @@ import type { ChatInputCommandInteraction } from 'discord.js';
 import {
   createMockInteraction,
   MockInteractionOptions,
+  type CapturedReply,
 } from '../../../lib/__tests__/mockInteraction.js';
 import { createMockContext } from '../../../lib/__tests__/mockContext.js';
 import { FOUR_TEAMS, RICH_TEAMS } from '../../../lib/__tests__/handlerFixtures.js';
@@ -11,6 +12,7 @@ import {
   clearCeremony,
   createCeremony,
   getCeremony,
+  markPreviewPosted,
   oddsRows,
   requestAbort,
   resetCeremoniesForTests,
@@ -46,6 +48,7 @@ interface ChannelPost {
 function ceremonyInteraction(opts: MockInteractionOptions & { commissioner?: boolean } = {}): {
   interaction: ChatInputCommandInteraction;
   lastContent: () => string | undefined;
+  replies: CapturedReply[];
   channelPosts: ChannelPost[];
 } {
   const handle = createMockInteraction(opts);
@@ -60,7 +63,32 @@ function ceremonyInteraction(opts: MockInteractionOptions & { commissioner?: boo
     },
     memberPermissions: (opts.commissioner ?? true) ? { has: () => true } : { has: () => false },
   });
-  return { interaction: handle.interaction, lastContent: handle.lastContent, channelPosts };
+  return {
+    interaction: handle.interaction,
+    lastContent: handle.lastContent,
+    replies: handle.replies,
+    channelPosts,
+  };
+}
+
+/**
+ * A stage double that only answers `state()` — `begin`'s single read (#210). Every `begin` test
+ * passes one: the handler awaits that read before committing, so without an injected stage the
+ * test would reach a real `FANTASY_STAGE_URL` (a dev api on :4610 answers it for real).
+ */
+function stageHolding(
+  snapshot: StageStateSnapshot | Error = { phase: 'idle' },
+): InspectableRevealStage {
+  return {
+    state: () => (snapshot instanceof Error ? Promise.reject(snapshot) : Promise.resolve(snapshot)),
+    lobby: () => Promise.resolve(),
+    clear: () => Promise.resolve(),
+    start: () => Promise.resolve(),
+    beat: () => Promise.resolve(),
+    reveal: () => Promise.resolve(),
+    finish: () => Promise.resolve(),
+    abort: () => Promise.resolve(),
+  };
 }
 
 afterEach(() => resetCeremoniesForTests());
@@ -184,7 +212,7 @@ describe('handleDraftOrderSetupSubcommand', () => {
 describe('handleDraftOrderBeginSubcommand', () => {
   it('requires a set-up ceremony', async () => {
     const { interaction, lastContent } = ceremonyInteraction({ options: {} });
-    await handleDraftOrderBeginSubcommand(interaction);
+    await handleDraftOrderBeginSubcommand(interaction, stageHolding());
     expect(lastContent()).toContain('setup');
   });
 
@@ -196,7 +224,7 @@ describe('handleDraftOrderBeginSubcommand', () => {
     await handleDraftOrderSetupSubcommand(setup.interaction, context);
 
     const begin = ceremonyInteraction({ options: { delay: 5 } });
-    await handleDraftOrderBeginSubcommand(begin.interaction);
+    await handleDraftOrderBeginSubcommand(begin.interaction, stageHolding());
     const session = getCeremony('guild-1');
     expect(session?.state).toBe('LOTTERY_RUNNING');
 
@@ -240,7 +268,7 @@ describe('handleDraftOrderBeginSubcommand — abort race', () => {
       },
     });
 
-    await handleDraftOrderBeginSubcommand(begin.interaction);
+    await handleDraftOrderBeginSubcommand(begin.interaction, stageHolding());
 
     expect(begin.channelPosts).toHaveLength(0);
     expect(session?.state).toBe('GAME_OPEN');
@@ -459,7 +487,7 @@ describe('preview ≡ commitment consistency (#165)', () => {
     ).toEqual([1, 2, 3, 4]);
 
     const begin = ceremonyInteraction({ options: { delay: 5 } });
-    await handleDraftOrderBeginSubcommand(begin.interaction);
+    await handleDraftOrderBeginSubcommand(begin.interaction, stageHolding());
     await vi.waitFor(
       () => {
         expect(begin.channelPosts.some((p) => p.content?.includes('commitment'))).toBe(true);
@@ -500,11 +528,87 @@ describe('preview ≡ commitment consistency (#165)', () => {
     setCeremony(session);
 
     const begin = ceremonyInteraction({ options: {} });
-    await handleDraftOrderBeginSubcommand(begin.interaction);
+    await handleDraftOrderBeginSubcommand(begin.interaction, stageHolding());
 
     expect(begin.channelPosts).toHaveLength(0);
     expect(session.state).toBe('CREATED');
     expect(begin.lastContent()).toContain('setup');
+  });
+});
+
+describe('in-Activity ball edits folded in at begin (#210)', () => {
+  function openSession() {
+    const session = createCeremony(
+      'guild-1',
+      '2026 Draft Lottery',
+      { teams: [{ teamId: 'a' }, { teamId: 'b' }], baseBallCount: 1 },
+      new Map([
+        ['a', 'Alpha'],
+        ['b', 'Bravo'],
+      ]),
+    );
+    markPreviewPosted(session);
+    setCeremony(session);
+    return session;
+  }
+
+  it('commits the edited bag and re-posts the odds card before the commitment (ADR 0006)', async () => {
+    const session = openSession();
+    const begin = ceremonyInteraction({ options: { delay: 5 } });
+
+    await handleDraftOrderBeginSubcommand(
+      begin.interaction,
+      stageHolding({ phase: 'lobby', adjustments: [{ teamId: 'b', balls: 4 }] }),
+    );
+
+    // The fresh public preview names the change and lands *before* the commitment, so the channel
+    // record never shows a commitment binding a bag nobody published.
+    const adjusted = begin.channelPosts.findIndex((p) => p.content?.includes('Bravo'));
+    expect(adjusted).toBe(0);
+    expect(begin.channelPosts[0].content).toContain('1 → 4 ball(s)');
+    expect(begin.channelPosts[0].files).toHaveLength(1);
+
+    // The commitment post is the one listing the frozen bag team by team (the adjusted preview
+    // also says the word "commitment", so match on the bag listing instead).
+    const bagListing = (): ChannelPost | undefined =>
+      begin.channelPosts.find((p) => p.content?.includes('• Alpha ('));
+    await vi.waitFor(() => expect(bagListing()).toBeDefined(), { timeout: 5000 });
+    // …and it binds the edited counts, not the ones setup froze.
+    const commitment = bagListing()!.content!;
+    expect(commitment).toMatch(/• Bravo \(`\w+`\) — 4 ball\(s\)/);
+    expect(commitment).toMatch(/• Alpha \(`\w+`\) — 1 ball\(s\)/);
+
+    requestAbort(session);
+    await vi.waitFor(() => expect(session.state).toBe('CANCELLED'), { timeout: 5000 });
+  });
+
+  it('posts nothing extra when the Activity holds no edits', async () => {
+    const session = openSession();
+    const begin = ceremonyInteraction({ options: { delay: 5 } });
+
+    await handleDraftOrderBeginSubcommand(begin.interaction, stageHolding({ phase: 'lobby' }));
+
+    expect(begin.channelPosts[0].content).toContain('commitment');
+    requestAbort(session);
+    await vi.waitFor(() => expect(session.state).toBe('CANCELLED'), { timeout: 5000 });
+  });
+
+  it('an unreachable stage still commits, but warns the commissioner about it', async () => {
+    const session = openSession();
+    const begin = ceremonyInteraction({ options: { delay: 5 } });
+
+    await handleDraftOrderBeginSubcommand(
+      begin.interaction,
+      stageHolding(new Error('ECONNREFUSED')),
+    );
+
+    // The ceremony is never blocked on presentation — but this is the one case where what the
+    // commissioner saw and what gets committed can differ, so they're told.
+    expect(begin.replies.some((r) => r.content?.includes('pending edits'))).toBe(true);
+    expect(begin.channelPosts.some((p) => p.content?.includes('commitment'))).toBe(true);
+
+    requestAbort(session);
+    await vi.waitFor(() => expect(session.state).toBe('CANCELLED'), { timeout: 5000 });
   });
 });
 

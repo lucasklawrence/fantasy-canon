@@ -15,7 +15,7 @@
  * browser, no jsdom. The queue and the "when" live here; `lottery.ts` owns the "what" (the DOM).
  */
 
-import type { LotteryEvent } from '../lotteryStage.js';
+import type { LotteryEvent } from '../lotteryTypes.js';
 import type { PendingStep } from './replayTimeline.js';
 
 /** The two things a local playback can be; they differ in what live news and a hidden tab mean. */

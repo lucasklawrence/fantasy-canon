@@ -23,18 +23,21 @@ import {
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
-import { DraftOrderState, DraftOrderTeamInput } from '@fantasy-canon/core';
+import { DraftOrderState, DraftOrderTeamInput, MAX_TEAM_BALLS } from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
 import { resolveLeagueId } from '../../lib/leagueId.js';
 import { ensureSnapshot } from '../../lib/snapshots.js';
 import { buildTeamNameMap } from '../../lib/teamNames.js';
 import { deriveStandingsBaseBalls, extractFinalRanks } from '../../lib/finalStandings.js';
 import {
+  applyLobbyAdjustments,
+  buildAdjustedPreviewPost,
   buildHypePost,
   buildPreviewPost,
   CeremonyAborted,
   CeremonyIo,
   CeremonyPost,
+  type CeremonySession,
   clearCeremony,
   createCeremony,
   getCeremony,
@@ -55,8 +58,11 @@ export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
 /** Hard cap on bonus balls per team — the bag is materialized ball-by-ball, so unbounded input is a foot-gun. */
 export const MAX_BONUS_BALLS = 10;
 
-/** Cap for the `balls` set-override — above any sane standings weight, below bag-size foot-guns. */
-export const MAX_BASE_BALLS = 30;
+/**
+ * Cap for the `balls` set-override — above any sane standings weight, below bag-size foot-guns.
+ * Re-exported from core so this option and the in-Activity stepper (#210) can never drift apart.
+ */
+export const MAX_BASE_BALLS = MAX_TEAM_BALLS;
 
 interface ParsedTeam {
   name: string;
@@ -337,6 +343,9 @@ export async function handleDraftOrderSetupSubcommand(
 
     // Best-effort: arm the Activity lobby (#198) so members can join before `begin`.
     // Failures are logged but never propagate — the ceremony state is already committed above.
+    // `commissionerIds` is what makes the lobby editable from inside the Activity (#210): the
+    // member who ran this command, which `denyUnlessCommissioner` already gated on Manage Server.
+    // No `keepAdjustments` — this is a brand-new bag, so edits to the previous one are meaningless.
     const lobbyRows = oddsRows(session);
     void stageFromEnv()
       .lobby({
@@ -345,6 +354,7 @@ export async function handleDraftOrderSetupSubcommand(
         totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
         rows: lobbyRows,
         guildId,
+        commissionerIds: [interaction.user.id],
       })
       .catch((error: unknown) => {
         console.error('[draftorder] failed to arm the Activity lobby:', error);
@@ -365,8 +375,14 @@ export async function handleDraftOrderSetupSubcommand(
   }
 }
 
+/**
+ * `stage` is injected so tests never open a socket (same seam as
+ * {@link recoverInterruptedCeremonies}). One client for the whole handler: the pre-commitment
+ * drain (#210), the channel-mode lobby disarm, and the reveal pacing all talk to the same stage.
+ */
 export async function handleDraftOrderBeginSubcommand(
   interaction: ChatInputCommandInteraction,
+  stage: InspectableRevealStage = stageFromEnv(),
 ): Promise<void> {
   if (!(await denyUnlessCommissioner(interaction))) return;
   const guildId = interaction.guildId as string;
@@ -439,6 +455,12 @@ export async function handleDraftOrderBeginSubcommand(
   // recovery discloses beside the commitment, capture it here, not at setup (#176).
   session.channelId = interaction.channelId;
 
+  // #210: the single drain point for in-Activity ball edits. The stage holds them as a pending
+  // delta; this is where they become the authoritative bag, and it has to happen before the
+  // commitment binds anything. Runs in channel mode too — the lobby is armed from `setup`
+  // regardless of how `begin` is run, so an edit made there must not be silently dropped.
+  await foldInActivityEdits(session, channel, interaction, stage);
+
   // Activity mode (#169): invite the league into the Lottery Machine before the commitment posts.
   // The reveal itself streams there; commitment, final board, and seed reveal still post here.
   // Best-effort — a failed invite post (permissions, transient API error) must never block the
@@ -471,11 +493,9 @@ export async function handleDraftOrderBeginSubcommand(
   // there forever — showing pre-draw odds after the order is public, and shadowing the draft
   // dashboard at the Activity root. Disarm it now; activity mode's `start` replaces it instead.
   if (stageMode !== 'activity') {
-    void stageFromEnv()
-      .clear({ guildId })
-      .catch((error: unknown) => {
-        console.error('[draftorder] failed to disarm the Activity lobby for a channel run:', error);
-      });
+    void stage.clear({ guildId }).catch((error: unknown) => {
+      console.error('[draftorder] failed to disarm the Activity lobby for a channel run:', error);
+    });
   }
 
   // Fire and forget: the ceremony runs on channel messages and outlives this interaction's
@@ -484,12 +504,50 @@ export async function handleDraftOrderBeginSubcommand(
     delayMs: delaySeconds * 1000,
     direction,
     store: createFileCeremonyStore(),
-    stage: stageMode === 'activity' ? stageFromEnv() : undefined,
+    stage: stageMode === 'activity' ? stage : undefined,
   }).catch((error) => {
     if (!(error instanceof CeremonyAborted)) {
       console.error('[draftorder] ceremony failed:', error);
     }
   });
+}
+
+/**
+ * Fold the commissioner's in-Activity ball edits (#210) into the bag `begin` is about to commit,
+ * and — when anything actually changed — post the fresh public odds card ADR 0006 requires after
+ * a bag change. The channel post is what keeps "the Discord posts are the record" true: an edit
+ * made in the Activity ends up named in the channel beside the commitment it produced.
+ *
+ * Best-effort by design. An unreachable stage means nobody could be looking at the Activity
+ * either, so the ceremony proceeds on the un-edited bag rather than blocking on presentation —
+ * but the commissioner is told, because it's the one case where what they saw and what gets
+ * committed can differ.
+ */
+async function foldInActivityEdits(
+  session: CeremonySession,
+  channel: SendableChannel,
+  interaction: ChatInputCommandInteraction,
+  stage: InspectableRevealStage,
+): Promise<void> {
+  try {
+    const snapshot = await stage.state();
+    const applied = applyLobbyAdjustments(session, snapshot.adjustments ?? []);
+    if (applied.length === 0) return;
+    await channelIo(channel).post(await buildAdjustedPreviewPost(session, applied));
+    console.log(
+      `[draftorder] folded ${applied.length} in-Activity ball edit(s) into the bag before committing`,
+    );
+  } catch (error) {
+    console.error('[draftorder] failed to fold in the Activity ball edits:', error);
+    await interaction
+      .followUp({
+        content:
+          "Couldn't read the Lottery Machine's pending edits — committing the bag as `setup` left it. " +
+          'If you adjusted balls in the Activity, abort and re-run `setup` with the `balls:` option.',
+        flags: MessageFlags.Ephemeral,
+      })
+      .catch(() => {});
+  }
 }
 
 /** Component id prefix for the ceremony's LAUNCH_ACTIVITY button (#169). */
@@ -594,6 +652,11 @@ export async function handleDraftOrderMinigameSubcommand(
           totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
           rows: lobbyRows,
           guildId,
+          commissionerIds: [interaction.user.id],
+          // These rows come from the session, which has *not* absorbed any in-Activity edits yet
+          // (#210 — `begin` is the single drain point). Without this the re-arm would silently
+          // revert the commissioner's adjustments in front of everyone watching.
+          keepAdjustments: true,
         })
         .catch((error: unknown) => {
           console.error('[draftorder] failed to re-arm the Activity lobby after minigame:', error);
