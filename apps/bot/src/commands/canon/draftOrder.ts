@@ -466,16 +466,19 @@ export async function handleDraftOrderBeginSubcommand(
   // Re-validate after the drain's awaits (stage read, card render, preview post) — same pattern as
   // the block above and as `setup`/`hype`/`minigame`. A replacing `setup` during those awaits has
   // already posted its own public preview; starting this session now would put a commitment for
-  // the *old* bag into the channel after it.
+  // the *old* bag into the channel after it. A reaction round that armed meanwhile is the same
+  // hazard the earlier block guards: sealing a bag in flux dooms that round to a public discard.
   if (
     getCeremony(guildId) !== session ||
     session.abort.signal.aborted ||
+    session.miniGameActive ||
     (session.state as DraftOrderState) !== 'GAME_OPEN'
   ) {
     await interaction
       .followUp({
-        content:
-          'The ceremony changed while the Activity edits were being applied — nothing was committed.',
+        content: session.miniGameActive
+          ? 'A reaction round armed while the Activity edits were being applied — wait for its results post, then `begin`.'
+          : 'The ceremony changed while the Activity edits were being applied — nothing was committed.',
         flags: MessageFlags.Ephemeral,
       })
       .catch(() => {});
