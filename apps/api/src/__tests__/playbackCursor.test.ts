@@ -196,15 +196,16 @@ describe('createPlaybackCursor', () => {
     expect(drained()).toBe(1);
   });
 
-  it('arms an append that lands while idle, and holds one that lands while paused', () => {
+  it('ignores an append that lands after the queue drained', () => {
     const { clock, cursor, played } = harness([revealStep(1, 100)]);
     cursor.start();
     clock.advance(100);
     expect(played).toEqual([1]);
+    expect(cursor.isRunning()).toBe(false);
     cursor.pause(); // drained already, so this is a no-op
     cursor.append(revealStep(2, 100));
     clock.advance(1000);
-    expect(played).toEqual([1]); // a drained cursor stays stopped until restarted
+    expect(played).toEqual([1]); // nothing is left to fire it — the cursor stays stopped
   });
 
   it('holds an appended step while paused, then plays it on resume', () => {

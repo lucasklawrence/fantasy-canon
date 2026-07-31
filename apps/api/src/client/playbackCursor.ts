@@ -32,7 +32,11 @@ export interface PlaybackClock {
 export interface PlaybackCursor {
   /** Arm the first step. No-op once started, or if there is nothing queued. */
   start(): void;
-  /** Queue a step onto the tail (a catch-up splicing live news). Arms it if the cursor is idle. */
+  /**
+   * Queue a step onto the tail (a catch-up splicing live news). It is armed only while the cursor
+   * is running and un-paused: an append onto a paused cursor waits for the resume, and one onto a
+   * stopped or already-drained cursor is inert — queued, but nothing is left to fire it.
+   */
   append(step: PendingStep): void;
   /** Freeze: bank what is left of the head step's delay and drop the timer. */
   pause(): void;
@@ -134,7 +138,7 @@ export function createPlaybackCursor(
     },
     append(step: PendingStep): void {
       queue.push(step);
-      schedule(); // no-op if a step is already in flight, or while paused
+      schedule(); // no-op if a step is already in flight, while paused, or once drained/stopped
     },
     pause(): void {
       if (!running || paused) return;

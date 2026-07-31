@@ -627,7 +627,19 @@ function onVisibilityChange(): void {
     // re-offers the catch-up if the draw is still running, so returning mid-ceremony can restart it
     // against the present rather than resuming a race it has already lost.
     flushCatchUpRevealsIntoBoard();
+    // A catch-up that had already buffered the finish is animating a ceremony that is *over*, and
+    // its finish never reached `renderSnapshot` — so `livePhase` is still 'revealing' here. Dropping
+    // it would strand the screen on "live reveal" with a catch-up offered on a sealed draw, and that
+    // stale gate would let the offer actually start one. Land on the sealed state instead.
+    const bufferedFinish = catchUpFinish;
     stopPlayback();
+    if (bufferedFinish) {
+      // Confetti is one-shot and would play to a tab nobody is watching. Suppress it here; the
+      // Replay this now correctly offers re-arms `celebrated`, so the finale isn't lost for good.
+      celebrated = true;
+      renderFinish({ phase: 'finished', reveals, finish: bufferedFinish });
+      return;
+    }
     renderBoard(reveals);
     setStatus('live reveal', 'live');
     updateReplayAffordance();
