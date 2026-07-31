@@ -11,6 +11,25 @@
 
 import type { RevealStage } from './draftOrderCeremony.js';
 
+/**
+ * The slice of the stage's `GET /api/lottery/state` snapshot the boot reconciler (#205) needs:
+ * enough to tell an armed lobby from a stranded committed run and to scope the cleanup.
+ */
+export interface StageStateSnapshot {
+  phase: string;
+  lobby?: { guildId?: string };
+  start?: { commitment?: string; guildId?: string };
+}
+
+/**
+ * A {@link RevealStage} that can also be inspected. Only the HTTP client (and reconciler test
+ * fakes) implement this — the ceremony's pacing seam stays write-only.
+ */
+export interface InspectableRevealStage extends RevealStage {
+  /** Fetch the stage's current public snapshot (`GET /api/lottery/state`, no key required). */
+  state(): Promise<StageStateSnapshot>;
+}
+
 export interface HttpRevealStageOptions {
   /** The Activity backend base URL, e.g. `http://127.0.0.1:4610`. */
   baseUrl: string;
@@ -25,7 +44,7 @@ export interface HttpRevealStageOptions {
 /** Default per-POST timeout: generous for a beat, tiny next to the reveal pacing. */
 export const DEFAULT_STAGE_TIMEOUT_MS = 5000;
 
-export function createHttpRevealStage(options: HttpRevealStageOptions): RevealStage {
+export function createHttpRevealStage(options: HttpRevealStageOptions): InspectableRevealStage {
   const {
     baseUrl,
     stageKey = '',
@@ -52,7 +71,37 @@ export function createHttpRevealStage(options: HttpRevealStageOptions): RevealSt
     }
   }
 
+  async function state(): Promise<StageStateSnapshot> {
+    const res = await fetchImpl(`${base}/api/lottery/state`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) {
+      throw new Error(`stage GET /api/lottery/state failed (${res.status})`);
+    }
+    const raw = (await res.json()) as Record<string, unknown>;
+    const sub = (v: unknown): Record<string, unknown> | undefined =>
+      v && typeof v === 'object' ? (v as Record<string, unknown>) : undefined;
+    const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+    const lobby = sub(raw.lobby);
+    const start = sub(raw.start);
+    return {
+      phase: str(raw.phase) ?? 'idle',
+      ...(lobby
+        ? { lobby: { ...(str(lobby.guildId) ? { guildId: lobby.guildId as string } : {}) } }
+        : {}),
+      ...(start
+        ? {
+            start: {
+              ...(str(start.commitment) ? { commitment: start.commitment as string } : {}),
+              ...(str(start.guildId) ? { guildId: start.guildId as string } : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
   return {
+    state,
     lobby: (lobby) => post('/api/lottery/lobby', lobby),
     clear: (clear) => post('/api/lottery/clear', clear),
     start: (start) => post('/api/lottery/start', start),
@@ -67,7 +116,7 @@ export function createHttpRevealStage(options: HttpRevealStageOptions): RevealSt
 export const DEFAULT_STAGE_URL = 'http://127.0.0.1:4610';
 
 /** The stage client configured from env (`FANTASY_STAGE_URL`/`FANTASY_STAGE_KEY`), dev default. */
-export function stageFromEnv(env: NodeJS.ProcessEnv = process.env): RevealStage {
+export function stageFromEnv(env: NodeJS.ProcessEnv = process.env): InspectableRevealStage {
   return createHttpRevealStage({
     baseUrl: env.FANTASY_STAGE_URL ?? DEFAULT_STAGE_URL,
     stageKey: env.FANTASY_STAGE_KEY ?? '',

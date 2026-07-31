@@ -76,6 +76,16 @@ export interface LotteryAbort {
 }
 
 /**
+ * The abort *request* (#205): `ifCommitment` makes the abort conditional — a no-op unless the
+ * stage is still showing that committed run. The bot's boot reconciler sends it so a stale
+ * snapshot can never abort a fresh ceremony that replaced the stranded one mid-flight. Stripped
+ * before broadcast; clients only ever see {@link LotteryAbort}.
+ */
+export interface LotteryAbortRequest extends LotteryAbort {
+  ifCommitment?: string;
+}
+
+/**
  * Pre-commitment lobby (#198): arms the waiting room from `setup` onward so members can
  * join the Activity before `begin` is called. No commitment yet — shown as a placeholder.
  */
@@ -161,7 +171,8 @@ export interface LotteryStage {
   beat(beat: LotteryBeat): void;
   reveal(reveal: LotteryReveal): void;
   finish(finish: LotteryFinish): void;
-  abort(abort: LotteryAbort): void;
+  /** See {@link LotteryAbortRequest} — a conditional request that no longer matches is a no-op. */
+  abort(abort: LotteryAbortRequest): void;
   /** Subscribe to events; returns an unsubscribe fn. New events only — snapshots are pulled. */
   subscribe(listener: (event: LotteryEvent) => void): () => void;
 }
@@ -301,11 +312,16 @@ export function parseLotteryFinish(body: string): Parsed<LotteryFinish> {
 }
 
 /** Guard for `POST /api/lottery/abort`. */
-export function parseLotteryAbort(body: string): Parsed<LotteryAbort> {
+export function parseLotteryAbort(body: string): Parsed<LotteryAbortRequest> {
   const parsed = parseJson(body);
   if ('error' in parsed) return parsed;
   const r = parsed.value;
-  return { value: { reason: isStr(r.reason) ? r.reason : 'The ceremony was aborted.' } };
+  return {
+    value: {
+      reason: isStr(r.reason) ? r.reason : 'The ceremony was aborted.',
+      ...(isStr(r.ifCommitment) ? { ifCommitment: r.ifCommitment } : {}),
+    },
+  };
 }
 
 /**
@@ -386,10 +402,11 @@ export function createLotteryStage(): LotteryStage {
       //
       // Known trade-off: this also removes the accidental self-healing a laxer check gave us. If
       // the stage is stranded mid-reveal (the bot died between `start` and `finish`, so no
-      // `finish`/`abort` ever arrives), every later `setup` now 409s and the lobby stays
-      // unavailable until the api restarts — where before, a same-guild lobby would have re-armed
-      // over it. Recovering that properly needs stage-side reconciliation (a TTL, or the bot
-      // reconciling at startup), not a weaker guard here.
+      // `finish`/`abort` ever arrives), every later `setup` 409s until the run is torn down. The
+      // bot's boot reconciler (#205, `recoverInterruptedCeremonies`) owns that recovery: at
+      // startup it aborts a stranded run and clears an orphaned lobby, since nothing on the
+      // stage can still have a pacer once the bot's in-memory sessions are gone. A stage-side
+      // TTL fallback (heals even if no bot ever returns) is deliberately deferred to #191.
       if (phase === 'waiting' || phase === 'revealing') {
         throw new StageBusyError();
       }
@@ -465,11 +482,21 @@ export function createLotteryStage(): LotteryStage {
       emit({ type: 'lottery-finish', finish: next });
     },
     abort(next) {
+      const { ifCommitment, ...publicAbort } = next;
+      // A conditional abort (#205) targets one specific committed run; if the stage has moved on
+      // — a fresh ceremony replaced it, or it already finished/aborted — the request is stale and
+      // must not touch what's showing now.
+      if (
+        ifCommitment !== undefined &&
+        !((phase === 'waiting' || phase === 'revealing') && start?.commitment === ifCommitment)
+      ) {
+        return;
+      }
       phase = 'aborted';
       lobby = undefined;
       pendingBeat = undefined;
-      abort = next;
-      emit({ type: 'lottery-abort', abort: next });
+      abort = publicAbort;
+      emit({ type: 'lottery-abort', abort: publicAbort });
     },
     subscribe(listener) {
       listeners.add(listener);

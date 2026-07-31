@@ -173,7 +173,12 @@ export interface RevealStage {
     order: { pick: number; team: string }[];
     verify: { secretSeed: string; salt: string; drawSeed: string; commitment: string };
   }): Promise<void>;
-  abort(abort: { reason: string }): Promise<void>;
+  /**
+   * Abort the stage presentation. `ifCommitment` makes it conditional server-side (#205): the
+   * stage only aborts if it is still showing that committed run — the boot reconciler's guard
+   * against racing a fresh `begin`. The ceremony's own aborts stay unconditional.
+   */
+  abort(abort: { reason: string; ifCommitment?: string }): Promise<void>;
 }
 
 /** Thrown out of {@link runCeremony} when the commissioner aborts mid-ceremony. */
@@ -201,6 +206,17 @@ export function clearCeremony(guildId: string): void {
 /** Test hook — wipe all in-memory ceremonies. */
 export function resetCeremoniesForTests(): void {
   sessions.clear();
+}
+
+/**
+ * Whether any guild's ceremony exists in this process — any state, not just mid-reveal. The boot
+ * reconciler (#205) uses this as its safety interlock: a `setup` that lands during recovery has
+ * already armed a fresh lobby (`GAME_OPEN`), and a `begin` is pacing the stage
+ * (`LOTTERY_RUNNING`), so the stage may reflect *current* state rather than an orphan the moment
+ * any session exists. Tear-down is only safe when this process knows of no ceremony at all.
+ */
+export function hasAnyCeremony(): boolean {
+  return sessions.size > 0;
 }
 
 /**

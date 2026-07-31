@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createHttpRevealStage, DEFAULT_STAGE_URL, stageFromEnv } from '../lotteryStageClient.js';
 
 /** A typed fake fetch that records calls — no vi.fn `any` chains, no real socket. */
-function fakeFetch(init: { ok?: boolean; status?: number; text?: string } = {}): {
+function fakeFetch(init: { ok?: boolean; status?: number; text?: string; json?: unknown } = {}): {
   impl: typeof fetch;
   calls: { url: string; init: RequestInit }[];
 } {
@@ -13,6 +13,7 @@ function fakeFetch(init: { ok?: boolean; status?: number; text?: string } = {}):
       ok: init.ok ?? true,
       status: init.status ?? 200,
       text: () => Promise.resolve(init.text ?? ''),
+      json: () => Promise.resolve(init.json ?? {}),
     } as unknown as Response);
   }) as typeof fetch;
   return { impl, calls };
@@ -78,6 +79,39 @@ describe('createHttpRevealStage', () => {
     const { impl } = fakeFetch({ ok: false, status: 401, text: 'bad key' });
     const stage = createHttpRevealStage({ baseUrl: 'http://x', fetchImpl: impl });
     await expect(stage.beat({ pick: 1, remaining: [] })).rejects.toThrow('401');
+  });
+
+  it('state() GETs the public snapshot and narrows it to the reconciler shape (#205)', async () => {
+    const { impl, calls } = fakeFetch({
+      json: {
+        phase: 'revealing',
+        start: { commitment: 'hash-1', guildId: 'g1', title: 'ignored extra' },
+        reveals: [{ pick: 4 }],
+      },
+    });
+    const stage = createHttpRevealStage({ baseUrl: 'http://x', stageKey: 'k', fetchImpl: impl });
+    const snapshot = await stage.state();
+    expect(calls[0].url).toBe('http://x/api/lottery/state');
+    expect(calls[0].init.method).toBeUndefined(); // a plain GET on the public route
+    expect(calls[0].init.signal).toBeInstanceOf(AbortSignal);
+    expect(snapshot).toEqual({
+      phase: 'revealing',
+      start: { commitment: 'hash-1', guildId: 'g1' },
+    });
+  });
+
+  it('state() tolerates a lobby snapshot and defaults a malformed phase to idle', async () => {
+    const lobby = fakeFetch({ json: { phase: 'lobby', lobby: { guildId: 'g2' } } });
+    const stage = createHttpRevealStage({ baseUrl: 'http://x', fetchImpl: lobby.impl });
+    expect(await stage.state()).toEqual({ phase: 'lobby', lobby: { guildId: 'g2' } });
+
+    const malformed = fakeFetch({ json: { phase: 42 } });
+    const bad = createHttpRevealStage({ baseUrl: 'http://x', fetchImpl: malformed.impl });
+    expect((await bad.state()).phase).toBe('idle');
+
+    const failing = fakeFetch({ ok: false, status: 503 });
+    const down = createHttpRevealStage({ baseUrl: 'http://x', fetchImpl: failing.impl });
+    await expect(down.state()).rejects.toThrow('503');
   });
 });
 
