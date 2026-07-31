@@ -558,7 +558,11 @@ describe('in-Activity ball edits folded in at begin (#210)', () => {
 
     await handleDraftOrderBeginSubcommand(
       begin.interaction,
-      stageHolding({ phase: 'lobby', adjustments: [{ teamId: 'b', balls: 4 }] }),
+      stageHolding({
+        phase: 'lobby',
+        lobby: { guildId: 'guild-1' },
+        adjustments: [{ teamId: 'b', balls: 4 }],
+      }),
     );
 
     // The fresh public preview names the change and lands *before* the commitment, so the channel
@@ -586,11 +590,105 @@ describe('in-Activity ball edits folded in at begin (#210)', () => {
     const session = openSession();
     const begin = ceremonyInteraction({ options: { delay: 5 } });
 
-    await handleDraftOrderBeginSubcommand(begin.interaction, stageHolding({ phase: 'lobby' }));
+    await handleDraftOrderBeginSubcommand(
+      begin.interaction,
+      stageHolding({ phase: 'lobby', lobby: { guildId: 'guild-1' } }),
+    );
 
     expect(begin.channelPosts[0].content).toContain('commitment');
     requestAbort(session);
     await vi.waitFor(() => expect(session.state).toBe('CANCELLED'), { timeout: 5000 });
+  });
+
+  it('never drains another guild’s lobby into this guild’s bag', async () => {
+    const session = openSession();
+    const begin = ceremonyInteraction({ options: { delay: 5 } });
+
+    // The stage is one process-wide slot (#191), and team ids collide across guilds trivially —
+    // `a`/`b` here, `team-1` for any manual setup. Guild B arming and editing after guild A's
+    // setup must not put B's ball counts under A's commitment.
+    await handleDraftOrderBeginSubcommand(
+      begin.interaction,
+      stageHolding({
+        phase: 'lobby',
+        lobby: { guildId: 'guild-2' },
+        adjustments: [{ teamId: 'b', balls: 9 }],
+      }),
+    );
+
+    expect(begin.channelPosts.some((p) => p.content?.includes('adjusted the hopper'))).toBe(false);
+    const bagListing = (): ChannelPost | undefined =>
+      begin.channelPosts.find((p) => p.content?.includes('• Alpha ('));
+    await vi.waitFor(() => expect(bagListing()).toBeDefined(), { timeout: 5000 });
+    expect(bagListing()!.content).toMatch(/• Bravo \(`\w+`\) — 1 ball\(s\)/);
+
+    requestAbort(session);
+    await vi.waitFor(() => expect(session.state).toBe('CANCELLED'), { timeout: 5000 });
+  });
+
+  it('rolls the bag back when the adjusted preview cannot be posted', async () => {
+    const session = openSession();
+    const begin = ceremonyInteraction({ options: { delay: 5 } });
+    // Fail only the adjusted preview; the commitment and everything after it still post. Without
+    // a rollback the ceremony would commit ball counts that were never publicly previewed.
+    const channel = begin.interaction.channel as unknown as {
+      send: (p: ChannelPost) => Promise<{ id: string }>;
+    };
+    const realSend = channel.send.bind(channel);
+    channel.send = (payload: ChannelPost): Promise<{ id: string }> =>
+      payload.content?.includes('adjusted the hopper')
+        ? Promise.reject(new Error('channel send failed'))
+        : realSend(payload);
+
+    await handleDraftOrderBeginSubcommand(
+      begin.interaction,
+      stageHolding({
+        phase: 'lobby',
+        lobby: { guildId: 'guild-1' },
+        adjustments: [{ teamId: 'b', balls: 4 }],
+      }),
+    );
+
+    expect(begin.replies.some((r) => r.content?.includes('pending edits'))).toBe(true);
+    const bagListing = (): ChannelPost | undefined =>
+      begin.channelPosts.find((p) => p.content?.includes('• Alpha ('));
+    await vi.waitFor(() => expect(bagListing()).toBeDefined(), { timeout: 5000 });
+    // Back to what `setup` froze and previewed — the warning the commissioner got is accurate.
+    expect(bagListing()!.content).toMatch(/• Bravo \(`\w+`\) — 1 ball\(s\)/);
+
+    requestAbort(session);
+    await vi.waitFor(() => expect(session.state).toBe('CANCELLED'), { timeout: 5000 });
+  });
+
+  it('refuses to commit when a replacing setup lands while the edits are being applied', async () => {
+    const session = openSession();
+    const begin = ceremonyInteraction({ options: { delay: 5 } });
+    // A `setup` for the same guild completing during the drain's awaits has already posted its own
+    // public preview; committing this session now would put the *old* bag in the channel after it.
+    const racingStage = stageHolding({ phase: 'lobby', lobby: { guildId: 'guild-1' } });
+    const raced: InspectableRevealStage = {
+      ...racingStage,
+      state: async () => {
+        const replacement = createCeremony(
+          'guild-1',
+          'Replacement Lottery',
+          { teams: [{ teamId: 'a' }, { teamId: 'b' }], baseBallCount: 1 },
+          new Map([
+            ['a', 'Alpha'],
+            ['b', 'Bravo'],
+          ]),
+        );
+        markPreviewPosted(replacement);
+        setCeremony(replacement);
+        return racingStage.state();
+      },
+    };
+
+    await handleDraftOrderBeginSubcommand(begin.interaction, raced);
+
+    expect(begin.replies.some((r) => r.content?.includes('ceremony changed'))).toBe(true);
+    expect(begin.channelPosts).toHaveLength(0);
+    expect(session.state).toBe('GAME_OPEN');
   });
 
   it('an unreachable stage still commits, but warns the commissioner about it', async () => {

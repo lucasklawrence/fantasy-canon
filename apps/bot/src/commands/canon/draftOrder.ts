@@ -34,6 +34,7 @@ import {
   buildAdjustedPreviewPost,
   buildHypePost,
   buildPreviewPost,
+  captureBag,
   CeremonyAborted,
   CeremonyIo,
   CeremonyPost,
@@ -46,6 +47,7 @@ import {
   markPreviewPosted,
   oddsRows,
   requestAbort,
+  restoreBag,
   runCeremony,
   setCeremony,
 } from '../../lib/draftOrderCeremony.js';
@@ -461,6 +463,25 @@ export async function handleDraftOrderBeginSubcommand(
   // regardless of how `begin` is run, so an edit made there must not be silently dropped.
   await foldInActivityEdits(session, channel, interaction, stage);
 
+  // Re-validate after the drain's awaits (stage read, card render, preview post) — same pattern as
+  // the block above and as `setup`/`hype`/`minigame`. A replacing `setup` during those awaits has
+  // already posted its own public preview; starting this session now would put a commitment for
+  // the *old* bag into the channel after it.
+  if (
+    getCeremony(guildId) !== session ||
+    session.abort.signal.aborted ||
+    (session.state as DraftOrderState) !== 'GAME_OPEN'
+  ) {
+    await interaction
+      .followUp({
+        content:
+          'The ceremony changed while the Activity edits were being applied — nothing was committed.',
+        flags: MessageFlags.Ephemeral,
+      })
+      .catch(() => {});
+    return;
+  }
+
   // Activity mode (#169): invite the league into the Lottery Machine before the commitment posts.
   // The reveal itself streams there; commitment, final board, and seed reveal still post here.
   // Best-effort — a failed invite post (permissions, transient API error) must never block the
@@ -529,8 +550,17 @@ async function foldInActivityEdits(
   interaction: ChatInputCommandInteraction,
   stage: InspectableRevealStage,
 ): Promise<void> {
+  // Undo point: everything below the stage read can fail *after* the bag is edited (the odds card
+  // renders, then goes to Discord). Committing a half-published bag is precisely the ADR 0006
+  // failure this whole drain exists to prevent, so a failure rolls all the way back.
+  const before = captureBag(session);
   try {
     const snapshot = await stage.state();
+    // The stage is one process-wide slot serving one ceremony at a time (multi-league partitioning
+    // is #191), and team ids collide across guilds trivially — manual setups produce `team-1`,
+    // ESPN produces small integers. So a lobby belonging to anyone else is not ours to drain:
+    // another guild's edits must never land in this guild's bag.
+    if (snapshot.phase !== 'lobby' || snapshot.lobby?.guildId !== session.guildId) return;
     const applied = applyLobbyAdjustments(session, snapshot.adjustments ?? []);
     if (applied.length === 0) return;
     await channelIo(channel).post(await buildAdjustedPreviewPost(session, applied));
@@ -538,11 +568,12 @@ async function foldInActivityEdits(
       `[draftorder] folded ${applied.length} in-Activity ball edit(s) into the bag before committing`,
     );
   } catch (error) {
+    restoreBag(session, before);
     console.error('[draftorder] failed to fold in the Activity ball edits:', error);
     await interaction
       .followUp({
         content:
-          "Couldn't read the Lottery Machine's pending edits — committing the bag as `setup` left it. " +
+          "Couldn't apply the Lottery Machine's pending edits — committing the bag as `setup` left it. " +
           'If you adjusted balls in the Activity, abort and re-run `setup` with the `balls:` option.',
         flags: MessageFlags.Ephemeral,
       })

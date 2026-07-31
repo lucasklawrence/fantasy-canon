@@ -309,6 +309,41 @@ export interface AppliedAdjustment {
   to: number;
 }
 
+/** Everything {@link applyLobbyAdjustments} can change, captured for {@link restoreBag}. */
+export interface BagSnapshot {
+  ballsByTeam: Map<string, { baseBalls?: number; bonusBalls?: number }>;
+  miniGameBonuses?: Record<string, number>;
+}
+
+/**
+ * Capture the mutable ball state of a bag so a caller can undo an {@link applyLobbyAdjustments}
+ * that it could not follow through on (#210). Needed because the drain's audit post — rendering
+ * a card, then sending it to Discord — can fail *after* the bag is edited, and `begin` would
+ * otherwise commit ball counts that were never publicly previewed (ADR 0006).
+ */
+export function captureBag(session: CeremonySession): BagSnapshot {
+  return {
+    ballsByTeam: new Map(
+      session.config.teams.map((team) => [
+        team.teamId,
+        { baseBalls: team.baseBalls, bonusBalls: team.bonusBalls },
+      ]),
+    ),
+    ...(session.miniGameBonuses ? { miniGameBonuses: { ...session.miniGameBonuses } } : {}),
+  };
+}
+
+/** Restore a bag captured by {@link captureBag}, in place (team object identities are kept). */
+export function restoreBag(session: CeremonySession, snapshot: BagSnapshot): void {
+  for (const team of session.config.teams) {
+    const previous = snapshot.ballsByTeam.get(team.teamId);
+    if (!previous) continue;
+    team.baseBalls = previous.baseBalls;
+    team.bonusBalls = previous.bonusBalls;
+  }
+  session.miniGameBonuses = snapshot.miniGameBonuses ? { ...snapshot.miniGameBonuses } : undefined;
+}
+
 /**
  * Fold the commissioner's in-Activity ball edits (#210) into the authoritative bag, returning the
  * ones that actually changed something (so the caller can name them in the fresh public preview
