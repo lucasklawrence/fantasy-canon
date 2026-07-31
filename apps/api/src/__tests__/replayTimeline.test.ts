@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildReplayTimeline,
+  catchUpPace,
   catchUpTailFromSnapshot,
   classifyDuringCatchUp,
   toPendingSteps,
@@ -364,5 +365,82 @@ describe('catch-up stale vs different-run disambiguation (#203)', () => {
         { known: 2 },
       ),
     ).toBe('cancel');
+  });
+});
+
+describe('pending-beat carry (#207)', () => {
+  const PENDING = { pick: 1, remaining: ['C'] };
+  const MID: LotterySnapshot = {
+    phase: 'revealing',
+    start: START,
+    reveals: REVEALS.slice(0, 2),
+    pendingBeat: PENDING,
+  };
+
+  it('buildReplayTimeline ends on the in-flight beat, so the merge pick keeps its drum-roll', () => {
+    const steps = buildReplayTimeline(MID);
+    const last = steps[steps.length - 1];
+    expect(last.event.type).toBe('lottery-beat');
+    expect(last.event.type === 'lottery-beat' && last.event.beat.pick).toBe(1);
+    // Scheduled where the next pick's beat would go — after the previous reveal's dwell.
+    const stepMs = replayStepMs(MID);
+    expect(last.atMs).toBe(2 * (stepMs + REPLAY_DWELL_MS));
+  });
+
+  it('buildReplayTimeline never emits a pending beat on a sealed snapshot', () => {
+    const steps = buildReplayTimeline({ ...FINISHED, pendingBeat: PENDING });
+    expect(steps[steps.length - 1].event.type).toBe('lottery-finish');
+  });
+
+  it('classifyDuringCatchUp buffers a snapshot whose only news is a fresh drum-roll', () => {
+    expect(classifyDuringCatchUp({ type: 'lottery-state', snapshot: MID }, { known: 2 })).toBe(
+      'buffer',
+    );
+  });
+
+  it('classifyDuringCatchUp ignores a re-served pending beat it already queued', () => {
+    expect(
+      classifyDuringCatchUp({ type: 'lottery-state', snapshot: MID }, { known: 2, beatPick: 1 }),
+    ).toBe('ignore');
+  });
+
+  it('catchUpTailFromSnapshot splices a new pending beat after the reveal tail', () => {
+    const tail = catchUpTailFromSnapshot(MID, { known: 1 });
+    expect(tail.map((e) => e.type)).toEqual(['lottery-beat', 'lottery-reveal', 'lottery-beat']);
+    const last = tail[tail.length - 1];
+    expect(last.type === 'lottery-beat' && last.beat.pick).toBe(1);
+  });
+
+  it('catchUpTailFromSnapshot skips a pending beat the catch-up already has', () => {
+    expect(catchUpTailFromSnapshot(MID, { known: 2, beatPick: 1 })).toEqual([]);
+  });
+
+  it('catchUpTailFromSnapshot never queues a beat past a finish', () => {
+    const tail = catchUpTailFromSnapshot({ ...FINISHED, pendingBeat: PENDING }, { known: 3 });
+    expect(tail.map((e) => e.type)).toEqual(['lottery-finish']);
+  });
+});
+
+describe('catchUpPace (#207 convergence)', () => {
+  it('keeps full pacing near the merge and hurries while behind', () => {
+    expect(catchUpPace(2500, 1)).toBe(2500);
+    expect(catchUpPace(2500, 2)).toBe(2500);
+    expect(catchUpPace(2500, 4)).toBe(1500);
+    expect(catchUpPace(2500, 7)).toBe(875);
+  });
+
+  it('converges at the bot delay floor: a hurried pick costs less than 5s of live time', () => {
+    // Per pick the catch-up pays one beat window + one dwell. At full pacing that is
+    // 2500 + 1800 = 4300ms against a 5000ms live cadence — 700ms/pick of headroom, which is
+    // the non-convergence #207 reports. Hurried, the same pick must cost decisively less.
+    const hurried = catchUpPace(2500, 4) + catchUpPace(1800, 4);
+    expect(hurried).toBeLessThanOrEqual(3000);
+    const sprint = catchUpPace(2500, 8) + catchUpPace(1800, 8);
+    expect(sprint).toBeLessThanOrEqual(1600);
+  });
+
+  it('floors a hurried delay so a step is never instantaneous, but keeps zero at zero', () => {
+    expect(catchUpPace(300, 10)).toBe(250);
+    expect(catchUpPace(0, 10)).toBe(0);
   });
 });

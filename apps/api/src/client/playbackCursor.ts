@@ -63,12 +63,18 @@ export interface PlaybackCursor {
  * from inside the client's handler — so nothing is re-armed after a step that stopped us.
  * `onDrained` fires once the queue empties on its own, which is how a catch-up learns it has
  * reached the present.
+ *
+ * `scaleDelay` (optional) adjusts each step's delay **at arm time**, given how many steps are
+ * still queued (#207): a catch-up racing a live draw hurries while the queue is deep and returns
+ * to full pacing near the merge. Arm-time matters — the queue can grow between when a step was
+ * appended and when its turn comes, and the pace should reflect the backlog *now*, not then.
  */
 export function createPlaybackCursor(
   steps: PendingStep[],
   onStep: (event: LotteryEvent) => void,
   onDrained: () => void,
   clock: PlaybackClock,
+  scaleDelay?: (delayMs: number, queueDepth: number) => number,
 ): PlaybackCursor {
   const queue: PendingStep[] = [...steps];
   let timer: number | null = null;
@@ -116,7 +122,7 @@ export function createPlaybackCursor(
       onDrained();
       return;
     }
-    arm(next.delayMs);
+    arm(scaleDelay ? scaleDelay(next.delayMs, queue.length) : next.delayMs);
   }
 
   function clearTimer(): void {

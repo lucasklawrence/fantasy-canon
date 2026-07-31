@@ -279,6 +279,65 @@ describe('createPlaybackCursor', () => {
   });
 });
 
+describe('scaleDelay (#207 catch-up hurry)', () => {
+  function scaledHarness(steps: PendingStep[], scale: (d: number, depth: number) => number) {
+    const clock = fakeClock();
+    const played: number[] = [];
+    const seenDepths: number[] = [];
+    const cursor = createPlaybackCursor(
+      steps,
+      (event: LotteryEvent) => {
+        if (event.type === 'lottery-reveal') played.push(event.reveal.pick);
+      },
+      () => {},
+      clock,
+      (d, depth) => {
+        seenDepths.push(depth);
+        return scale(d, depth);
+      },
+    );
+    return { clock, cursor, played, seenDepths };
+  }
+
+  it('applies the scaled delay at arm time', () => {
+    const { clock, cursor, played } = scaledHarness(
+      [revealStep(1, 1000), revealStep(2, 1000)],
+      (d) => d / 2,
+    );
+    cursor.start();
+    clock.advance(499);
+    expect(played).toEqual([]);
+    clock.advance(1);
+    expect(played).toEqual([1]);
+    clock.advance(500);
+    expect(played).toEqual([1, 2]);
+  });
+
+  it('reports the queue depth as of arming, so appends re-tighten later steps', () => {
+    const { clock, cursor, seenDepths } = scaledHarness([revealStep(1, 1000)], (d, depth) =>
+      depth > 1 ? d / 2 : d,
+    );
+    cursor.start(); // armed at depth 1 → full delay
+    cursor.append(revealStep(2, 1000));
+    cursor.append(revealStep(3, 1000));
+    clock.advance(1000); // step 1 fires; step 2 arms at depth 2 → hurried
+    clock.advance(500); // step 2 fires; step 3 arms at depth 1 → full again
+    clock.advance(1000);
+    expect(seenDepths).toEqual([1, 2, 1]);
+  });
+
+  it('pause banks the scaled remainder, not the unscaled one', () => {
+    const { clock, cursor, played } = scaledHarness([revealStep(1, 1000)], (d) => d / 2);
+    cursor.start(); // armed with 500
+    clock.advance(300);
+    cursor.pause();
+    expect(cursor.remainingMs()).toBe(200);
+    cursor.resume();
+    clock.advance(200);
+    expect(played).toEqual([1]);
+  });
+});
+
 describe('onHiddenAction', () => {
   // A sealed re-watch loses nothing by waiting — freeze it and hand it back intact.
   it('pauses a replay', () => {
