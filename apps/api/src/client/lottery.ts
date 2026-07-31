@@ -21,6 +21,13 @@ import type {
   LotteryStart,
 } from '../lotteryStage.js';
 import {
+  createPlaybackCursor,
+  onHiddenAction,
+  type PlaybackClock,
+  type PlaybackCursor,
+  type PlaybackMode,
+} from './playbackCursor.js';
+import {
   buildReplayTimeline,
   catchUpTailFromSnapshot,
   classifyDuringCatchUp,
@@ -338,19 +345,20 @@ function renderFinish(snapshot: LotterySnapshot): void {
 //
 // Playback is a chained cursor rather than a batch of absolute `setTimeout`s, because a catch-up
 // has to append to a schedule that is already running. Pacing is unchanged: the per-step delays
-// are the gaps between the builder's `atMs` values.
-
-type PlaybackMode = 'replay' | 'catchup';
-interface PendingStep {
-  delayMs: number;
-  event: LotteryEvent;
-}
+// are the gaps between the builder's `atMs` values. The cursor itself — queue, timer, pause/resume
+// (#204) — lives in `playbackCursor.ts` so it unit-tests without a DOM; this file owns the render.
 
 let finishedSnapshot: LotterySnapshot | null = null;
 let playbackMode: PlaybackMode | null = null;
-let pendingSteps: PendingStep[] = [];
-let stepTimer: number | null = null;
+let cursor: PlaybackCursor | null = null;
 let replayWindowMs = REPLAY_MAX_STEP_MS;
+
+/** Real timers + wall clock; the cursor takes them injected so it can be tested headless. */
+const browserClock: PlaybackClock = {
+  setTimer: (fn, ms) => window.setTimeout(fn, ms),
+  clearTimer: (handle) => window.clearTimeout(handle),
+  now: () => Date.now(),
+};
 /** Reveals the running catch-up accounts for — its source plus everything buffered since. */
 let catchUpKnown = 0;
 let catchUpFinish: LotteryFinish | undefined;
@@ -417,35 +425,17 @@ function applyReplayStep(event: LotteryEvent): void {
   }
 }
 
-/**
- * Play the next queued step; an empty queue means playback has reached its end.
- *
- * The step stays at the head of `pendingSteps` until its timer actually fires. Shifting it out at
- * schedule time would leave one step living only inside the closure, and `skipReplay` — which
- * drains the queue — would silently drop it, holing the board by exactly one pick.
- */
-function scheduleNextStep(): void {
-  if (stepTimer !== null) return;
-  const next = pendingSteps[0];
-  if (!next) {
-    if (playbackMode === 'catchup') {
-      handOffToLive();
-    } else {
-      // A replay whose source carried no finish (a snapshot captured mid-reveal) ends by simply
-      // running out. Without this it would stay "playing" — skip control up, replay button
-      // hidden — until some unrelated live event happened along to cancel it.
-      stopPlayback();
-      updateReplayAffordance();
-    }
+/** The cursor drained on its own: playback reached its end. What that means depends on the mode. */
+function onPlaybackDrained(mode: PlaybackMode): void {
+  if (mode === 'catchup') {
+    handOffToLive();
     return;
   }
-  stepTimer = window.setTimeout(() => {
-    stepTimer = null;
-    pendingSteps.shift(); // consumed now that it is actually being applied
-    applyReplayStep(next.event);
-    // A finish step ends playback from inside applyReplayStep — don't re-arm on top of it.
-    if (isPlaying()) scheduleNextStep();
-  }, next.delayMs);
+  // A replay whose source carried no finish (a snapshot captured mid-reveal) ends by simply
+  // running out. Without this it would stay "playing" — skip control up, replay button hidden —
+  // until some unrelated live event happened along to cancel it.
+  stopPlayback();
+  updateReplayAffordance();
 }
 
 /**
@@ -466,7 +456,12 @@ function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
   const timeline = buildReplayTimeline(source);
   if (timeline.length === 0) return;
   playbackMode = mode;
-  pendingSteps = toPendingSteps(timeline);
+  cursor = createPlaybackCursor(
+    toPendingSteps(timeline),
+    applyReplayStep,
+    () => onPlaybackDrained(mode),
+    browserClock,
+  );
   replayWindowMs = replayStepMs(source);
   // Both modes re-arm the finale. A catch-up's `lottery-finish` is buffered and played by
   // `applyReplayStep`, so this *is* the viewer's finale — suppressing it here would mean the one
@@ -483,7 +478,7 @@ function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
   show('drop', false);
   byId('replay-skip').textContent = mode === 'catchup' ? '⏭ skip to live' : '⏭ skip to result';
   setStatus(mode === 'catchup' ? 'catching up…' : 'replaying the reveal', 'live');
-  scheduleNextStep();
+  cursor.start();
 }
 
 function startReplay(): void {
@@ -514,9 +509,8 @@ function startCatchUp(): void {
 }
 
 function stopPlayback(options: { keepPull?: boolean } = {}): void {
-  if (stepTimer !== null) clearTimeout(stepTimer);
-  stepTimer = null;
-  pendingSteps = [];
+  cursor?.stop();
+  cursor = null;
   playbackMode = null;
   catchUpCommitment = undefined;
   show('replay-skip', false);
@@ -530,7 +524,7 @@ function stopPlayback(options: { keepPull?: boolean } = {}): void {
  * animated so far. The polling path repaints wholesale and doesn't need this; the WS path does.
  */
 function flushCatchUpRevealsIntoBoard(): void {
-  for (const step of pendingSteps) {
+  for (const step of cursor?.pending() ?? []) {
     if (step.event.type === 'lottery-reveal') reveals.push(step.event.reveal);
   }
 }
@@ -539,7 +533,9 @@ function flushCatchUpRevealsIntoBoard(): void {
 function catchUpHasPick(pick: number): boolean {
   return (
     reveals.some((r) => r.pick === pick) ||
-    pendingSteps.some((s) => s.event.type === 'lottery-reveal' && s.event.reveal.pick === pick)
+    (cursor?.pending() ?? []).some(
+      (s) => s.event.type === 'lottery-reveal' && s.event.reveal.pick === pick,
+    )
   );
 }
 
@@ -547,7 +543,7 @@ function catchUpHasPick(pick: number): boolean {
 function bufferCatchUpEvent(event: LotteryEvent): void {
   switch (event.type) {
     case 'lottery-beat':
-      pendingSteps.push({ delayMs: REPLAY_DWELL_MS, event });
+      cursor?.append({ delayMs: REPLAY_DWELL_MS, event });
       break;
     case 'lottery-reveal':
       // Polling and the WebSocket have no cross-transport ordering guarantee, and both are briefly
@@ -556,16 +552,15 @@ function bufferCatchUpEvent(event: LotteryEvent): void {
       // rather than trusting arrival order.
       if (catchUpHasPick(event.reveal.pick)) return;
       catchUpKnown += 1;
-      pendingSteps.push({ delayMs: replayWindowMs, event });
+      cursor?.append({ delayMs: replayWindowMs, event });
       break;
     case 'lottery-finish':
       catchUpFinish = event.finish;
-      pendingSteps.push({ delayMs: REPLAY_DWELL_MS, event });
+      cursor?.append({ delayMs: REPLAY_DWELL_MS, event });
       break;
     default:
       return;
   }
-  scheduleNextStep(); // no-op if a step is already in flight
 }
 
 /**
@@ -576,7 +571,7 @@ function bufferCatchUpEvent(event: LotteryEvent): void {
 function skipReplay(): void {
   if (playbackMode === 'catchup') {
     // Apply everything still queued instantly, so the board lands exactly on the live state.
-    const queued = pendingSteps;
+    const queued = cursor?.pending() ?? [];
     stopPlayback();
     playbackMode = 'catchup'; // keep applyReplayStep's accumulate-into-`reveals` behavior
     for (const step of queued) applyReplayStep(step.event);
@@ -610,6 +605,41 @@ function updateReplayAffordance(): void {
   // (aborted especially, which leaves the board on screen) gets no offer at all.
   btn.textContent = '↻ Catch up from the start';
   show('replay-btn', livePhase === 'revealing' && reveals.length > 0);
+}
+
+/**
+ * Backgrounding the tab (#204). Chrome throttles and batches timers in a hidden tab, so without
+ * this a playback either bursts through on return or crawls at one step a minute — either way the
+ * viewer comes back to something that isn't what they left. What to do about it differs by mode;
+ * `onHiddenAction` owns that rule and explains why.
+ */
+function onVisibilityChange(): void {
+  if (!cursor || !playbackMode) return;
+  if (document.hidden) {
+    if (onHiddenAction(playbackMode) === 'pause') {
+      cursor.pause();
+      // The pull is a CSS animation the browser freezes too; drop it and re-arm on the way back.
+      cancelPull();
+      return;
+    }
+    // Cancel (a catch-up): keep every published pick it had queued — those are public results the
+    // viewer is entitled to see — then let live state own the screen again. `updateReplayAffordance`
+    // re-offers the catch-up if the draw is still running, so returning mid-ceremony can restart it
+    // against the present rather than resuming a race it has already lost.
+    flushCatchUpRevealsIntoBoard();
+    stopPlayback();
+    renderBoard(reveals);
+    setStatus('live reveal', 'live');
+    updateReplayAffordance();
+    return;
+  }
+  if (!cursor.isPaused()) return;
+  // Re-arm the pull against what is genuinely left of the drum-roll window. A short remainder is
+  // fine: `armPull` clamps its lead to 0, so the ball snaps to the chute and the reveal lands on it.
+  const next = cursor.peek();
+  const leftMs = cursor.remainingMs();
+  cursor.resume();
+  if (next?.event.type === 'lottery-reveal') armPull(next.event.reveal.pick, leftMs);
 }
 
 function confetti(): void {
@@ -867,6 +897,7 @@ async function boot(): Promise<void> {
     else startCatchUp();
   });
   byId('replay-skip').addEventListener('click', skipReplay);
+  document.addEventListener('visibilitychange', onVisibilityChange);
   const inDiscord = isDiscordActivity(window.location);
   const base = proxyBase(inDiscord);
   if (inDiscord) {
