@@ -112,8 +112,14 @@ export function sameFinishOrder(
   );
 }
 
+/** One queued step of a chained playback: fire `event` `delayMs` after the previous one. */
+export interface PendingStep {
+  delayMs: number;
+  event: LotteryEvent;
+}
+
 /** Absolute `atMs` schedule → per-step gaps, for a chained playback cursor. */
-export function toPendingSteps(timeline: ReplayStep[]): { delayMs: number; event: LotteryEvent }[] {
+export function toPendingSteps(timeline: ReplayStep[]): PendingStep[] {
   let prev = 0;
   return timeline.map((step) => {
     const delayMs = Math.max(0, step.atMs - prev);
