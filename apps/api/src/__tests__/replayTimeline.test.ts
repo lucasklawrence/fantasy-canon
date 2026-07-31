@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildReplayTimeline,
+  catchUpTailFromSnapshot,
+  classifyDuringCatchUp,
+  toPendingSteps,
   REPLAY_DWELL_MS,
   REPLAY_MAX_STEP_MS,
   replayStepMs,
 } from '../client/replayTimeline.js';
-import type { LotteryReveal, LotterySnapshot, LotteryStart } from '../lotteryStage.js';
+import type {
+  LotteryFinish,
+  LotteryReveal,
+  LotterySnapshot,
+  LotteryStart,
+} from '../lotteryStage.js';
 
 const START: LotteryStart = {
   title: '2026 Draft Lottery',
@@ -110,5 +118,251 @@ describe('buildReplayTimeline', () => {
 
   it('builds an empty timeline from an empty snapshot (nothing to replay)', () => {
     expect(buildReplayTimeline({ phase: 'idle', reveals: [] })).toEqual([]);
+  });
+});
+
+const FINISH: LotteryFinish = FINISHED.finish as LotteryFinish;
+/** The catch-up has played the first pick and nothing else. */
+const MID: { known: number } = { known: 1 };
+
+describe('classifyDuringCatchUp (#203)', () => {
+  it('buffers the ceremony own beats and reveals instead of cancelling', () => {
+    // The whole point: the old live-wins rule cancelled on the first live beat, which made a
+    // mid-reveal catch-up impossible. These extend the tail.
+    expect(
+      classifyDuringCatchUp(
+        { type: 'lottery-beat', beat: { pick: 2, remaining: ['A', 'C'] } },
+        MID,
+      ),
+    ).toBe('buffer');
+    expect(classifyDuringCatchUp({ type: 'lottery-reveal', reveal: REVEALS[1] }, MID)).toBe(
+      'buffer',
+    );
+  });
+
+  it('buffers a finish so the catch-up plays through to the finale, not a jump cut', () => {
+    expect(classifyDuringCatchUp({ type: 'lottery-finish', finish: FINISH }, MID)).toBe('buffer');
+  });
+
+  it('ignores a re-broadcast of a finish it already queued', () => {
+    expect(
+      classifyDuringCatchUp({ type: 'lottery-finish', finish: FINISH }, { ...MID, finish: FINISH }),
+    ).toBe('ignore');
+  });
+
+  it('cancels on an abort — never keep animating a draw that was thrown out', () => {
+    expect(classifyDuringCatchUp({ type: 'lottery-abort', abort: { reason: 'nope' } }, MID)).toBe(
+      'cancel',
+    );
+  });
+
+  it('cancels when a different ceremony opens', () => {
+    expect(classifyDuringCatchUp({ type: 'lottery-start', start: START }, MID)).toBe('cancel');
+    expect(
+      classifyDuringCatchUp(
+        {
+          type: 'lottery-lobby',
+          lobby: { title: 'next', teamCount: 3, totalBalls: 6, rows: START.rows },
+        },
+        MID,
+      ),
+    ).toBe('cancel');
+  });
+
+  describe('lottery-state snapshots', () => {
+    const snap = (over: Partial<LotterySnapshot>): LotterySnapshot => ({
+      phase: 'revealing',
+      start: START,
+      reveals: REVEALS.slice(0, 1),
+      ...over,
+    });
+
+    it('ignores a snapshot that has not moved past what the catch-up knows', () => {
+      expect(classifyDuringCatchUp({ type: 'lottery-state', snapshot: snap({}) }, MID)).toBe(
+        'ignore',
+      );
+    });
+
+    it('buffers a snapshot that ran ahead, so a poll-only client can still merge', () => {
+      expect(
+        classifyDuringCatchUp({ type: 'lottery-state', snapshot: snap({ reveals: REVEALS }) }, MID),
+      ).toBe('buffer');
+    });
+
+    it('buffers a snapshot carrying a finish it has not seen', () => {
+      expect(
+        classifyDuringCatchUp(
+          { type: 'lottery-state', snapshot: snap({ phase: 'finished', finish: FINISH }) },
+          MID,
+        ),
+      ).toBe('buffer');
+    });
+
+    it('cancels on a snapshot for a phase that is no longer this running draw', () => {
+      for (const phase of ['idle', 'lobby', 'waiting', 'aborted'] as const) {
+        expect(
+          classifyDuringCatchUp({ type: 'lottery-state', snapshot: snap({ phase }) }, MID),
+        ).toBe('cancel');
+      }
+    });
+  });
+});
+
+describe('catchUpTailFromSnapshot (#203)', () => {
+  it('emits only the picks the catch-up has not accounted for', () => {
+    const tail = catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, MID);
+    // Picks 2 and 1 only — pick 3 is already known. Each carries its drum-roll (see the
+    // drum-rolls describe below for why the beat matters).
+    expect(tail.flatMap((e) => (e.type === 'lottery-reveal' ? [e.reveal] : []))).toEqual([
+      REVEALS[1],
+      REVEALS[2],
+    ]);
+  });
+
+  it('appends the finish when the ceremony ended while catching up', () => {
+    const tail = catchUpTailFromSnapshot(FINISHED, MID);
+    expect(tail[tail.length - 1]).toEqual({ type: 'lottery-finish', finish: FINISH });
+  });
+
+  it('is empty when the snapshot matches what the catch-up already has', () => {
+    expect(
+      catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, { known: REVEALS.length }),
+    ).toEqual([]);
+    expect(catchUpTailFromSnapshot(FINISHED, { known: REVEALS.length, finish: FINISH })).toEqual(
+      [],
+    );
+  });
+});
+
+describe('toPendingSteps (#203 pacing conversion)', () => {
+  it('reproduces the absolute schedule exactly as per-step gaps', () => {
+    // The #197 replay moved from absolute setTimeout(atMs) to a chained cursor so a catch-up can
+    // append to a running schedule. This pins that the observable pacing did not change.
+    const timeline = buildReplayTimeline(FINISHED);
+    const steps = toPendingSteps(timeline);
+    expect(steps.map((s) => s.delayMs)).toEqual([
+      0, // first step fires immediately, as setTimeout(fn, 0) did
+      REPLAY_MAX_STEP_MS, // beat → reveal: the drum-roll window
+      REPLAY_DWELL_MS, // reveal → next beat: the dwell
+      REPLAY_MAX_STEP_MS,
+      REPLAY_DWELL_MS,
+      REPLAY_MAX_STEP_MS,
+      REPLAY_DWELL_MS, // last drop → finale
+    ]);
+    // Cumulative gaps must land back on the original absolute times.
+    let t = 0;
+    steps.forEach((step, i) => {
+      t += step.delayMs;
+      expect(t).toBe(timeline[i].atMs);
+    });
+    expect(steps.map((s) => s.event)).toEqual(timeline.map((s) => s.event));
+  });
+
+  it('is empty for an empty timeline', () => {
+    expect(toPendingSteps([])).toEqual([]);
+  });
+});
+
+describe('catch-up ceremony identity (#203)', () => {
+  const RERUN_START: LotteryStart = { ...START, commitment: 'different-hash' };
+
+  it('cancels when a revealing snapshot belongs to a different ceremony', () => {
+    // A re-run reports `revealing` with its own history, so reveal counts cannot tell it apart —
+    // only the commitment can. Without this the new run's picks splice onto the old replay.
+    const snapshot: LotterySnapshot = {
+      phase: 'revealing',
+      start: RERUN_START,
+      reveals: REVEALS,
+    };
+    expect(
+      classifyDuringCatchUp({ type: 'lottery-state', snapshot }, { known: 1, commitment: 'hash' }),
+    ).toBe('cancel');
+  });
+
+  it('still buffers when the commitment matches', () => {
+    const snapshot: LotterySnapshot = { phase: 'revealing', start: START, reveals: REVEALS };
+    expect(
+      classifyDuringCatchUp({ type: 'lottery-state', snapshot }, { known: 1, commitment: 'hash' }),
+    ).toBe('buffer');
+  });
+
+  it('cancels when history goes backwards, even with no commitment to compare', () => {
+    const snapshot: LotterySnapshot = { phase: 'revealing', reveals: REVEALS.slice(0, 1) };
+    expect(classifyDuringCatchUp({ type: 'lottery-state', snapshot }, { known: 3 })).toBe('cancel');
+  });
+});
+
+describe('catchUpTailFromSnapshot drum-rolls (#203)', () => {
+  it('pairs every tail reveal with its beat, so the fallback keeps the full animation', () => {
+    // Reveal-only tails would stop the hopper spinning and skip the pull — a visible fidelity
+    // cliff the moment playback crossed from the built timeline into the tail.
+    const tail = catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, { known: 1 });
+    expect(tail.map((e) => e.type)).toEqual([
+      'lottery-beat',
+      'lottery-reveal',
+      'lottery-beat',
+      'lottery-reveal',
+    ]);
+  });
+
+  it("reconstructs each tail beat's remaining from the previous reveal", () => {
+    const tail = catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, { known: 1 });
+    const beats = tail.flatMap((e) => (e.type === 'lottery-beat' ? [e.beat] : []));
+    expect(beats[0]).toEqual({ pick: 2, remaining: REVEALS[0].remaining });
+    expect(beats[1]).toEqual({ pick: 1, remaining: REVEALS[1].remaining });
+  });
+
+  it('from known:0 the first beat still includes the team about to be drawn', () => {
+    const tail = catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS }, { known: 0 });
+    const first = tail[0];
+    expect(first.type === 'lottery-beat' && first.beat.remaining).toEqual([
+      REVEALS[0].team,
+      ...REVEALS[0].remaining,
+    ]);
+  });
+
+  it('yields nothing when the snapshot is shorter than what the catch-up knows', () => {
+    expect(
+      catchUpTailFromSnapshot({ phase: 'revealing', reveals: REVEALS.slice(0, 1) }, { known: 3 }),
+    ).toEqual([]);
+  });
+});
+
+describe('catch-up stale vs different-run disambiguation (#203)', () => {
+  const shorter: LotterySnapshot = {
+    phase: 'revealing',
+    start: START,
+    reveals: REVEALS.slice(0, 1),
+  };
+
+  it('ignores a shorter snapshot when the commitment proves it is our own run', () => {
+    // Overlapping polls are routine on the fallback transport: a later response can land before
+    // an earlier one. Cancelling would discard the catch-up and repaint the board backwards.
+    expect(
+      classifyDuringCatchUp(
+        { type: 'lottery-state', snapshot: shorter },
+        { known: 3, commitment: 'hash' },
+      ),
+    ).toBe('ignore');
+  });
+
+  it('cancels a shorter snapshot that carries no start to identify it', () => {
+    // Half-identified: we know our own commitment, but the snapshot has nothing to compare it to.
+    // Identity is unproven, so the conservative branch must win.
+    expect(
+      classifyDuringCatchUp(
+        { type: 'lottery-state', snapshot: { phase: 'revealing', reveals: REVEALS.slice(0, 1) } },
+        { known: 3, commitment: 'hash' },
+      ),
+    ).toBe('cancel');
+  });
+
+  it('cancels a shorter snapshot when we never recorded a commitment of our own', () => {
+    expect(
+      classifyDuringCatchUp(
+        { type: 'lottery-state', snapshot: { phase: 'revealing', start: START, reveals: [] } },
+        { known: 2 },
+      ),
+    ).toBe('cancel');
   });
 });

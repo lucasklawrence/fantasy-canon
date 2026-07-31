@@ -15,11 +15,22 @@ import type {
   LotteryEvent,
   LotteryFinish,
   LotteryLobby,
+  LotteryPhase,
   LotteryReveal,
   LotterySnapshot,
   LotteryStart,
 } from '../lotteryStage.js';
-import { buildReplayTimeline, REPLAY_MAX_STEP_MS, replayStepMs } from './replayTimeline.js';
+import {
+  buildReplayTimeline,
+  catchUpTailFromSnapshot,
+  classifyDuringCatchUp,
+  REPLAY_DWELL_MS,
+  REPLAY_MAX_STEP_MS,
+  replayStepMs,
+  sameFinishOrder,
+  toPendingSteps,
+  type CatchUpContext,
+} from './replayTimeline.js';
 import { runHandshake } from './sdk.js';
 import { apiPath, isDiscordActivity, proxyBase, wsUrl } from './transport.js';
 
@@ -307,28 +318,64 @@ function renderFinish(snapshot: LotterySnapshot): void {
     ...(start ? { start } : {}),
     ...(snapshot.finish ? { finish: snapshot.finish } : {}),
   };
-  show('replay-btn', snapshot.reveals.length > 0 || !!snapshot.finish);
+  // Reached directly by a catch-up's buffered finish (not via renderSnapshot), and that finish is
+  // the live ceremony genuinely ending — so the phase gate has to be updated here too.
+  livePhase = 'finished';
+  if (snapshot.reveals.length > 0 || snapshot.finish) updateReplayAffordance();
   if (!celebrated) {
     celebrated = true;
     confetti();
   }
 }
 
-// --- replay (#197): re-run the published reveal locally; live events always win ---
+// --- replay (#197) + mid-reveal catch-up (#203) ---
+//
+// Both modes re-render published history on a local timer; they differ only in what a live event
+// means. A `replay` re-watches a sealed ceremony, so any real live news wins and cancels it. A
+// `catchup` runs *alongside* the ceremony it is replaying, so that ceremony's own beats and
+// reveals cannot cancel it — they buffer and splice onto the tail (`classifyDuringCatchUp`), and
+// when the queue drains the catch-up has reached the present and hands off to live.
+//
+// Playback is a chained cursor rather than a batch of absolute `setTimeout`s, because a catch-up
+// has to append to a schedule that is already running. Pacing is unchanged: the per-step delays
+// are the gaps between the builder's `atMs` values.
+
+type PlaybackMode = 'replay' | 'catchup';
+interface PendingStep {
+  delayMs: number;
+  event: LotteryEvent;
+}
 
 let finishedSnapshot: LotterySnapshot | null = null;
-let replayTimers: number[] = [];
-let replaying = false;
+let playbackMode: PlaybackMode | null = null;
+let pendingSteps: PendingStep[] = [];
+let stepTimer: number | null = null;
 let replayWindowMs = REPLAY_MAX_STEP_MS;
+/** Reveals the running catch-up accounts for — its source plus everything buffered since. */
+let catchUpKnown = 0;
+let catchUpFinish: LotteryFinish | undefined;
+/** Commitment of the ceremony being caught up on, so a re-run is recognised as a different one. */
+let catchUpCommitment: string | undefined;
+/** Last phase the server reported — catch-up is only meaningful while a draw is actually running. */
+let livePhase: LotteryPhase = 'idle';
 
-function sameFinish(a: LotteryFinish | undefined, b: LotteryFinish | undefined): boolean {
-  return (
-    !!a &&
-    !!b &&
-    a.verify.commitment === b.verify.commitment &&
-    JSON.stringify(a.order) === JSON.stringify(b.order)
-  );
+/** The context the pure catch-up policy needs, assembled from the running catch-up's state. */
+function catchUpContext(): CatchUpContext {
+  return {
+    known: catchUpKnown,
+    ...(catchUpFinish ? { finish: catchUpFinish } : {}),
+    ...(catchUpCommitment ? { commitment: catchUpCommitment } : {}),
+  };
 }
+
+/** True while either mode is playing — live handlers consult this before applying an event. */
+function isPlaying(): boolean {
+  return playbackMode !== null;
+}
+
+// Both modes' echo rules must agree on "same sealed result", so they share one implementation
+// (`sameFinishOrder`) rather than keeping parallel copies that could drift apart.
+const sameFinish = sameFinishOrder;
 
 /**
  * During a replay, a repaint of the same finished ceremony (the polling fallback re-serving the
@@ -351,7 +398,7 @@ function applyReplayStep(event: LotteryEvent): void {
   switch (event.type) {
     case 'lottery-beat':
       renderDrum(event.beat.pick, event.beat.remaining, replayWindowMs);
-      setStatus('replaying the reveal', 'live');
+      setStatus(playbackMode === 'catchup' ? 'catching up…' : 'replaying the reveal', 'live');
       break;
     case 'lottery-reveal':
       reveals.push(event.reveal);
@@ -359,8 +406,10 @@ function applyReplayStep(event: LotteryEvent): void {
       renderBoard(reveals);
       break;
     case 'lottery-finish':
-      // End the replay first so renderFinish paints the sealed state (status, confetti) normally.
-      stopReplay();
+      // End playback first so renderFinish paints the sealed state (status, confetti) normally.
+      // For a catch-up this is the real finale: the ceremony ended while we were catching up, so
+      // the viewer lands on the sealed board having watched the whole thing.
+      stopPlayback();
       renderFinish({ phase: 'finished', reveals, finish: event.finish });
       break;
     default:
@@ -368,14 +417,61 @@ function applyReplayStep(event: LotteryEvent): void {
   }
 }
 
-function startReplay(): void {
-  const source = finishedSnapshot;
-  if (!source || replaying) return;
+/**
+ * Play the next queued step; an empty queue means playback has reached its end.
+ *
+ * The step stays at the head of `pendingSteps` until its timer actually fires. Shifting it out at
+ * schedule time would leave one step living only inside the closure, and `skipReplay` — which
+ * drains the queue — would silently drop it, holing the board by exactly one pick.
+ */
+function scheduleNextStep(): void {
+  if (stepTimer !== null) return;
+  const next = pendingSteps[0];
+  if (!next) {
+    if (playbackMode === 'catchup') {
+      handOffToLive();
+    } else {
+      // A replay whose source carried no finish (a snapshot captured mid-reveal) ends by simply
+      // running out. Without this it would stay "playing" — skip control up, replay button
+      // hidden — until some unrelated live event happened along to cancel it.
+      stopPlayback();
+      updateReplayAffordance();
+    }
+    return;
+  }
+  stepTimer = window.setTimeout(() => {
+    stepTimer = null;
+    pendingSteps.shift(); // consumed now that it is actually being applied
+    applyReplayStep(next.event);
+    // A finish step ends playback from inside applyReplayStep — don't re-arm on top of it.
+    if (isPlaying()) scheduleNextStep();
+  }, next.delayMs);
+}
+
+/**
+ * The catch-up reached the present: drop out of playback and let live events render directly.
+ * `reveals` already equals the live truth (every buffered reveal was played), so there is nothing
+ * to repaint — the board simply keeps growing from here.
+ */
+function handOffToLive(): void {
+  // Keep any armed pull: a catch-up most often drains right after playing a buffered beat, i.e.
+  // while the live ceremony is mid-drum-roll. Cancelling here would strip the chute animation off
+  // the exact pick the merge lands on — the feature's showcase moment.
+  stopPlayback({ keepPull: true });
+  setStatus('live reveal', 'live');
+  updateReplayAffordance();
+}
+
+function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
   const timeline = buildReplayTimeline(source);
   if (timeline.length === 0) return;
-  replaying = true;
+  playbackMode = mode;
+  pendingSteps = toPendingSteps(timeline);
   replayWindowMs = replayStepMs(source);
-  celebrated = false; // the finale deserves its confetti again
+  // Both modes re-arm the finale. A catch-up's `lottery-finish` is buffered and played by
+  // `applyReplayStep`, so this *is* the viewer's finale — suppressing it here would mean the one
+  // person the feature exists for is the only one who never sees the confetti.
+  celebrated = false;
   lastDropPick = null;
   reveals = [];
   show('board', false);
@@ -385,28 +481,135 @@ function startReplay(): void {
   show('replay-skip', true);
   show('stage', true);
   show('drop', false);
-  setStatus('replaying the reveal', 'live');
-  for (const step of timeline) {
-    replayTimers.push(window.setTimeout(() => applyReplayStep(step.event), step.atMs));
+  byId('replay-skip').textContent = mode === 'catchup' ? '⏭ skip to live' : '⏭ skip to result';
+  setStatus(mode === 'catchup' ? 'catching up…' : 'replaying the reveal', 'live');
+  scheduleNextStep();
+}
+
+function startReplay(): void {
+  const source = finishedSnapshot;
+  if (!source || isPlaying()) return;
+  beginPlayback('replay', source);
+}
+
+/**
+ * Catch-up (#203): replay this ceremony from pick one while it is still running. The source is
+ * whatever has been published so far — the same local accumulator the live board renders from, so
+ * no refetch and no server state.
+ */
+function startCatchUp(): void {
+  // Only while a draw is actually running. An aborted ceremony leaves the board (and this button)
+  // on screen, and re-animating a discarded draw under the abort banner — ending on a full board
+  // labelled "live reveal" — is the worst possible screen for a fairness-critical lottery.
+  if (isPlaying() || livePhase !== 'revealing' || reveals.length === 0) return;
+  const source: LotterySnapshot = {
+    phase: 'revealing',
+    reveals: [...reveals],
+    ...(currentStart ? { start: currentStart } : {}),
+  };
+  catchUpKnown = source.reveals.length;
+  catchUpFinish = undefined;
+  catchUpCommitment = currentStart?.commitment;
+  beginPlayback('catchup', source);
+}
+
+function stopPlayback(options: { keepPull?: boolean } = {}): void {
+  if (stepTimer !== null) clearTimeout(stepTimer);
+  stepTimer = null;
+  pendingSteps = [];
+  playbackMode = null;
+  catchUpCommitment = undefined;
+  show('replay-skip', false);
+  if (!options.keepPull) cancelPull();
+}
+
+/**
+ * Cancelling a catch-up abandons its queue, but those queued reveals are *published* picks the
+ * viewer is entitled to see. Fold them into the board so a cancel (an abort, most importantly)
+ * leaves the full published order on screen rather than the truncated prefix the catch-up had
+ * animated so far. The polling path repaints wholesale and doesn't need this; the WS path does.
+ */
+function flushCatchUpRevealsIntoBoard(): void {
+  for (const step of pendingSteps) {
+    if (step.event.type === 'lottery-reveal') reveals.push(step.event.reveal);
   }
 }
 
-function stopReplay(): void {
-  for (const timer of replayTimers) clearTimeout(timer);
-  replayTimers = [];
-  replaying = false;
-  show('replay-skip', false);
-  cancelPull();
+/** Is this pick already on the board or sitting in the queue? */
+function catchUpHasPick(pick: number): boolean {
+  return (
+    reveals.some((r) => r.pick === pick) ||
+    pendingSteps.some((s) => s.event.type === 'lottery-reveal' && s.event.reveal.pick === pick)
+  );
 }
 
-/** Skip straight back to the sealed final state (the "final state wins" control). */
+/** Queue a live event onto the tail of a running catch-up, at the compressed cadence. */
+function bufferCatchUpEvent(event: LotteryEvent): void {
+  switch (event.type) {
+    case 'lottery-beat':
+      pendingSteps.push({ delayMs: REPLAY_DWELL_MS, event });
+      break;
+    case 'lottery-reveal':
+      // Polling and the WebSocket have no cross-transport ordering guarantee, and both are briefly
+      // live around a reconnect — so the same published pick can reach us twice, once inside a
+      // snapshot-derived tail and once as its own frame. Picks are unique, so dedupe on that
+      // rather than trusting arrival order.
+      if (catchUpHasPick(event.reveal.pick)) return;
+      catchUpKnown += 1;
+      pendingSteps.push({ delayMs: replayWindowMs, event });
+      break;
+    case 'lottery-finish':
+      catchUpFinish = event.finish;
+      pendingSteps.push({ delayMs: REPLAY_DWELL_MS, event });
+      break;
+    default:
+      return;
+  }
+  scheduleNextStep(); // no-op if a step is already in flight
+}
+
+/**
+ * Skip: during a replay, jump to the sealed final board; during a catch-up, jump to the live
+ * present. Both are "stop pretending and show me what is true now" — they just have different
+ * truths, because a catch-up's ceremony has not finished.
+ */
 function skipReplay(): void {
+  if (playbackMode === 'catchup') {
+    // Apply everything still queued instantly, so the board lands exactly on the live state.
+    const queued = pendingSteps;
+    stopPlayback();
+    playbackMode = 'catchup'; // keep applyReplayStep's accumulate-into-`reveals` behavior
+    for (const step of queued) applyReplayStep(step.event);
+    if (isPlaying()) handOffToLive();
+    return;
+  }
   const source = finishedSnapshot;
   if (!source) return;
-  stopReplay();
+  stopPlayback();
   celebrated = true; // skipping isn't a finale moment — no second confetti burst
   reveals = [...source.reveals];
   renderSnapshot(source);
+}
+
+/**
+ * Show the right button for the phase: "catch up" mid-reveal, "replay" once sealed, nothing while
+ * a playback is already running (the skip control takes over).
+ */
+function updateReplayAffordance(): void {
+  const btn = byId('replay-btn');
+  if (isPlaying()) {
+    show('replay-btn', false);
+    return;
+  }
+  if (livePhase === 'finished' && finishedSnapshot) {
+    btn.textContent = '↻ Replay the reveal';
+    show('replay-btn', true);
+    return;
+  }
+  // Mid-reveal: only worth offering once there is history to catch up on. Any other phase
+  // (aborted especially, which leaves the board on screen) gets no offer at all.
+  btn.textContent = '↻ Catch up from the start';
+  show('replay-btn', livePhase === 'revealing' && reveals.length > 0);
 }
 
 function confetti(): void {
@@ -424,6 +627,10 @@ function confetti(): void {
 
 /** Repaint everything from a snapshot — the late-join / reconnect path. */
 function renderSnapshot(snapshot: LotterySnapshot): void {
+  // Track what the *server* says, separately from what playback is animating: the catch-up offer
+  // and the replay offer are both phase-gated, and a replay renders a finished snapshot while the
+  // live ceremony may be something else entirely.
+  livePhase = snapshot.phase;
   // A fresh phase repaints from scratch: hide the sections a previous run may have left visible
   // (a re-run start after a finished/aborted ceremony must not show stale board/verify/abort),
   // and re-arm the one-shot celebration.
@@ -472,12 +679,19 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
     case 'revealing':
       if (snapshot.start) renderWaiting(snapshot.start);
       setStatus('live reveal', 'live');
+      // A draw is running, so any sealed result we were holding belongs to a *previous* ceremony.
+      // Left set, it would mislabel the button "Replay the reveal" and replay the old lottery over
+      // the live one (reachable on the poll-only path, whose 2s tick can skip the waiting phase).
+      finishedSnapshot = null;
       renderBoard(snapshot.reveals);
       if (snapshot.pendingBeat) {
         renderDrum(snapshot.pendingBeat.pick, snapshot.pendingBeat.remaining);
       } else if (snapshot.reveals.length > 0) {
         renderDrop(snapshot.reveals[snapshot.reveals.length - 1]);
       }
+      // The late-join path (#203): landing mid-ceremony with picks already published is exactly
+      // when catch-up is worth offering. Live state stays on screen — the viewer chooses.
+      updateReplayAffordance();
       break;
     case 'finished':
       if (snapshot.start) renderWaiting(snapshot.start);
@@ -490,6 +704,9 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       show('abort', true);
       byId('abort-reason').textContent = snapshot.abort?.reason ?? 'The ceremony was aborted.';
       setStatus('aborted', 'err');
+      // The board (and the button inside it) stays up, so retract the offer explicitly — an inert
+      // "catch up" control sitting on a fairness-critical failure screen is its own problem.
+      updateReplayAffordance();
       break;
   }
 }
@@ -510,13 +727,25 @@ function applyEvent(event: LotteryEvent): void {
       renderSnapshot({ phase: 'waiting', start: event.start, reveals: [] });
       break;
     case 'lottery-beat':
+      // The draw is running. The server only pushes a full `lottery-state` on WS connect, so for
+      // a client that was already watching (the whole lobby, per #198) these incremental events
+      // are the *only* signal that `waiting` became `revealing` — without this the catch-up offer
+      // would never appear for anyone except a strict mid-ceremony joiner.
+      livePhase = 'revealing';
+      // Keep the "a draw is running ⇒ no sealed result in hand" invariant local to this path
+      // rather than resting on `lottery-start` having arrived first: a stale `finishedSnapshot`
+      // would route this button's click into a replay of the *previous* lottery.
+      finishedSnapshot = null;
       setStatus('live reveal', 'live');
       renderDrum(event.beat.pick, event.beat.remaining);
       break;
     case 'lottery-reveal':
+      livePhase = 'revealing';
       reveals.push(event.reveal);
       renderDrop(event.reveal);
       renderBoard(reveals);
+      // A late joiner now has history worth catching up on (#203).
+      updateReplayAffordance();
       break;
     case 'lottery-finish':
       renderFinish({ phase: 'finished', reveals, finish: event.finish });
@@ -534,11 +763,26 @@ function poll(base: string): void {
   fetch(apiPath(base, '/api/lottery/state'), { cache: 'no-store' })
     .then((r) => r.json())
     .then((snapshot: LotterySnapshot) => {
-      if (replaying) {
+      if (playbackMode === 'catchup') {
+        // Polling only ever hands us whole snapshots, so a poll-only client (no WebSocket) merges
+        // back into the present by turning the un-played remainder into tail events.
+        const verdict = classifyDuringCatchUp(
+          { type: 'lottery-state', snapshot },
+          catchUpContext(),
+        );
+        if (verdict === 'ignore') return;
+        if (verdict === 'buffer') {
+          for (const tail of catchUpTailFromSnapshot(snapshot, catchUpContext())) {
+            bufferCatchUpEvent(tail);
+          }
+          return;
+        }
+        stopPlayback(); // cancel: aborted, or a different ceremony
+      } else if (playbackMode === 'replay') {
         // An identical finished snapshot is just the fallback repainting — the replay runs on.
         if (snapshot.phase === 'finished' && sameFinish(snapshot.finish, finishedSnapshot?.finish))
           return;
-        stopReplay(); // anything else is real news, and live state wins
+        stopPlayback(); // anything else is real news, and live state wins
       }
       reveals = [...snapshot.reveals];
       renderSnapshot(snapshot);
@@ -575,9 +819,27 @@ function connect(base: string): void {
   ws.onmessage = (ev: MessageEvent): void => {
     try {
       const event = JSON.parse(String(ev.data)) as LotteryEvent;
-      if (replaying) {
+      if (playbackMode === 'catchup') {
+        const verdict = classifyDuringCatchUp(event, catchUpContext());
+        if (verdict === 'ignore') return;
+        if (verdict === 'buffer') {
+          // A snapshot that ran ahead becomes the tail events it implies; everything else queues
+          // as itself. Either way the catch-up plays on and merges into the present.
+          if (event.type === 'lottery-state') {
+            for (const tail of catchUpTailFromSnapshot(event.snapshot, catchUpContext())) {
+              bufferCatchUpEvent(tail);
+            }
+          } else {
+            bufferCatchUpEvent(event);
+          }
+          return;
+        }
+        // cancel: aborted, or a different ceremony. Keep the picks we had already queued.
+        flushCatchUpRevealsIntoBoard();
+        stopPlayback();
+      } else if (playbackMode === 'replay') {
         if (isReplayEcho(event)) return; // same finished ceremony — the replay runs on
-        stopReplay(); // anything else is real news, and live events win
+        stopPlayback(); // anything else is real news, and live events win
       }
       if (event.type === 'lottery-state') reveals = [...event.snapshot.reveals];
       applyEvent(event);
@@ -599,7 +861,11 @@ function connect(base: string): void {
 }
 
 async function boot(): Promise<void> {
-  byId('replay-btn').addEventListener('click', startReplay);
+  // One button, two meanings: replay a sealed ceremony, or catch up on a running one (#203).
+  byId('replay-btn').addEventListener('click', () => {
+    if (finishedSnapshot) startReplay();
+    else startCatchUp();
+  });
   byId('replay-skip').addEventListener('click', skipReplay);
   const inDiscord = isDiscordActivity(window.location);
   const base = proxyBase(inDiscord);
