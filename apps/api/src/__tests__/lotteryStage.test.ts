@@ -319,6 +319,9 @@ describe('adjust() — commissioner lobby edits (#210)', () => {
       {
         type: 'lottery-lobby',
         lobby,
+        // The cumulative pending set, so a subscriber dedupes on stage state rather than on the
+        // events it happened to witness (#220).
+        adjustments: [{ teamId: 't-a', balls: 4 }],
         adjusted: { teamId: 't-a', team: 'A', from: 1, to: 4 },
       },
     ]);

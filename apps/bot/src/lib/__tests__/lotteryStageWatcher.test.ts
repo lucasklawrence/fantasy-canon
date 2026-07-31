@@ -39,16 +39,21 @@ function fakeSocket(): {
   };
 }
 
+/** Let the `post` promise chain settle — a line is only recorded as announced once it resolves. */
+const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 /** Harness: records posts, captures scheduled reconnects so a test can run them deterministically. */
-function harness() {
+function harness(deliver: (attempt: number) => Promise<boolean> = () => Promise.resolve(true)) {
   const posts: { guildId: string | undefined; content: string }[] = [];
   const sockets: ReturnType<typeof fakeSocket>[] = [];
   const scheduled: { fn: () => void; ms: number }[] = [];
+  let attempt = 0;
   const watcher = createStageWatcher({
     baseUrl: 'http://stage.test',
     post: (guildId, content) => {
       posts.push({ guildId, content });
-      return Promise.resolve(true);
+      attempt += 1;
+      return deliver(attempt);
     },
     socketFactory: () => {
       const next = fakeSocket();
@@ -67,16 +72,32 @@ function harness() {
     sockets,
     scheduled,
     latest: () => sockets[sockets.length - 1],
+    /** Deliver a frame and let any resulting post settle before the test asserts. */
+    send: async (payload: unknown): Promise<void> => {
+      sockets[sockets.length - 1].send(payload);
+      await flush();
+    },
     contents: () => posts.map((p) => p.content),
     runReconnect: () => scheduled.pop()?.fn(),
   };
 }
 
-const EDIT = (over: Record<string, unknown> = {}) => ({
-  type: 'lottery-lobby',
-  lobby: { title: 'L', teamCount: 2, totalBalls: 5, guildId: 'g1', rows: [] },
-  adjusted: { teamId: 't1', team: 'Bravo Bears', from: 1, to: 4, guildId: 'g1', ...over },
-});
+/**
+ * One commissioner edit as the stage broadcasts it: the recomputed lobby, the *cumulative*
+ * pending set, and the detail describing what just changed.
+ */
+const EDIT = (
+  over: { teamId?: string; team?: string; from?: number; to?: number } = {},
+  pending?: { teamId: string; balls: number }[],
+) => {
+  const adjusted = { teamId: 't1', team: 'Bravo Bears', from: 1, to: 4, guildId: 'g1', ...over };
+  return {
+    type: 'lottery-lobby',
+    lobby: { title: 'L', teamCount: 2, totalBalls: 5, guildId: 'g1', rows: [] },
+    adjustments: pending ?? [{ teamId: adjusted.teamId, balls: adjusted.to }],
+    adjusted,
+  };
+};
 
 describe('stageWsUrl', () => {
   it('derives the ws endpoint from the http base, trailing slashes and all', () => {
@@ -101,13 +122,18 @@ describe('adjustmentLine', () => {
 });
 
 describe('createStageWatcher (#220)', () => {
-  it('posts one line per commissioner edit, routed by guild', () => {
+  it('posts one line per commissioner edit, routed by guild', async () => {
     const h = harness();
     h.watcher.start();
     h.latest().open();
 
-    h.latest().send(EDIT());
-    h.latest().send(EDIT({ teamId: 't2', team: 'Alpha Antlers', from: 1, to: 2 }));
+    await h.send(EDIT());
+    await h.send(
+      EDIT({ teamId: 't2', team: 'Alpha Antlers', from: 1, to: 2 }, [
+        { teamId: 't1', balls: 4 },
+        { teamId: 't2', balls: 2 },
+      ]),
+    );
 
     expect(h.posts.map((p) => p.guildId)).toEqual(['g1', 'g1']);
     expect(h.contents()).toEqual([
@@ -116,12 +142,12 @@ describe('createStageWatcher (#220)', () => {
     ]);
   });
 
-  it('ignores a bot-driven re-arm — only a human edit carries `adjusted`', () => {
+  it('ignores a bot-driven re-arm — only a human edit carries `adjusted`', async () => {
     const h = harness();
     h.watcher.start();
     h.latest().open();
 
-    h.latest().send({
+    await h.send({
       type: 'lottery-lobby',
       lobby: { title: 'L', teamCount: 2, totalBalls: 5, guildId: 'g1', rows: [] },
     });
@@ -129,37 +155,71 @@ describe('createStageWatcher (#220)', () => {
     expect(h.posts).toHaveLength(0);
   });
 
-  it('never announces the same team landing on the same count twice', () => {
+  it('never announces the same team landing on the same count twice', async () => {
     const h = harness();
     h.watcher.start();
     h.latest().open();
 
-    h.latest().send(EDIT());
-    h.latest().send(EDIT()); // duplicate broadcast
+    await h.send(EDIT());
+    await h.send(EDIT()); // duplicate broadcast
     expect(h.posts).toHaveLength(1);
 
     // A genuine follow-up edit to the same team is news again.
-    h.latest().send(EDIT({ from: 4, to: 6 }));
+    await h.send(EDIT({ from: 4, to: 6 }));
     expect(h.contents()[1]).toContain('to 6 balls');
+    expect(h.contents()[1]).toContain('(was 4 balls)');
   });
 
-  it('re-announces after a re-arm, because the bag it published is a different one', () => {
+  it('re-announces after a fresh setup, whose re-arm drops every pending edit', async () => {
     const h = harness();
     h.watcher.start();
     h.latest().open();
 
-    h.latest().send(EDIT());
-    h.latest().send({ type: 'lottery-lobby', lobby: { guildId: 'g1', rows: [] } }); // re-arm
-    h.latest().send(EDIT());
+    await h.send(EDIT());
+    // A `setup` re-arm carries no pending set — a brand-new bag makes old edits meaningless.
+    await h.send({ type: 'lottery-lobby', lobby: { guildId: 'g1', rows: [] } });
+    await h.send(EDIT());
 
     expect(h.posts).toHaveLength(2);
   });
 
-  it('stays quiet on a reconnect that brings no news, and catches up on one that does', () => {
+  it('stays silent through a re-arm that keeps pending edits (the mini-game path)', async () => {
     const h = harness();
     h.watcher.start();
     h.latest().open();
-    h.latest().send(EDIT());
+    await h.send(EDIT());
+    expect(h.posts).toHaveLength(1);
+
+    // `keepAdjustments: true` republishes the whole lobby *and* retains the edit. Dedupe is keyed
+    // on the stage's pending set, not on the events witnessed, so this is not news…
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [{ teamId: 't1', team: 'Bravo Bears', balls: 4 }] },
+      adjustments: [{ teamId: 't1', balls: 4 }],
+    });
+    expect(h.posts).toHaveLength(1);
+
+    // …and neither is the snapshot a later reconnect brings, which carries the same retained edit.
+    h.latest().drop();
+    h.runReconnect();
+    h.latest().open();
+    await h.send({
+      type: 'lottery-state',
+      snapshot: {
+        phase: 'lobby',
+        lobby: { guildId: 'g1', rows: [{ teamId: 't1', team: 'Bravo Bears', balls: 4 }] },
+        adjustments: [{ teamId: 't1', balls: 4 }],
+        reveals: [],
+      },
+    });
+    expect(h.posts).toHaveLength(1);
+  });
+
+  it('stays quiet on a reconnect that brings no news, and catches up on one that does', async () => {
+    const h = harness();
+    h.watcher.start();
+    h.latest().open();
+    await h.send(EDIT());
     expect(h.posts).toHaveLength(1);
 
     // Reconnect: the stage always opens with a full snapshot, whose `adjustments` are cumulative.
@@ -181,12 +241,12 @@ describe('createStageWatcher (#220)', () => {
     h.latest().drop();
     h.runReconnect();
     h.latest().open();
-    h.latest().send(snapshot([{ teamId: 't1', balls: 4 }]));
+    await h.send(snapshot([{ teamId: 't1', balls: 4 }]));
     expect(h.posts).toHaveLength(1); // already told them about t1 @ 4
 
     // An edit made while we were disconnected reaches the channel late rather than never — and
     // without a "was", since a snapshot can't say where it started.
-    h.latest().send(
+    await h.send(
       snapshot([
         { teamId: 't1', balls: 4 },
         { teamId: 't2', balls: 3 },
@@ -198,17 +258,76 @@ describe('createStageWatcher (#220)', () => {
     );
   });
 
-  it('forgets announced state once the lobby is gone, so the next ceremony starts clean', () => {
+  it('forgets announced state once the lobby is gone, so the next ceremony starts clean', async () => {
     const h = harness();
     h.watcher.start();
     h.latest().open();
-    h.latest().send(EDIT());
+    await h.send(EDIT());
 
     // The bag got sealed; a later lobby is a different ceremony entirely.
-    h.latest().send({ type: 'lottery-start', start: { commitment: 'hash' } });
-    h.latest().send(EDIT());
+    await h.send({ type: 'lottery-start', start: { commitment: 'hash' } });
+    await h.send(EDIT());
 
     expect(h.posts).toHaveLength(2);
+  });
+
+  it('retries a line Discord refused, instead of recording it as delivered', async () => {
+    // Committing the announced count before the send lands would make a transient failure
+    // permanent — the reconcile below would treat the line as delivered and never retry it.
+    const h = harness((attempt) =>
+      attempt === 1 ? Promise.reject(new Error('discord 503')) : Promise.resolve(true),
+    );
+    h.watcher.start();
+    h.latest().open();
+
+    await h.send(EDIT());
+    expect(h.posts).toHaveLength(1); // attempted, but not delivered
+
+    // The next snapshot carrying the same pending edit tries again, and this time it lands.
+    await h.send({
+      type: 'lottery-state',
+      snapshot: {
+        phase: 'lobby',
+        lobby: { guildId: 'g1', rows: [{ teamId: 't1', team: 'Bravo Bears', balls: 4 }] },
+        adjustments: [{ teamId: 't1', balls: 4 }],
+        reveals: [],
+      },
+    });
+    expect(h.posts).toHaveLength(2);
+
+    // …and once it has landed, it stops being retried.
+    await h.send(EDIT());
+    expect(h.posts).toHaveLength(2);
+  });
+
+  it('retries when there was nowhere to post yet (a `false` result is not a delivery)', async () => {
+    const h = harness((attempt) => Promise.resolve(attempt !== 1));
+    h.watcher.start();
+    h.latest().open();
+
+    await h.send(EDIT());
+    await h.send(EDIT());
+    expect(h.posts).toHaveLength(2);
+  });
+
+  it('ignores a stale socket after a stop/start cycle', async () => {
+    const h = harness();
+    h.watcher.start();
+    const stale = h.latest();
+    stale.open();
+
+    h.watcher.stop();
+    h.watcher.start();
+    expect(h.sockets).toHaveLength(2);
+
+    // The old socket is still alive long enough to deliver its own close and even a frame. Acting
+    // on either would null out the *new* socket and schedule a reconnect on top of it.
+    stale.drop();
+    expect(h.scheduled).toHaveLength(0);
+    expect(h.sockets).toHaveLength(2);
+    stale.send(EDIT());
+    await flush();
+    expect(h.posts).toHaveLength(0);
   });
 
   it('reconnects with exponential backoff, capped, and resets the delay after a good connect', () => {
@@ -259,17 +378,17 @@ describe('createStageWatcher (#220)', () => {
     expect(h.sockets).toHaveLength(1);
   });
 
-  it('shrugs off a malformed frame instead of posting or throwing', () => {
+  it('shrugs off a malformed frame instead of posting or throwing', async () => {
     const h = harness();
     h.watcher.start();
     h.latest().open();
 
-    const fire = (data: unknown): void => {
-      h.latest().send(data);
-    };
-    expect(() => fire({ type: 'lottery-lobby', adjusted: { teamId: 't1' } })).not.toThrow();
-    expect(() => fire({ type: 'lottery-lobby', adjusted: 'nope' })).not.toThrow();
-    expect(() => fire({ nothing: true })).not.toThrow();
+    // A frame whose `adjusted` is unusable must not throw — and must not post, since without a
+    // pending set there is nothing to reconcile against.
+    await h.send({ type: 'lottery-lobby', adjusted: { teamId: 't1' } });
+    await h.send({ type: 'lottery-lobby', adjusted: 'nope' });
+    await h.send({ nothing: true });
+    await h.send('{not json');
     expect(h.posts).toHaveLength(0);
   });
 });

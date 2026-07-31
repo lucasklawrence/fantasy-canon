@@ -978,13 +978,16 @@ describe('recoverInterruptedCeremonies (#176)', () => {
 });
 
 describe('postActivityEditLine (#220)', () => {
-  function clientWith(sent: { content?: string }[], sendable = true): Client {
+  function clientWith(
+    sent: { content?: string; allowedMentions?: unknown }[],
+    sendable = true,
+  ): Client {
     return {
       channels: {
         fetch: () =>
           Promise.resolve({
             isSendable: () => sendable,
-            send: (p: { content?: string }) => {
+            send: (p: { content?: string; allowedMentions?: unknown }) => {
               sent.push(p);
               return Promise.resolve({ id: 'm1' });
             },
@@ -1014,7 +1017,9 @@ describe('postActivityEditLine (#220)', () => {
     const sent: { content?: string }[] = [];
     openSession();
     await expect(postActivityEditLine(clientWith(sent))('guild-1', '🛠 line')).resolves.toBe(true);
-    expect(sent).toEqual([{ content: '🛠 line' }]);
+    // Mentions suppressed: team names come from ESPN, so a league could have one called
+    // `@everyone` and every edit line would ping the server.
+    expect(sent).toEqual([{ content: '🛠 line', allowedMentions: { parse: [] } }]);
   });
 
   it('drops an edit for a guild this bot is not running a ceremony for', async () => {

@@ -412,6 +412,13 @@ export function createLotteryStage(): LotteryStage {
     for (const listener of listeners) listener(event);
   }
 
+  /** The pending edit set as the wire carries it — omitted entirely when there is nothing pending. */
+  function pendingAdjustments(): { adjustments?: LotteryAdjustment[] } {
+    return adjustments.size > 0
+      ? { adjustments: [...adjustments].map(([teamId, balls]) => ({ teamId, balls })) }
+      : {};
+  }
+
   /**
    * Leave the lobby phase. Editors and pending edits are lobby-scoped — an adjustment that
    * outlived its lobby could be drained into a bag the commissioner never saw it against, and a
@@ -433,11 +440,7 @@ export function createLotteryStage(): LotteryStage {
       finish,
       abort,
       // Omitted entirely when empty so the common snapshot stays byte-identical to before (#210).
-      ...(adjustments.size > 0
-        ? {
-            adjustments: [...adjustments].map(([teamId, balls]) => ({ teamId, balls })),
-          }
-        : {}),
+      ...pendingAdjustments(),
     }),
     isCommissioner: (userId) => phase === 'lobby' && commissionerIds.includes(userId),
     lobby(next) {
@@ -492,7 +495,9 @@ export function createLotteryStage(): LotteryStage {
       reveals = [];
       finish = undefined;
       abort = undefined;
-      emit({ type: 'lottery-lobby', lobby });
+      // `adjustments` rides along so a subscriber can dedupe on stage state (#220): a re-arm that
+      // kept pending edits and one that dropped them look identical otherwise.
+      emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
     adjust(next) {
       if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
@@ -517,7 +522,7 @@ export function createLotteryStage(): LotteryStage {
       // wholesale from it, so live viewers see the new bag without a new client branch. `adjusted`
       // rides along for the bot's audit post (#220): it distinguishes this from a re-arm and says
       // exactly what changed, so nobody has to diff two lobbies to describe a human's action.
-      emit({ type: 'lottery-lobby', lobby, adjusted: detail });
+      emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), adjusted: detail });
     },
     clear(next) {
       // Narrow by design: only an armed lobby is disarmable, so this can never tear down a

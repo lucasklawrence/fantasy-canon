@@ -609,9 +609,23 @@ export function postActivityEditLine(
     // Past GAME_OPEN the bag is sealed and the stage can't be showing an editable lobby for us —
     // anything arriving then is stale, and posting it beside a commitment would be misleading.
     if (!session || session.state !== 'GAME_OPEN' || !session.lobbyChannelId) return false;
-    const channel = await client.channels.fetch(session.lobbyChannelId);
+    const channelId = session.lobbyChannelId;
+    const channel = await client.channels.fetch(channelId);
     if (!channel?.isSendable()) return false;
-    await channel.send({ content });
+    // Re-check after the fetch: a `begin`, `abort`, or replacing `setup` can land while Discord is
+    // answering, and the guard above is the whole reason this line is safe to send. Same pattern
+    // the ceremony handlers use after their awaits.
+    const current = getCeremony(guildId);
+    if (
+      current !== session ||
+      current.state !== 'GAME_OPEN' ||
+      current.lobbyChannelId !== channelId
+    ) {
+      return false;
+    }
+    // Team names come from ESPN, so a league could have one called `@everyone`. This announcement
+    // never needs to mention anyone; without this it would ping the server on every edit.
+    await channel.send({ content, allowedMentions: { parse: [] } });
     return true;
   };
 }

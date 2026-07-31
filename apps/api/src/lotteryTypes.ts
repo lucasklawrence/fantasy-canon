@@ -185,6 +185,14 @@ export type LotteryEvent =
   | {
       type: 'lottery-lobby';
       lobby: LotteryLobby;
+      /**
+       * The complete pending-edit set *after* this broadcast, mirroring
+       * {@link LotterySnapshot.adjustments}. Present so a subscriber can dedupe against stage
+       * state rather than against the events it happened to witness — a re-arm that keeps
+       * adjustments (`keepAdjustments`) and one that drops them are otherwise indistinguishable,
+       * and the bot would re-announce a retained edit on its next reconnect. Omitted when empty.
+       */
+      adjustments?: LotteryAdjustment[];
       /** Set only when this broadcast came from a commissioner edit rather than a bot re-arm. */
       adjusted?: LotteryAdjustmentDetail;
     }
