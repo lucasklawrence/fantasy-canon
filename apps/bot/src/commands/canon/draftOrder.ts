@@ -52,7 +52,12 @@ import {
   setCeremony,
 } from '../../lib/draftOrderCeremony.js';
 import { createFileCeremonyStore, type CeremonyStore } from '../../lib/ceremonyStore.js';
-import { stageFromEnv, type InspectableRevealStage } from '../../lib/lotteryStageClient.js';
+import {
+  DEFAULT_STAGE_URL,
+  stageFromEnv,
+  type InspectableRevealStage,
+} from '../../lib/lotteryStageClient.js';
+import { createStageWatcher } from '../../lib/lotteryStageWatcher.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
@@ -341,6 +346,9 @@ export async function handleDraftOrderSetupSubcommand(
     const preview = await buildPreviewPost(session);
     await channelIo(channel).post(preview);
     markPreviewPosted(session);
+    // Where the odds preview just landed — the audit line for an in-Activity edit (#220) posts
+    // here, since it fires before `begin` has captured `channelId`.
+    session.lobbyChannelId = interaction.channelId;
     setCeremony(session);
 
     // Best-effort: arm the Activity lobby (#198) so members can join before `begin`.
@@ -582,6 +590,43 @@ async function foldInActivityEdits(
       })
       .catch(() => {});
   }
+}
+
+/**
+ * Post an in-Activity edit's audit line (#220) to the channel where that guild's `setup` ran.
+ *
+ * Routed strictly through this process's own ceremony registry: an edit only reaches Discord if
+ * *this* bot holds a still-open (`GAME_OPEN`) ceremony for that guild, so a stale lobby on a
+ * shared stage can never make the bot post into a league it isn't running. Returns false when
+ * there is nowhere legitimate to post, which the watcher treats as "drop it".
+ */
+export function postActivityEditLine(
+  client: Client,
+): (guildId: string | undefined, content: string) => Promise<boolean> {
+  return async (guildId, content) => {
+    if (!guildId) return false;
+    const session = getCeremony(guildId);
+    // Past GAME_OPEN the bag is sealed and the stage can't be showing an editable lobby for us —
+    // anything arriving then is stale, and posting it beside a commitment would be misleading.
+    if (!session || session.state !== 'GAME_OPEN' || !session.lobbyChannelId) return false;
+    const channel = await client.channels.fetch(session.lobbyChannelId);
+    if (!channel?.isSendable()) return false;
+    await channel.send({ content });
+    return true;
+  };
+}
+
+/**
+ * Start watching the stage for commissioner edits (#220). Best-effort and non-blocking: an
+ * unreachable api just retries with backoff, and nothing about the ceremony depends on it —
+ * `begin` still re-posts the full odds card before the commitment.
+ */
+export function watchActivityEdits(client: Client, env: NodeJS.ProcessEnv = process.env): void {
+  const watcher = createStageWatcher({
+    baseUrl: env.FANTASY_STAGE_URL ?? DEFAULT_STAGE_URL,
+    post: postActivityEditLine(client),
+  });
+  watcher.start();
 }
 
 /** Component id prefix for the ceremony's LAUNCH_ACTIVITY button (#169). */

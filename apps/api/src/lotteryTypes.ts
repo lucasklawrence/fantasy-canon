@@ -163,10 +163,31 @@ export interface LotterySnapshot {
   adjustments?: LotteryAdjustment[];
 }
 
+/**
+ * What changed in a single commissioner edit (#220), carried on the `lottery-lobby` broadcast that
+ * the edit produces. The bot subscribes to the same feed the browsers do and posts an in-channel
+ * audit line from this, so it never has to diff two lobbies to work out what a human just did —
+ * and can't mistake a bot-driven re-arm for an edit.
+ */
+export interface LotteryAdjustmentDetail {
+  teamId: string;
+  /** Display name at the time of the edit, so the audit line reads without a lookup. */
+  team: string;
+  from: number;
+  to: number;
+  /** Whose lobby this was — the bot routes the audit post by it. */
+  guildId?: string;
+}
+
 /** The events fanned out over the WS, tagged for the client. */
 export type LotteryEvent =
   | { type: 'lottery-state'; snapshot: LotterySnapshot }
-  | { type: 'lottery-lobby'; lobby: LotteryLobby }
+  | {
+      type: 'lottery-lobby';
+      lobby: LotteryLobby;
+      /** Set only when this broadcast came from a commissioner edit rather than a bot re-arm. */
+      adjusted?: LotteryAdjustmentDetail;
+    }
   | { type: 'lottery-start'; start: LotteryStart }
   | { type: 'lottery-beat'; beat: LotteryBeat }
   | { type: 'lottery-reveal'; reveal: LotteryReveal }

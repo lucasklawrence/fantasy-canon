@@ -7,7 +7,7 @@ import {
 } from '../../../lib/__tests__/mockInteraction.js';
 import { createMockContext } from '../../../lib/__tests__/mockContext.js';
 import { FOUR_TEAMS, RICH_TEAMS } from '../../../lib/__tests__/handlerFixtures.js';
-import { ballCountForTeam } from '@fantasy-canon/core';
+import { ballCountForTeam, type DraftOrderState } from '@fantasy-canon/core';
 import {
   clearCeremony,
   createCeremony,
@@ -29,6 +29,7 @@ import {
   handleDraftOrderSetupSubcommand,
   handleDraftOrderStatusSubcommand,
   parseManualTeams,
+  postActivityEditLine,
   recoverInterruptedCeremonies,
 } from '../draftOrder.js';
 import type { ButtonInteraction } from 'discord.js';
@@ -973,5 +974,77 @@ describe('recoverInterruptedCeremonies (#176)', () => {
       ),
     ).resolves.toBeUndefined();
     expect(store.loadPending()).toEqual([]); // the seed still went out
+  });
+});
+
+describe('postActivityEditLine (#220)', () => {
+  function clientWith(sent: { content?: string }[], sendable = true): Client {
+    return {
+      channels: {
+        fetch: () =>
+          Promise.resolve({
+            isSendable: () => sendable,
+            send: (p: { content?: string }) => {
+              sent.push(p);
+              return Promise.resolve({ id: 'm1' });
+            },
+          }),
+      },
+    } as unknown as Client;
+  }
+
+  function openSession(over: { state?: DraftOrderState; lobbyChannelId?: string } = {}) {
+    const session = createCeremony(
+      'guild-1',
+      '2026 Draft Lottery',
+      { teams: [{ teamId: 'a' }, { teamId: 'b' }], baseBallCount: 1 },
+      new Map([
+        ['a', 'Alpha'],
+        ['b', 'Bravo'],
+      ]),
+    );
+    markPreviewPosted(session);
+    session.lobbyChannelId = 'lobby-chan';
+    Object.assign(session, over);
+    setCeremony(session);
+    return session;
+  }
+
+  it('posts to the channel where that guild’s setup ran', async () => {
+    const sent: { content?: string }[] = [];
+    openSession();
+    await expect(postActivityEditLine(clientWith(sent))('guild-1', '🛠 line')).resolves.toBe(true);
+    expect(sent).toEqual([{ content: '🛠 line' }]);
+  });
+
+  it('drops an edit for a guild this bot is not running a ceremony for', async () => {
+    const sent: { content?: string }[] = [];
+    openSession();
+    // The stage is one process-wide slot (#191) — a lobby belonging to someone else must never
+    // make this bot post into a league it isn't running.
+    await expect(postActivityEditLine(clientWith(sent))('guild-2', 'x')).resolves.toBe(false);
+    await expect(postActivityEditLine(clientWith(sent))(undefined, 'x')).resolves.toBe(false);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('drops an edit once the bag is sealed, or with no lobby channel captured', async () => {
+    const sent: { content?: string }[] = [];
+    // Past GAME_OPEN anything arriving is stale, and posting it beside a commitment would mislead.
+    openSession({ state: 'LOTTERY_RUNNING' });
+    await expect(postActivityEditLine(clientWith(sent))('guild-1', 'x')).resolves.toBe(false);
+
+    resetCeremoniesForTests();
+    openSession({ lobbyChannelId: undefined });
+    await expect(postActivityEditLine(clientWith(sent))('guild-1', 'x')).resolves.toBe(false);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('drops an edit when the channel is not sendable', async () => {
+    const sent: { content?: string }[] = [];
+    openSession();
+    await expect(postActivityEditLine(clientWith(sent, false))('guild-1', 'x')).resolves.toBe(
+      false,
+    );
+    expect(sent).toHaveLength(0);
   });
 });

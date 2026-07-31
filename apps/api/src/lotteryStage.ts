@@ -31,6 +31,7 @@ import type {
   LotteryAbort,
   LotteryAbortRequest,
   LotteryAdjustment,
+  LotteryAdjustmentDetail,
   LotteryBeat,
   LotteryClear,
   LotteryEvent,
@@ -495,18 +496,28 @@ export function createLotteryStage(): LotteryStage {
     },
     adjust(next) {
       if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
-      if (!lobby.rows.some((row) => row.teamId === next.teamId)) {
+      const target = lobby.rows.find((row) => row.teamId === next.teamId);
+      if (!target) {
         throw new UnknownTeamError(next.teamId);
       }
       const pending = new Map(adjustments).set(next.teamId, next.balls);
       // applyAdjustments throws before anything is committed, so a lobby that can't carry exact
       // odds leaves the stage exactly as it was.
       const rows = applyAdjustments(lobby.rows, pending);
+      const detail: LotteryAdjustmentDetail = {
+        teamId: next.teamId,
+        team: target.team,
+        from: target.balls,
+        to: next.balls,
+        ...(lobby.guildId ? { guildId: lobby.guildId } : {}),
+      };
       adjustments = pending;
       lobby = { ...lobby, rows, totalBalls: rows.reduce((sum, row) => sum + row.balls, 0) };
-      // Same event the bot's re-arm emits: every connected client already repaints the odds table
-      // wholesale from it, so live viewers see the new bag without a new client branch.
-      emit({ type: 'lottery-lobby', lobby });
+      // Same event the bot's re-arm emits — every connected client already repaints the odds table
+      // wholesale from it, so live viewers see the new bag without a new client branch. `adjusted`
+      // rides along for the bot's audit post (#220): it distinguishes this from a re-arm and says
+      // exactly what changed, so nobody has to diff two lobbies to describe a human's action.
+      emit({ type: 'lottery-lobby', lobby, adjusted: detail });
     },
     clear(next) {
       // Narrow by design: only an armed lobby is disarmable, so this can never tear down a
