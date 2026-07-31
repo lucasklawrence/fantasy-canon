@@ -21,6 +21,16 @@ import { assignBallRanges, ballRadius, NUMBER_MIN_RADIUS } from './ballAssignmen
 
 const { Bodies, Body, Composite, Engine, Sleeping } = Matter;
 
+// @types/matter-js lags the runtime: `Body.rotate` has accepted (body, rotation, point,
+// updateVelocity) since matter 0.19 — the point spins the compound about the hopper center, and
+// updateVelocity gives the cage a surface velocity so friction actually carries balls.
+const rotateAbout = Body.rotate as (
+  body: Matter.Body,
+  rotation: number,
+  point?: Matter.Vector,
+  updateVelocity?: boolean,
+) => void;
+
 export interface HopperSim {
   /**
    * Idempotent: make the pile match this bag minus these drawn teams. Poll repaints call this
@@ -98,26 +108,51 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
   const engine = Engine.create({ enableSleeping: true });
   engine.gravity.y = 1;
 
-  // The circular wall: matter has no concave circle, so approximate the hopper's inside with a
-  // ring of static segments. 28 segments at this size renders indistinguishable from a circle.
+  // The drum: a rotating cage, the real lottery-machine mechanism. The circular wall (matter has
+  // no concave circle, so a ring of segments) plus three inward vanes form one compound body;
+  // agitation spins it, the vanes scoop balls up the wall, and gravity tumbles them off the top.
+  // No applied forces at all — earlier force-based boils either froze the top of a big pile or
+  // levitated it wholesale (constant lift is just buoyancy), while a spinning cage churns any bag
+  // size for free because the mechanism is mechanical, not a field.
   const center = cssSize / 2;
   const wallRadius = cssSize / 2 - 4;
-  const segments: Matter.Body[] = [];
+  /** Vane reach into the chamber, as measured from the wall toward the center. */
+  const VANE_LENGTH = wallRadius * 0.34;
+  const VANE_COUNT = 3;
+  const parts: Matter.Body[] = [];
   const segmentCount = 28;
   for (let i = 0; i < segmentCount; i += 1) {
     const angle = (i / segmentCount) * Math.PI * 2;
     const segLength = (2 * Math.PI * wallRadius) / segmentCount + 4;
-    segments.push(
+    parts.push(
       Bodies.rectangle(
         center + Math.cos(angle) * (wallRadius + 5),
         center + Math.sin(angle) * (wallRadius + 5),
         10,
         segLength,
-        { isStatic: true, angle: angle, friction: 0.05 },
+        { angle: angle, friction: 0.4 },
       ),
     );
   }
-  Composite.add(engine.world, segments);
+  for (let i = 0; i < VANE_COUNT; i += 1) {
+    const angle = (i / VANE_COUNT) * Math.PI * 2;
+    const mid = wallRadius - VANE_LENGTH / 2;
+    parts.push(
+      Bodies.rectangle(
+        center + Math.cos(angle) * mid,
+        center + Math.sin(angle) * mid,
+        VANE_LENGTH,
+        7,
+        { angle: angle, friction: 0.4, chamfer: { radius: 3 } },
+      ),
+    );
+  }
+  const drum = Body.create({ parts, isStatic: true });
+  Composite.add(engine.world, drum);
+  /** Accumulated drum rotation, for drawing the vanes in step with the physics. */
+  let drumAngle = 0;
+  /** Cage spin while agitating, radians per second. */
+  const DRUM_SPEED = 1.5;
 
   const meta = new Map<Matter.Body, BallMeta>();
   let bagSig = '';
@@ -135,6 +170,24 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssSize, cssSize);
+    // The cage's vanes, under the balls — the visible spin of the drum. Drawn from our own angle
+    // accumulator, which the physics rotation advances in lockstep.
+    ctx.strokeStyle = 'rgba(87, 102, 141, 0.9)';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < VANE_COUNT; i += 1) {
+      const angle = drumAngle + (i / VANE_COUNT) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(
+        center + Math.cos(angle) * (wallRadius - VANE_LENGTH),
+        center + Math.sin(angle) * (wallRadius - VANE_LENGTH),
+      );
+      ctx.lineTo(
+        center + Math.cos(angle) * (wallRadius - 1),
+        center + Math.sin(angle) * (wallRadius - 1),
+      );
+      ctx.stroke();
+    }
     for (const [body, m] of meta) {
       let alpha = 1;
       if (m.fadeStart !== undefined) {
@@ -171,16 +224,12 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
     rafId = null;
     if (destroyed || !running) return;
     if (agitating) {
-      // The boil: constant small jostling plus upward kicks near the floor of the pile, so balls
-      // climb, tumble, and collide instead of vibrating in place.
-      for (const body of balls()) {
-        Sleeping.set(body, false);
-        const kick = body.position.y > center ? -0.0012 : -0.0002;
-        Body.applyForce(body, body.position, {
-          x: (Math.random() - 0.5) * 0.0011,
-          y: kick * (0.5 + Math.random()),
-        });
-      }
+      // Spin the cage; the vanes do the stirring. Balls must stay awake while the drum turns —
+      // a sleeping ball ignores the vane sweeping into it.
+      const step = (DRUM_SPEED * STEP_MS) / 1000;
+      drumAngle += step;
+      rotateAbout(drum, step, { x: center, y: center }, true);
+      for (const body of balls()) Sleeping.set(body, false);
     }
     Engine.update(engine, STEP_MS);
     draw(now);
