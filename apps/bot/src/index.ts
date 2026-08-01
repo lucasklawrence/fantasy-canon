@@ -15,7 +15,7 @@ async function start(): Promise<void> {
     });
     // Mirror in-Activity commissioner edits into the league's channel as they happen (#220).
     // Outbound socket with backoff; the ceremony never depends on it.
-    watchActivityEdits(client);
+    watchActivityEdits(client, context);
   });
 
   registerInteractionHandlers(client, context);

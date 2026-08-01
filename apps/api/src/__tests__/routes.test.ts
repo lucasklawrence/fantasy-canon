@@ -504,6 +504,90 @@ describe('commissioner lobby edits (#210)', () => {
     expect(state.adjustments).toBeUndefined();
   });
 
+  it('renames a team and asks for a re-import, both commissioner-gated (#219)', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+
+    const renamed = await routeRequest(
+      'POST',
+      '/api/lottery/rename',
+      JSON.stringify({ teamId: 't-a', displayName: 'Alpha Antlers' }),
+      d,
+      asCommissioner,
+    );
+    expect(renamed.status).toBe(200);
+
+    const reimport = await routeRequest('POST', '/api/lottery/reimport', '', d, asCommissioner);
+    expect(reimport.status).toBe(200);
+
+    const state = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(state.lobby?.rows.map((r) => r.team)).toEqual(['B', 'Alpha Antlers']);
+    expect(state.renames).toEqual([{ teamId: 't-a', displayName: 'Alpha Antlers' }]);
+    expect(state.reimportRequested).toBe(true);
+    // A rename is cosmetic: no ball moved, so the bag is untouched.
+    expect(state.lobby?.totalBalls).toBe(3);
+  });
+
+  it('401s/403s rename and reimport exactly like adjust', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+    const rename = JSON.stringify({ teamId: 't-a', displayName: 'X' });
+
+    expect((await routeRequest('POST', '/api/lottery/rename', rename, d)).status).toBe(401);
+    expect((await routeRequest('POST', '/api/lottery/reimport', '', d)).status).toBe(401);
+    for (const [route, body] of [
+      ['/api/lottery/rename', rename],
+      ['/api/lottery/reimport', ''],
+    ] as const) {
+      const outsider = await routeRequest('POST', route, body, d, {
+        authorization: 'Bearer user-rando',
+      });
+      expect(outsider.status).toBe(403);
+    }
+  });
+
+  it('409s a duplicate name, 400s an unusable one, 409s everything once the bag is sealed', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+
+    const dupe = await routeRequest(
+      'POST',
+      '/api/lottery/rename',
+      JSON.stringify({ teamId: 't-a', displayName: 'b' }),
+      d,
+      asCommissioner,
+    );
+    expect(dupe.status).toBe(409);
+    expect(dupe.body).toContain('already called');
+
+    const blank = await routeRequest(
+      'POST',
+      '/api/lottery/rename',
+      JSON.stringify({ teamId: 't-a', displayName: '   ' }),
+      d,
+      asCommissioner,
+    );
+    expect(blank.status).toBe(400);
+
+    await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d);
+    expect(
+      (
+        await routeRequest(
+          'POST',
+          '/api/lottery/rename',
+          JSON.stringify({ teamId: 't-a', displayName: 'X' }),
+          d,
+          asCommissioner,
+        )
+      ).status,
+    ).toBe(409);
+    expect(
+      (await routeRequest('POST', '/api/lottery/reimport', '', d, asCommissioner)).status,
+    ).toBe(409);
+  });
+
   it('never accepts the bot’s stage key in place of a bearer (the two auth paths stay disjoint)', async () => {
     const d = deps(hub(), { stageKey: 'sekrit' });
     await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d, {

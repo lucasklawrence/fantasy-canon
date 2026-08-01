@@ -22,6 +22,10 @@ export interface StageStateSnapshot {
   start?: { commitment?: string; guildId?: string };
   /** Commissioner ball edits made in the Activity that this bot has not folded into its bag yet. */
   adjustments?: { teamId: string; balls: number }[];
+  /** Commissioner display-name fixes, drained alongside the ball edits (#219). */
+  renames?: { teamId: string; displayName: string }[];
+  /** The commissioner asked for an ESPN refetch; only this bot can perform it (#219). */
+  reimportRequested?: boolean;
 }
 
 /**
@@ -99,9 +103,21 @@ export function createHttpRevealStage(options: HttpRevealStageOptions): Inspecta
             : [];
         })
       : [];
+    // Same re-validation as the ball edits: these strings become team names on a rendered card
+    // and in channel messages, and the stage accepts them from the public Activity client.
+    const renames = Array.isArray(raw.renames)
+      ? raw.renames.flatMap((entry) => {
+          const row = sub(entry);
+          const teamId = row ? str(row.teamId) : undefined;
+          const displayName = row ? str(row.displayName) : undefined;
+          return teamId && displayName ? [{ teamId, displayName }] : [];
+        })
+      : [];
     return {
       phase: str(raw.phase) ?? 'idle',
       ...(adjustments.length > 0 ? { adjustments } : {}),
+      ...(renames.length > 0 ? { renames } : {}),
+      ...(raw.reimportRequested === true ? { reimportRequested: true } : {}),
       ...(lobby
         ? { lobby: { ...(str(lobby.guildId) ? { guildId: lobby.guildId as string } : {}) } }
         : {}),

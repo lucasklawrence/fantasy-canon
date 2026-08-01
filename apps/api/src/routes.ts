@@ -27,8 +27,10 @@ import {
   parseLotteryClear,
   parseLotteryFinish,
   parseLotteryLobby,
+  parseLotteryRename,
   parseLotteryReveal,
   parseLotteryStart,
+  DuplicateTeamNameError,
   StageBusyError,
   StageNotEditableError,
   UnknownTeamError,
@@ -169,6 +171,8 @@ export async function routeRequest(
  *   GET  /api/lottery/state   → {@link LotterySnapshot} (public — it's the shared presentation)
  *   GET  /api/lottery/me      → is the bearer's Discord user the lobby's commissioner? (#210)
  *   POST /api/lottery/adjust  → nudge a team's balls in the armed lobby (#210, commissioner only)
+ *   POST /api/lottery/rename  → fix a team's display name (#219, commissioner only)
+ *   POST /api/lottery/reimport→ ask the bot to refetch the league from ESPN (#219, commissioner only)
  *   POST /api/lottery/lobby   → arm the pre-commitment lobby from setup onward (#198, bot only)
  *   POST /api/lottery/clear   → disarm that lobby, back to idle (#198, bot only)
  *   POST /api/lottery/start   → open the stage (bot only)
@@ -204,10 +208,14 @@ async function lotteryRoute(
   }
   if (method !== 'POST') return json(404, { error: 'not found' });
 
-  // The commissioner's edit (#210) is the one POST that is *not* bot-only, so it resolves its own
-  // identity and returns before the shared `x-stage-key` gate below.
-  if (path === '/api/lottery/adjust') {
-    return await adjustRoute(body, deps, headers);
+  // The commissioner's edits (#210 balls, #219 rename/re-import) are the POSTs that are *not*
+  // bot-only, so they resolve their own identity and return before the `x-stage-key` gate below.
+  if (
+    path === '/api/lottery/adjust' ||
+    path === '/api/lottery/rename' ||
+    path === '/api/lottery/reimport'
+  ) {
+    return await commissionerRoute(path, body, deps, headers);
   }
 
   if (deps.stageKey) {
@@ -301,12 +309,14 @@ async function identifyCaller(
 }
 
 /**
- * `POST /api/lottery/adjust` (#210) — the commissioner nudges a team's ball count from inside the
- * Activity. Guarded in order: identity (server-side, via Discord) → commissioner → phase → payload.
- * The 403 is deliberately indistinguishable for "not a commissioner" and "no lobby armed", since
- * `isCommissioner` is false in both cases and neither is something a caller can act on.
+ * The commissioner-authenticated writes: `adjust` (#210), `rename` and `reimport` (#219).
+ * Guarded in order: phase (cheap, local) → identity (server-side, via Discord) → commissioner →
+ * payload. The 403 is deliberately indistinguishable for "not a commissioner" and "no lobby
+ * armed", since `isCommissioner` is false in both cases and neither is something a caller can
+ * act on.
  */
-async function adjustRoute(
+async function commissionerRoute(
+  path: string,
   body: string,
   deps: RouteDeps,
   headers: Record<string, string | string[] | undefined>,
@@ -323,15 +333,26 @@ async function adjustRoute(
   if (!deps.lottery.isCommissioner(caller.user.id)) {
     return json(403, { error: 'only the commissioner who ran setup can adjust this lobby' });
   }
-  const parsed = parseLotteryAdjust(body);
-  if ('error' in parsed) return json(400, { error: parsed.error });
   try {
-    deps.lottery.adjust(parsed.value);
+    if (path === '/api/lottery/reimport') {
+      // No payload: the api cannot reach ESPN, so this only raises a flag the bot honours.
+      deps.lottery.requestReimport();
+    } else if (path === '/api/lottery/rename') {
+      const parsed = parseLotteryRename(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.rename(parsed.value);
+    } else {
+      const parsed = parseLotteryAdjust(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.adjust(parsed.value);
+    }
   } catch (error) {
     // A committed/finished run, or a lobby whose rows can't carry exact odds — either way the
     // edit is refused outright rather than retried.
     if (error instanceof StageNotEditableError) return json(409, { error: error.message });
     if (error instanceof UnknownTeamError) return json(404, { error: error.message });
+    // A name the commissioner can fix by choosing a different one.
+    if (error instanceof DuplicateTeamNameError) return json(409, { error: error.message });
     throw error;
   }
   return json(200, { ok: true, snapshot: deps.lottery.snapshot() });

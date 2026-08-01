@@ -10,13 +10,23 @@ import { apiPath } from './transport.js';
 
 declare global {
   interface Window {
-    __DRAFT_CONFIG__?: { clientId?: string };
+    __DRAFT_CONFIG__?: { clientId?: string; maxTeamBalls?: number };
   }
 }
 
 /** The Discord application (client) id the server injected into the page (`''` in dev). */
 export function configuredClientId(): string {
   return window.__DRAFT_CONFIG__?.clientId ?? '';
+}
+
+/**
+ * The per-team ball cap, injected by the page shell from core's `MAX_TEAM_BALLS` (#219). The
+ * bundle cannot import core (it reaches `node:crypto`), and a hand-copied literal would silently
+ * drift from the value the server enforces — so the server states it and the client reads it.
+ */
+export function configuredMaxTeamBalls(): number {
+  const value = window.__DRAFT_CONFIG__?.maxTeamBalls;
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 30;
 }
 
 /**

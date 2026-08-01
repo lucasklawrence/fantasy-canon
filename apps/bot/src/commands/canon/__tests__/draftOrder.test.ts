@@ -14,6 +14,7 @@ import {
   getCeremony,
   markPreviewPosted,
   oddsRows,
+  type CeremonySession,
   requestAbort,
   resetCeremoniesForTests,
   setCeremony,
@@ -29,6 +30,7 @@ import {
   handleDraftOrderSetupSubcommand,
   handleDraftOrderStatusSubcommand,
   parseManualTeams,
+  performActivityReimport,
   postActivityEditLine,
   recoverInterruptedCeremonies,
 } from '../draftOrder.js';
@@ -1050,6 +1052,198 @@ describe('postActivityEditLine (#220)', () => {
     await expect(postActivityEditLine(clientWith(sent, false))('guild-1', 'x')).resolves.toBe(
       false,
     );
+    expect(sent).toHaveLength(0);
+  });
+});
+
+describe('performActivityReimport (#219)', () => {
+  function reimportClient(sent: { content?: string; files?: unknown[] }[]): Client {
+    return {
+      channels: {
+        fetch: () =>
+          Promise.resolve({
+            isSendable: () => true,
+            send: (p: { content?: string; files?: unknown[] }) => {
+              sent.push(p);
+              return Promise.resolve({ id: 'm1' });
+            },
+          }),
+      },
+    } as unknown as Client;
+  }
+
+  /** A session as `setup` leaves it for an ESPN-backed ceremony. */
+  function espnSession(over: Partial<CeremonySession> = {}) {
+    const session = createCeremony(
+      'guild-1',
+      '2026 Draft Lottery',
+      { teams: [{ teamId: 'a' }, { teamId: 'b' }], baseBallCount: 1 },
+      new Map([
+        ['a', 'Stale Alpha'],
+        ['b', 'Stale Bravo'],
+      ]),
+    );
+    markPreviewPosted(session);
+    session.lobbyChannelId = 'lobby-chan';
+    session.leagueId = 'league-1';
+    session.season = 2026;
+    session.commissionerIds = ['commish'];
+    Object.assign(session, over);
+    setCeremony(session);
+    return session;
+  }
+
+  it('refetches the roster, resets the bag, and posts a fresh preview', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const session = espnSession();
+    const sent: { content?: string; files?: unknown[] }[] = [];
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stageHolding())('guild-1'),
+    ).resolves.toBe(true);
+
+    // The roster is whatever ESPN just returned, not what setup froze.
+    expect(session.config.teams).toHaveLength(4);
+    expect(session.names.get('4')).toBe('Delta Ducks');
+    expect(session.names.has('a')).toBe(false);
+    // A refetched roster invalidates mini-game awards made against the old one.
+    expect(session.miniGameBonuses).toBeUndefined();
+    // The channel gets a plain announcement plus the re-rendered odds card.
+    expect(sent[0].content).toContain('re-imported the league');
+    expect(sent[0].content).toContain('earlier in-Activity edits were reset');
+    expect(sent[1].files).toHaveLength(1);
+  });
+
+  it('refuses a refetched roster that would be invalid, leaving the old one installed', async () => {
+    // Two teams sharing a name is something `createCeremony` rejects — installing it straight from
+    // ESPN would only fail later, on `begin` or on an unrelated rename's uniqueness check.
+    const collidingTeams = {
+      teams: [
+        { id: 1, location: 'Same', nickname: 'Name' },
+        { id: 2, location: 'Same', nickname: 'Name' },
+      ],
+    };
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: collidingTeams },
+    });
+    const session = espnSession();
+    const sent: { content?: string }[] = [];
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stageHolding())('guild-1'),
+    ).rejects.toThrow('two teams called');
+    // The session still holds what setup froze.
+    expect(session.names.get('a')).toBe('Stale Alpha');
+    expect(session.config.teams).toHaveLength(2);
+  });
+
+  it('goes to ESPN rather than the snapshot the setup already cached', async () => {
+    // Every ESPN-backed setup has cached this exact league/season/view, so a cache-first read
+    // would hand back the roster the commissioner is asking us to replace — the re-import would
+    // silently do nothing, which is the whole feature failing quietly.
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      snapshots: [
+        {
+          leagueId: 'league-1',
+          season: 2026,
+          view: 'mTeam',
+          fetchedAt: new Date(),
+          payload: RICH_TEAMS,
+        },
+      ],
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const session = espnSession();
+    const sent: { content?: string }[] = [];
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stageHolding())('guild-1'),
+    ).resolves.toBe(true);
+    // FOUR_TEAMS is what the *fetch* returns; RICH_TEAMS is the stale cache.
+    expect(session.names.get('4')).toBe('Delta Ducks');
+  });
+
+  it('blocks begin while it is publishing, so no commitment precedes the fresh preview', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const session = espnSession();
+    let sawFlagDuringPublish = false;
+    const client = {
+      channels: {
+        fetch: () =>
+          Promise.resolve({
+            isSendable: () => true,
+            send: () => {
+              // ADR 0006 requires the fresh preview to precede any commitment for the new bag.
+              sawFlagDuringPublish = session.reimportActive === true;
+              return Promise.resolve({ id: 'm1' });
+            },
+          }),
+      },
+    } as unknown as Client;
+
+    await performActivityReimport(client, context, stageHolding())('guild-1');
+    expect(sawFlagDuringPublish).toBe(true);
+    // …and it is released once publication finishes, so `begin` is not wedged.
+    expect(session.reimportActive).toBe(false);
+  });
+
+  it('restores the old roster when the fresh preview cannot be published', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const session = espnSession();
+    const client = {
+      channels: {
+        fetch: () =>
+          Promise.resolve({
+            isSendable: () => true,
+            send: () => Promise.reject(new Error('channel send failed')),
+          }),
+      },
+    } as unknown as Client;
+
+    await expect(
+      performActivityReimport(client, context, stageHolding())('guild-1'),
+    ).rejects.toThrow('channel send failed');
+    // Keeping the refetched bag would let a later `begin` commit teams the league never saw.
+    expect(session.names.get('a')).toBe('Stale Alpha');
+    expect(session.config.teams).toHaveLength(2);
+    expect(session.reimportActive).toBe(false);
+  });
+
+  it('refuses a ceremony with no ESPN league behind it', async () => {
+    const { context } = createMockContext({ defaultLeagueId: 'league-1' });
+    // A manual `teams:` setup never records a leagueId — there is nothing to refetch.
+    espnSession({ leagueId: undefined });
+    const sent: { content?: string }[] = [];
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stageHolding())('guild-1'),
+    ).resolves.toBe(false);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('refuses once the bag is sealed, for another guild, or with no lobby channel', async () => {
+    const { context } = createMockContext({ defaultLeagueId: 'league-1' });
+    const sent: { content?: string }[] = [];
+    const run = performActivityReimport(reimportClient(sent), context, stageHolding());
+
+    espnSession({ state: 'LOTTERY_RUNNING' });
+    await expect(run('guild-1')).resolves.toBe(false);
+    await expect(run('guild-2')).resolves.toBe(false);
+    await expect(run(undefined)).resolves.toBe(false);
+
+    resetCeremoniesForTests();
+    espnSession({ lobbyChannelId: undefined });
+    await expect(run('guild-1')).resolves.toBe(false);
     expect(sent).toHaveLength(0);
   });
 });
