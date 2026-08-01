@@ -433,21 +433,22 @@ function describeError(error: unknown): string {
  * Ask the backend whether this member may edit. Returns the answer instead of mutating shared
  * state, so callers can discard a result that resolved out of order — two checks can be in
  * flight when arms come quickly, and the older answer must never overwrite the newer lobby's.
- * A failed request returns `false`: fail closed — the server enforces authorization regardless,
- * but the UI must not keep offering steppers on a check it couldn't complete.
+ * `null` means the check could not complete (network, non-2xx): the caller fails closed for the
+ * moment but leaves the latch open so a later repaint retries — a definite "no" latches, a blip
+ * must not strand a real commissioner read-only until the next re-arm.
  */
-async function fetchCommissioner(): Promise<boolean> {
-  if (!accessToken) return false;
+async function fetchCommissioner(): Promise<boolean | null> {
+  if (!accessToken) return null;
   try {
     const res = await fetch(apiPath(activityBase, '/api/lottery/me'), {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: 'no-store',
     });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     return ((await res.json()) as { commissioner?: boolean }).commissioner === true;
   } catch (error) {
     console.error('[lottery] commissioner check failed', error);
-    return false;
+    return null;
   }
 }
 
@@ -485,10 +486,14 @@ function renderLobby(lobby: LotteryLobby): void {
       // Bind the answer to the arm it was asked about: a newer arm may have its own check in
       // flight, and this (now stale) result must neither grant nor revoke against that lobby.
       if (currentLobby?.armedSeq !== seqAtAsk) return;
-      if (answer !== commissioner) {
-        commissioner = answer;
+      const next = answer === true; // fail closed while indeterminate
+      if (next !== commissioner) {
+        commissioner = next;
         if (currentLobby) renderLobby(currentLobby);
       }
+      // An indeterminate check leaves the latch open so the next repaint retries; a definite
+      // answer latches (viewers' clients must not re-ask /me on every edit echo).
+      if (answer === null) commissionerCheck = null;
     });
   }
 }
@@ -1455,7 +1460,7 @@ async function boot(): Promise<void> {
   // re-asks if this one lands while the stage is still idle.
   if (accessToken) {
     const boot = fetchCommissioner().then((answer) => {
-      commissioner = answer;
+      commissioner = answer === true;
     });
     commissionerCheck = boot;
     await boot;
