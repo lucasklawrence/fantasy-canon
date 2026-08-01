@@ -17,6 +17,8 @@
  * native-teardown lesson from #156).
  */
 
+import { WebSocket } from 'ws';
+
 /**
  * What one commissioner edit changed (mirrors the api's `LotteryAdjustmentDetail`, same as
  * `StageOddsRow`/`StageStateSnapshot` mirror their api counterparts — the bot doesn't depend on
@@ -39,7 +41,7 @@ export interface StageRenameDetail {
   guildId?: string;
 }
 
-/** The subset of a `WebSocket` this module drives. Matches the Node 24 / browser global. */
+/** The subset of a `WebSocket` this module drives — satisfied by both `ws` and the browser global. */
 export interface StageSocket {
   addEventListener(type: 'open' | 'close' | 'error', listener: () => void): void;
   addEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
@@ -58,7 +60,7 @@ export interface StageWatcherOptions {
    * Omitted ⇒ re-import requests are ignored.
    */
   reimport?: (guildId: string | undefined) => Promise<boolean>;
-  /** Injected for tests; defaults to the global `WebSocket` (Node >= 24). */
+  /** Injected for tests; defaults to a `ws` socket (works on every Node this repo runs on). */
   socketFactory?: (url: string) => StageSocket;
   /** Injected for tests; defaults to `setTimeout`. Must return a handle `clearReconnect` accepts. */
   schedule?: (fn: () => void, ms: number) => unknown;
@@ -118,7 +120,12 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     baseUrl,
     post,
     reimport,
-    // Node >= 24 ships a global `WebSocket`, which already satisfies `StageSocket` structurally.
+    // `ws`, not the global `WebSocket`. Node only exposes that global from 22 onward, and the
+    // repo's `engines: node >= 24` is a floor we declare, not one anything enforces — a bot
+    // started on Node 20 threw `ReferenceError: WebSocket is not defined` here on every reconnect
+    // attempt, so the audit lines (#220) and re-import (#219) silently never worked while the log
+    // filled up. CI runs Node 24, so nothing caught it. `ws` is already a dependency of `apps/api`
+    // and exposes the same `addEventListener` surface, so this is version-proof either way.
     socketFactory = (url): StageSocket => new WebSocket(url),
     schedule = (fn, ms): unknown => setTimeout(fn, ms),
     cancel = (handle): void => clearTimeout(handle as ReturnType<typeof setTimeout>),
