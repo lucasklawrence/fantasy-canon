@@ -32,6 +32,10 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     line-height: 1; transition: background .2s, box-shadow .2s; }
   .pill.sound:hover { background: #232c42; }
   .pill.sound.on { border-color: rgba(245,214,123,.4); box-shadow: 0 0 8px rgba(245,214,123,.18); }
+  /* Sticky handshake-failure indicator (#231) — phase renders never touch it, unlike the status
+     pill, so an auth outage stays visible instead of being overwritten by the first repaint. */
+  .pill.authwarn { color: #fecaca; background: rgba(58,22,32,.7); border: 1px solid #55202c;
+    cursor: help; }
   .pill.live { background: #113526; color: #4ade80; }
   .pill.err { background: #3a1620; color: #f87171; }
   .commit { margin-left: auto; font-size: 11px; color: #5c657d; font-family: ui-monospace, monospace; }
@@ -175,6 +179,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   <h1 id="title">The Lottery Machine</h1>
   <span id="status" class="pill">connecting…</span>
   <button id="sound-btn" class="pill sound" type="button" title="Sound is off — click to enable">&#128263;</button>
+  <span id="auth-warn" class="pill authwarn hidden">&#9888; sign-in failed</span>
   <button id="replay-skip" class="pill skip hidden" type="button">&#9197; skip to result</button>
   <span class="commit" id="commit"></span>
 </header>

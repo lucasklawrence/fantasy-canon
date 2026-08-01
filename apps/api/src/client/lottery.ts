@@ -407,12 +407,28 @@ let activityBase = '';
 
 /** In-flight/settled commissioner check, so a repainting lobby doesn't re-ask on every event. */
 let commissionerCheck: Promise<void> | null = null;
+/** Last lobby arm we checked commissioner-ship against — a new arm re-asks (#232). */
+let seenArmedSeq: number | undefined;
 
 /**
  * Ask the backend whether *this* member may edit. Authoritative — the client can't derive it,
  * since the commissioner list never leaves the server. A failure just leaves the machine
  * read-only, which is the correct fallback for everyone but one person.
  */
+/**
+ * Human-readable failure text (#231). The Embedded App SDK rejects with plain `{code, message}`
+ * objects, not Errors — `String(error)` renders those as "[object Object]", which is exactly the
+ * observability hole that turned a one-field portal misconfiguration into a multi-hour hunt.
+ */
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  try {
+    return JSON.stringify(error, Object.getOwnPropertyNames(Object(error))).slice(0, 200);
+  } catch {
+    return String(error);
+  }
+}
+
 async function checkCommissioner(): Promise<void> {
   if (!accessToken) return;
   try {
@@ -448,13 +464,18 @@ function renderLobby(lobby: LotteryLobby): void {
   // the request is accepted and cleared by the bot's re-arm — the exact lifetime of "an import is
   // actually pending". Every viewer's snapshot agrees, so late joiners see the true state too.
   (byId('reimport-btn') as HTMLButtonElement).disabled = reimportPending;
-  // The answer is lobby-scoped server-side, so a client that booted while the stage was idle was
-  // told "not a commissioner" and would otherwise sit there read-only through the whole lobby —
-  // exactly the case where the commissioner already had the Activity open before running `setup`.
-  // Re-ask once per page, on the first lobby we see, and repaint if the answer flipped.
-  if (accessToken && !commissioner && !commissionerCheck) {
+  // The answer is lobby-scoped server-side, and commissioner-ship is stamped fresh at every arm —
+  // so re-ask whenever a *newly armed* lobby appears (`armedSeq` bumps per arm, not per edit
+  // echo, #232), not just once per page. The once-per-page latch left an open Activity holding a
+  // stale "no" through a re-setup: the commissioner had to fully close and rejoin to be
+  // recognised — rediscovered live, at cost, on 2026-08-01. A same-answer re-ask repaints
+  // nothing, so the common re-arm (same commissioner) doesn't flicker.
+  const rearmed = lobby.armedSeq !== undefined && lobby.armedSeq !== seenArmedSeq;
+  if (rearmed) seenArmedSeq = lobby.armedSeq;
+  if (accessToken && (rearmed || (!commissioner && !commissionerCheck))) {
+    const before = commissioner;
     commissionerCheck = checkCommissioner().then(() => {
-      if (commissioner && currentLobby) renderLobby(currentLobby);
+      if (commissioner !== before && currentLobby) renderLobby(currentLobby);
     });
   }
 }
@@ -1395,8 +1416,19 @@ async function boot(): Promise<void> {
     try {
       ({ accessToken } = await runHandshake(base));
     } catch (error) {
+      // Three sinks, because the 2026-08-01 outage (a portal misconfiguration failing every
+      // desktop handshake) was invisible in all of them (#231): the status pill got overwritten
+      // by the first render, the console printed "[object Object]" for the SDK's plain-object
+      // rejections, and the operator's api saw nothing at all.
+      const reason = describeError(error);
       setStatus('Discord auth failed', 'err');
-      console.error('[lottery] handshake failed', error);
+      const warn = byId('auth-warn');
+      warn.title = `Discord sign-in failed — editing is unavailable. ${reason}`;
+      show('auth-warn', true);
+      console.error('[lottery] handshake failed:', reason, error);
+      void fetch(
+        apiPath(base, `/api/lottery/diag?msg=${encodeURIComponent(`handshake failed: ${reason}`)}`),
+      ).catch(() => {});
       // Fall through — the reveal is public; still show it even if auth didn't complete.
     }
   }

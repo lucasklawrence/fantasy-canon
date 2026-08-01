@@ -24,6 +24,7 @@ function deps(h: DraftHub, over: Partial<RouteDeps> = {}): RouteDeps {
     nextOverall: () => h.nextOverall(),
     reset: () => h.reset(),
     clientId: over.clientId ?? '',
+    clientLog: over.clientLog,
     clientScript: over.clientScript ?? ((): string | undefined => 'export const bundled = 1;'),
     exchangeToken:
       over.exchangeToken ?? ((code: string) => Promise.resolve({ accessToken: `tok-${code}` })),
@@ -645,5 +646,30 @@ describe('parsePickBody', () => {
     expect(parsePickBody(JSON.stringify({ playerName: 'A' }), () => 7)).toEqual({
       picks: [{ overall: 7, teamId: 0, playerName: 'A' }],
     });
+  });
+});
+
+describe('client diagnostics beacon (#231)', () => {
+  it('logs the msg param, truncated, and replies 204 with no body', async () => {
+    const h = hub();
+    const logged: string[] = [];
+    const d = deps(h, { clientLog: (m) => logged.push(m) });
+    const reply = await routeRequest(
+      'GET',
+      `/api/lottery/diag?msg=${encodeURIComponent('handshake failed: ' + 'x'.repeat(400))}`,
+      '',
+      d,
+    );
+    expect(reply.status).toBe(204);
+    expect(reply.body).toBe('');
+    expect(logged).toHaveLength(1);
+    expect(logged[0].startsWith('handshake failed:')).toBe(true);
+    expect(logged[0].length).toBe(300);
+  });
+
+  it('works under the /.proxy prefix and without a clientLog sink', async () => {
+    const h = hub();
+    const reply = await routeRequest('GET', '/.proxy/api/lottery/diag?msg=hi', '', deps(h));
+    expect(reply.status).toBe(204);
   });
 });

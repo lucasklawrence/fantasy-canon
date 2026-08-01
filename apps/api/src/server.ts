@@ -156,6 +156,7 @@ export function startApiServer(
             nextOverall: () => hub.nextOverall(),
             reset: () => hub.reset(),
             clientId,
+            clientLog: (message) => console.log('[lottery-client]', message),
             clientScript: () => cachedScript,
             exchangeToken,
             identify,
