@@ -45,6 +45,14 @@ export interface HopperSim {
   pulse(): void;
   /** A team was drawn: fade its balls out of the pile (the reveal path's animated exit). */
   removeTeam(team: string): void;
+  /**
+   * The drawn ball leaves the drum (#215): steer ball `num` to the chute mouth and remove it
+   * there. Resolves `true` once the ball visually reached the chute (the caller runs the tube
+   * transit next), `false` when there is nothing to animate — reduced motion, sim paused, or the
+   * ball is not in the pile — so the reveal can proceed instantly. Never rejects and never takes
+   * longer than a bounded cap: cosmetics must not block a reveal.
+   */
+  extractBall(num: number): Promise<boolean>;
   /** Hidden-tab pause — the sim neither steps nor draws while off. */
   setRunning(on: boolean): void;
   destroy(): void;
@@ -54,6 +62,10 @@ export interface HopperSim {
 const FADE_MS = 450;
 /** Fixed physics step — matter-js recommends a constant delta for stability. */
 const STEP_MS = 1000 / 60;
+/** How long the drawn ball takes to swim from the pile to the chute mouth. */
+const EXTRACT_MS = 620;
+/** Failsafe: an extraction that somehow outlives this snaps to done rather than stall a reveal. */
+const EXTRACT_CAP_MS = 1500;
 
 interface BallMeta {
   num: number;
@@ -162,6 +174,26 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
   let rafId: number | null = null;
   let destroyed = false;
 
+  /** The drawn ball mid-flight to the chute (#215) — at most one; a new one settles the old. */
+  let extraction: {
+    body: Matter.Body;
+    from: Matter.Vector;
+    startedAt: number;
+    resolve: (flew: boolean) => void;
+  } | null = null;
+  /** Where the extraction lands: the chute mouth at the drum's bottom center. */
+  const chuteMouth = { x: center, y: cssSize - 10 };
+
+  /** Finish the in-flight extraction now — ball out, promise settled. Safe to call twice. */
+  function settleExtraction(flew: boolean): void {
+    if (!extraction) return;
+    const { body, resolve } = extraction;
+    extraction = null;
+    Composite.remove(engine.world, body);
+    meta.delete(body);
+    resolve(flew);
+  }
+
   function balls(): Matter.Body[] {
     return [...meta.keys()];
   }
@@ -213,7 +245,7 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
    * asleep. The loop parks here and `wake()` restarts it on the next state change.
    */
   function idle(): boolean {
-    if (agitating) return false;
+    if (agitating || extraction) return false;
     for (const [body, m] of meta) {
       if (m.fadeStart !== undefined || !body.isSleeping) return false;
     }
@@ -230,6 +262,19 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
       drumAngle += step;
       rotateAbout(drum, step, { x: center, y: center }, true);
       for (const body of balls()) Sleeping.set(body, false);
+    }
+    if (extraction) {
+      // Steer, don't simulate: the drawn ball swims to the chute mouth on an eased path the
+      // physics can't disturb (its collisions are already off). Kinematic by design — the draw
+      // picked this ball, the animation only delivers it.
+      const t = Math.min(1, (now - extraction.startedAt) / EXTRACT_MS);
+      const ease = 1 - (1 - t) * (1 - t);
+      Body.setPosition(extraction.body, {
+        x: extraction.from.x + (chuteMouth.x - extraction.from.x) * ease,
+        y: extraction.from.y + (chuteMouth.y - extraction.from.y) * ease,
+      });
+      Sleeping.set(extraction.body, false);
+      if (t >= 1 || now - extraction.startedAt > EXTRACT_CAP_MS) settleExtraction(true);
     }
     Engine.update(engine, STEP_MS);
     draw(now);
@@ -288,6 +333,7 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
       // can't be un-removed piecemeal, so that's a rebuild too.
       const shrank = [...drawn].some((team) => !target.has(team));
       if (sig !== bagSig || shrank) {
+        settleExtraction(false); // the pile is being rebuilt under it — end the flight quietly
         bagSig = sig;
         drawn.clear();
         for (const team of target) drawn.add(team);
@@ -300,10 +346,10 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
           if (drawn.has(team)) continue;
           drawn.add(team);
           for (const [body, m] of meta) {
-            if (m.team === team) {
-              Composite.remove(engine.world, body);
-              meta.delete(body);
-            }
+            if (m.team !== team) continue;
+            if (body === extraction?.body) continue; // mid-flight to the chute — it exits there
+            Composite.remove(engine.world, body);
+            meta.delete(body);
           }
         }
       }
@@ -328,12 +374,36 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
       }
       wake();
     },
+    extractBall(num): Promise<boolean> {
+      settleExtraction(false); // a newer reveal supersedes any flight still in progress
+      if (reducedMotion || destroyed || !running) return Promise.resolve(false);
+      const entry = [...meta.entries()].find(([, m]) => m.num === num && m.fadeStart === undefined);
+      if (!entry) return Promise.resolve(false); // late joiner or dup event — nothing to animate
+      const [body] = entry;
+      return new Promise<boolean>((resolve) => {
+        // The chosen ball stops colliding and swims out on its own path; the pile takes the
+        // extraction recoil so the exit visibly disturbs the drum.
+        body.collisionFilter.mask = 0;
+        extraction = { body, from: { ...body.position }, startedAt: performance.now(), resolve };
+        for (const other of balls()) {
+          if (other === body) continue;
+          const dx = other.position.x - body.position.x;
+          const dy = other.position.y - body.position.y;
+          if (dx * dx + dy * dy < 60 * 60) {
+            Sleeping.set(other, false);
+            Body.applyForce(other, other.position, { x: dx * 0.00005, y: -0.002 * Math.random() });
+          }
+        }
+        wake();
+      });
+    },
     removeTeam(team): void {
       if (drawn.has(team)) return;
       drawn.add(team);
       const now = performance.now();
       for (const [body, m] of meta) {
         if (m.team !== team) continue;
+        if (body === extraction?.body) continue; // the drawn ball exits via the chute, not a fade
         if (reducedMotion) {
           Composite.remove(engine.world, body);
           meta.delete(body);
@@ -352,13 +422,19 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
       if (running === on) return;
       running = on;
       if (on) wake();
-      else if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
+      else {
+        // A paused sim can't fly the ball — settle now so the reveal choreography never waits on
+        // a frame loop that isn't coming back.
+        settleExtraction(false);
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
       }
     },
     destroy(): void {
       destroyed = true;
+      settleExtraction(false);
       if (rafId !== null) cancelAnimationFrame(rafId);
       rafId = null;
       clearBalls();
