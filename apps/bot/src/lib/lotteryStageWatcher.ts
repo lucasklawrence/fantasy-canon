@@ -379,6 +379,8 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       socket = null;
       announced.clear();
       announcedNames.clear();
+      // Otherwise a guild whose import was in flight at stop() stays blocked after the next start.
+      reimporting.clear();
       if (open) {
         try {
           open.close();

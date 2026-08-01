@@ -1117,6 +1117,30 @@ describe('performActivityReimport (#219)', () => {
     expect(sent[1].files).toHaveLength(1);
   });
 
+  it('refuses a refetched roster that would be invalid, leaving the old one installed', async () => {
+    // Two teams sharing a name is something `createCeremony` rejects — installing it straight from
+    // ESPN would only fail later, on `begin` or on an unrelated rename's uniqueness check.
+    const collidingTeams = {
+      teams: [
+        { id: 1, location: 'Same', nickname: 'Name' },
+        { id: 2, location: 'Same', nickname: 'Name' },
+      ],
+    };
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: collidingTeams },
+    });
+    const session = espnSession();
+    const sent: { content?: string }[] = [];
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stageHolding())('guild-1'),
+    ).rejects.toThrow('two teams called');
+    // The session still holds what setup froze.
+    expect(session.names.get('a')).toBe('Stale Alpha');
+    expect(session.config.teams).toHaveLength(2);
+  });
+
   it('refuses a ceremony with no ESPN league behind it', async () => {
     const { context } = createMockContext({ defaultLeagueId: 'league-1' });
     // A manual `teams:` setup never records a leagueId — there is nothing to refetch.

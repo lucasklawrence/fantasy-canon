@@ -23,7 +23,12 @@ import {
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
-import { DraftOrderState, DraftOrderTeamInput, MAX_TEAM_BALLS } from '@fantasy-canon/core';
+import {
+  computePickOdds,
+  DraftOrderState,
+  DraftOrderTeamInput,
+  MAX_TEAM_BALLS,
+} from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
 import { resolveLeagueId } from '../../lib/leagueId.js';
 import { ensureSnapshot } from '../../lib/snapshots.js';
@@ -681,12 +686,29 @@ export function performActivityReimport(
     const current = getCeremony(guildId);
     if (current !== session || current.state !== 'GAME_OPEN') return false;
 
-    session.config.teams = teams.map((team) => ({
+    // Validate the refetched roster the way `createCeremony` would, *before* installing it. ESPN
+    // can hand back two teams with the same display name (or a league that outgrew the odds DP
+    // cap), and a session built straight from that would only fail later — at `begin`, or on an
+    // unrelated rename whose uniqueness check trips over it.
+    const refetched = teams.map((team) => ({
       teamId: team.teamId,
       displayName: team.name,
       baseBalls: team.baseBalls,
       bonusBalls: team.bonusBalls,
     }));
+    const seenNames = new Set<string>();
+    for (const team of refetched) {
+      const key = (team.displayName ?? team.teamId).toLowerCase();
+      if (seenNames.has(key)) {
+        throw new Error(
+          `ESPN returned two teams called "${team.displayName}" — re-import refused.`,
+        );
+      }
+      seenNames.add(key);
+    }
+    computePickOdds(refetched, session.config.baseBallCount);
+
+    session.config.teams = refetched;
     session.names = new Map(teams.map((team) => [team.teamId, team.name]));
     // A refetched roster invalidates whatever the mini-game awarded against the old one.
     session.miniGameBonuses = undefined;
