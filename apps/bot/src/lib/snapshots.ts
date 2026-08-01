@@ -30,6 +30,17 @@ export function populateTeamNameCache(
   context.teamNameCache.set(leagueId, season, choices);
 }
 
+export interface EnsureSnapshotOptions {
+  /**
+   * Skip the cache and go to ESPN, saving what comes back. Needed wherever the *point* of the call
+   * is to observe a change made in ESPN since the last fetch — the in-Activity re-import (#219)
+   * being the case in hand: every ESPN-backed `setup` has already cached this exact
+   * league/season/view, so a cache-first read would hand back the roster the commissioner is
+   * trying to replace and the re-import would silently do nothing.
+   */
+  refresh?: boolean;
+}
+
 /**
  * Return the snapshot payload for a league/season/view, fetching from ESPN and persisting it
  * on a cache miss. `mTeam` fetches additionally warm the team-name cache.
@@ -39,8 +50,11 @@ export async function ensureSnapshot(
   leagueId: string,
   season: number,
   view: string,
+  options: EnsureSnapshotOptions = {},
 ): Promise<unknown> {
-  const existing = await context.snapshotsRepo.listBySeason(leagueId, season);
+  const existing = options.refresh
+    ? []
+    : await context.snapshotsRepo.listBySeason(leagueId, season);
   const match = existing.find((s) => s.view === view);
   let payload: unknown;
   if (match) {

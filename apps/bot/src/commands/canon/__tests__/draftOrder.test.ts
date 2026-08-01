@@ -1141,6 +1141,85 @@ describe('performActivityReimport (#219)', () => {
     expect(session.config.teams).toHaveLength(2);
   });
 
+  it('goes to ESPN rather than the snapshot the setup already cached', async () => {
+    // Every ESPN-backed setup has cached this exact league/season/view, so a cache-first read
+    // would hand back the roster the commissioner is asking us to replace — the re-import would
+    // silently do nothing, which is the whole feature failing quietly.
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      snapshots: [
+        {
+          leagueId: 'league-1',
+          season: 2026,
+          view: 'mTeam',
+          fetchedAt: new Date(),
+          payload: RICH_TEAMS,
+        },
+      ],
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const session = espnSession();
+    const sent: { content?: string }[] = [];
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stageHolding())('guild-1'),
+    ).resolves.toBe(true);
+    // FOUR_TEAMS is what the *fetch* returns; RICH_TEAMS is the stale cache.
+    expect(session.names.get('4')).toBe('Delta Ducks');
+  });
+
+  it('blocks begin while it is publishing, so no commitment precedes the fresh preview', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const session = espnSession();
+    let sawFlagDuringPublish = false;
+    const client = {
+      channels: {
+        fetch: () =>
+          Promise.resolve({
+            isSendable: () => true,
+            send: () => {
+              // ADR 0006 requires the fresh preview to precede any commitment for the new bag.
+              sawFlagDuringPublish = session.reimportActive === true;
+              return Promise.resolve({ id: 'm1' });
+            },
+          }),
+      },
+    } as unknown as Client;
+
+    await performActivityReimport(client, context, stageHolding())('guild-1');
+    expect(sawFlagDuringPublish).toBe(true);
+    // …and it is released once publication finishes, so `begin` is not wedged.
+    expect(session.reimportActive).toBe(false);
+  });
+
+  it('restores the old roster when the fresh preview cannot be published', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const session = espnSession();
+    const client = {
+      channels: {
+        fetch: () =>
+          Promise.resolve({
+            isSendable: () => true,
+            send: () => Promise.reject(new Error('channel send failed')),
+          }),
+      },
+    } as unknown as Client;
+
+    await expect(
+      performActivityReimport(client, context, stageHolding())('guild-1'),
+    ).rejects.toThrow('channel send failed');
+    // Keeping the refetched bag would let a later `begin` commit teams the league never saw.
+    expect(session.names.get('a')).toBe('Stale Alpha');
+    expect(session.config.teams).toHaveLength(2);
+    expect(session.reimportActive).toBe(false);
+  });
+
   it('refuses a ceremony with no ESPN league behind it', async () => {
     const { context } = createMockContext({ defaultLeagueId: 'league-1' });
     // A manual `teams:` setup never records a leagueId — there is nothing to refetch.

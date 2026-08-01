@@ -99,6 +99,12 @@ export interface CeremonySession {
   miniGameBonuses?: Record<string, number>;
   /** True while a reaction round is collecting clicks — `begin` must wait (the bag is in flux). */
   miniGameActive?: boolean;
+  /**
+   * True while an in-Activity re-import is replacing the roster and publishing its fresh preview
+   * (#219). Same interlock as {@link CeremonySession.miniGameActive}: `begin` must not seal a bag
+   * whose required public preview has not landed yet.
+   */
+  reimportActive?: boolean;
   /** How many hype posts have gone out — rotates the copy templates (#165). */
   hypeCount?: number;
   abort: AbortController;
