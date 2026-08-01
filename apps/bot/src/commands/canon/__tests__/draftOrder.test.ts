@@ -45,6 +45,7 @@ import type { Client } from 'discord.js';
 interface ChannelPost {
   content?: string;
   files?: unknown[];
+  allowedMentions?: { parse: string[] };
 }
 
 /** Mock interaction with a sendable channel and (by default) commissioner permissions. */
@@ -178,6 +179,21 @@ describe('handleDraftOrderSetupSubcommand', () => {
     expect(session?.state).toBe('GAME_OPEN');
     expect(session?.config.teams.map((t) => t.bonusBalls ?? 0)).toEqual([0, 2, 0, 0]);
     expect(lastContent()).toContain('begin');
+  });
+
+  it('never lets a ceremony post parse mentions — team names are ESPN-controlled text (#222)', async () => {
+    const { context } = createMockContext();
+    // A team literally named @everyone: the post must carry it as inert text.
+    const { interaction, channelPosts } = ceremonyInteraction({
+      options: { season: 2026, teams: '@everyone, Vipers, Ducks, Goats' },
+    });
+
+    await handleDraftOrderSetupSubcommand(interaction, context);
+
+    expect(channelPosts.length).toBeGreaterThan(0);
+    for (const post of channelPosts) {
+      expect(post.allowedMentions).toEqual({ parse: [] });
+    }
   });
 
   it('ESPN teams: resolves names from the mTeam snapshot', async () => {

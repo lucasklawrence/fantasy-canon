@@ -191,6 +191,8 @@ interface SendableChannel {
     components?: (
       ActionRowBuilder<ButtonBuilder> | ReturnType<ActionRowBuilder<ButtonBuilder>['toJSON']>
     )[];
+    /** Always `{ parse: [] }` on ceremony surfaces — posts echo ESPN-controlled names (#222). */
+    allowedMentions?: { parse: never[] };
   }): Promise<{ id: string }>;
 }
 
@@ -206,7 +208,14 @@ function channelIo(channel: SendableChannel): CeremonyIo {
       const files = post.image
         ? [new AttachmentBuilder(post.image.data, { name: post.image.name })]
         : undefined;
-      const message = await channel.send({ content: post.content, files });
+      // Ceremony posts echo ESPN team names — user-controlled text from our side. A team renamed
+      // to `@everyone` (or carrying a role mention) must not ping the server on every post of a
+      // paced 12-pick ceremony; nothing the ceremony says needs to mention anyone (#222).
+      const message = await channel.send({
+        content: post.content,
+        files,
+        allowedMentions: { parse: [] },
+      });
       return { id: message.id };
     },
   };
@@ -531,6 +540,7 @@ export async function handleDraftOrderBeginSubcommand(
       await channel.send({
         content: `🎰 **${session.title}** — the ball-by-ball reveal streams live in the Lottery Machine. Click to watch; the commitment, final board, and seed verification still post right here.`,
         components: [row],
+        allowedMentions: { parse: [] }, // uniform ceremony-surface policy (#222)
       });
     } catch (error) {
       console.error('[draftorder] failed to post the lottery-machine launch button:', error);
@@ -1080,7 +1090,10 @@ export async function recoverInterruptedCeremonies(
       }
       // Re-check after the async fetch: a `begin` may have started a live ceremony in the interim.
       if (getCeremony(record.guildId)?.state === 'LOTTERY_RUNNING') continue;
-      await channel.send({ content: interruptedDisclosureContent(record) });
+      await channel.send({
+        content: interruptedDisclosureContent(record),
+        allowedMentions: { parse: [] }, // the stored title can carry ESPN-derived text (#222)
+      });
       // Remove by commitment (not guild): a newer run for the same guild has a different key, so
       // this can never clobber a still-undisclosed record.
       store.remove(record.commitment);
