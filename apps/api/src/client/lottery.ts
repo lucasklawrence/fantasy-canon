@@ -348,22 +348,36 @@ let exitInFlight: number | null = null;
 
 function armChute(pick: number, windowMs: number): void {
   if (armedPick === pick) return;
-  resetChute();
+  // Glow only — a new drum-roll must NOT abort the previous reveal's exit flight. The live bot
+  // posts the next beat almost immediately after a reveal, so the flight (~1s) routinely outlives
+  // the reveal's own screen time; killing it here would strip the choreography from every
+  // non-final pick at live pace. The flight lands into the drop on its own, and the drop then
+  // stays up through the next drum-roll — the previous result keeps its moment.
+  resetGlow();
   armedPick = pick;
   const lead = Math.max(0, windowMs - CHUTE_GLOW_LEAD_MS);
   chuteTimer = setTimeout(() => byId('chute').classList.add('active'), lead);
 }
 
-/** Tear down glow + any exit in flight. Every path that leaves the current reveal calls this. */
-function resetChute(): void {
-  choreoToken += 1;
-  exitInFlight = null;
+/** Retire the glow timer + light. Safe under a flight — the flight re-lights what it needs. */
+function resetGlow(): void {
   if (chuteTimer) {
     clearTimeout(chuteTimer);
     chuteTimer = null;
   }
   armedPick = null;
   byId('chute').classList.remove('active');
+}
+
+/**
+ * Tear down glow AND any exit in flight. For paths where the flight itself is stale news: abort,
+ * phase wipe, finish, playback transitions. A newer reveal doesn't need this — starting its own
+ * choreography supersedes the old one via the token.
+ */
+function resetChute(): void {
+  choreoToken += 1;
+  exitInFlight = null;
+  resetGlow();
   const tube = byId('tube-ball');
   tube.classList.remove('transit');
   tube.style.background = '';
@@ -1000,12 +1014,20 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       show('waiting', true);
       show('stage', false);
       break;
-    case 'revealing':
-      // Drawn teams ride along so the pile reflects the live bag, not the full pre-draw one.
+    case 'revealing': {
+      // Drawn teams ride along so the pile reflects the live bag, not the full pre-draw one —
+      // EXCEPT the newest reveal when this repaint is about to animate it for the first time
+      // (#215): `renderDrop` below needs that team's ball still in the pile to extract it, and
+      // will fade the rest itself. Poll-only clients get their reveals exclusively through this
+      // path, so removing it here would silently downgrade every one of their exits. Repaints of
+      // an already-shown reveal (`lastDropPick` matches) remove it like any other drawn team.
+      const last = snapshot.reveals[snapshot.reveals.length - 1];
+      const aboutToAnimate =
+        !snapshot.pendingBeat && last !== undefined && last.pick !== lastDropPick;
       if (snapshot.start)
         renderWaiting(
           snapshot.start,
-          snapshot.reveals.map((r) => r.team),
+          snapshot.reveals.filter((r) => !(aboutToAnimate && r === last)).map((r) => r.team),
         );
       setStatus('live reveal', 'live');
       // A draw is running, so any sealed result we were holding belongs to a *previous* ceremony.
@@ -1022,6 +1044,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       // when catch-up is worth offering. Live state stays on screen — the viewer chooses.
       updateReplayAffordance();
       break;
+    }
     case 'finished':
       if (snapshot.start) renderWaiting(snapshot.start);
       renderFinish(snapshot);

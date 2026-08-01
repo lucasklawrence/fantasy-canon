@@ -346,10 +346,10 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
           if (drawn.has(team)) continue;
           drawn.add(team);
           for (const [body, m] of meta) {
-            if (m.team === team) {
-              Composite.remove(engine.world, body);
-              meta.delete(body);
-            }
+            if (m.team !== team) continue;
+            if (body === extraction?.body) continue; // mid-flight to the chute — it exits there
+            Composite.remove(engine.world, body);
+            meta.delete(body);
           }
         }
       }
