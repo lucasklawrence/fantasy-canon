@@ -429,18 +429,25 @@ function describeError(error: unknown): string {
   }
 }
 
-async function checkCommissioner(): Promise<void> {
-  if (!accessToken) return;
+/**
+ * Ask the backend whether this member may edit. Returns the answer instead of mutating shared
+ * state, so callers can discard a result that resolved out of order — two checks can be in
+ * flight when arms come quickly, and the older answer must never overwrite the newer lobby's.
+ * A failed request returns `false`: fail closed — the server enforces authorization regardless,
+ * but the UI must not keep offering steppers on a check it couldn't complete.
+ */
+async function fetchCommissioner(): Promise<boolean> {
+  if (!accessToken) return false;
   try {
     const res = await fetch(apiPath(activityBase, '/api/lottery/me'), {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: 'no-store',
     });
-    if (res.ok) {
-      commissioner = ((await res.json()) as { commissioner?: boolean }).commissioner === true;
-    }
+    if (!res.ok) return false;
+    return ((await res.json()) as { commissioner?: boolean }).commissioner === true;
   } catch (error) {
     console.error('[lottery] commissioner check failed', error);
+    return false;
   }
 }
 
@@ -473,9 +480,15 @@ function renderLobby(lobby: LotteryLobby): void {
   const rearmed = lobby.armedSeq !== undefined && lobby.armedSeq !== seenArmedSeq;
   if (rearmed) seenArmedSeq = lobby.armedSeq;
   if (accessToken && (rearmed || (!commissioner && !commissionerCheck))) {
-    const before = commissioner;
-    commissionerCheck = checkCommissioner().then(() => {
-      if (commissioner !== before && currentLobby) renderLobby(currentLobby);
+    const seqAtAsk = lobby.armedSeq;
+    commissionerCheck = fetchCommissioner().then((answer) => {
+      // Bind the answer to the arm it was asked about: a newer arm may have its own check in
+      // flight, and this (now stale) result must neither grant nor revoke against that lobby.
+      if (currentLobby?.armedSeq !== seqAtAsk) return;
+      if (answer !== commissioner) {
+        commissioner = answer;
+        if (currentLobby) renderLobby(currentLobby);
+      }
     });
   }
 }
@@ -1173,6 +1186,12 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       show('edit-hint', false);
       show('edit-actions', false);
       hopper().sync([], []); // empty the pile — the canvas clears on the next frame
+      // An idle stage means an api restart or a cleared lobby — either way the armedSeq space
+      // may reset (#232), so forget everything commissioner-related and let the next lobby's
+      // check start from scratch rather than trust sequence numbers across a process boundary.
+      seenArmedSeq = undefined;
+      commissioner = false;
+      commissionerCheck = null;
       break;
     case 'lobby':
       // Pre-commitment lobby (#198): show odds without the commitment hash.
@@ -1435,8 +1454,11 @@ async function boot(): Promise<void> {
   // Whether this member may edit (#210). Only meaningful once a lobby is armed, so `renderLobby`
   // re-asks if this one lands while the stage is still idle.
   if (accessToken) {
-    commissionerCheck = checkCommissioner();
-    await commissionerCheck;
+    const boot = fetchCommissioner().then((answer) => {
+      commissioner = answer;
+    });
+    commissionerCheck = boot;
+    await boot;
     // A boot-time "no" is not final — the lobby may not exist yet. Let the lobby path retry.
     if (!commissioner) commissionerCheck = null;
   }

@@ -95,6 +95,25 @@ export function startApiServer(
     return exchangeCodeForToken(code, { clientId, clientSecret, fetchImpl: fetch });
   };
 
+  // The diag sink (#231) takes attacker-typeable text on an unauthenticated route, so it defends
+  // the log rather than trusting the caller: control characters are stripped (a newline or ANSI
+  // escape could forge log records / drive the terminal), and a coarse per-minute cap bounds
+  // flooding — diagnostics are a courtesy, not a contract, so over-cap messages just drop.
+  const CLIENT_LOG_MAX_PER_MINUTE = 10;
+  let clientLogWindowStart = 0;
+  let clientLogCount = 0;
+  const clientLog = (message: string): void => {
+    const t = now().getTime();
+    if (t - clientLogWindowStart > 60_000) {
+      clientLogWindowStart = t;
+      clientLogCount = 0;
+    }
+    if (clientLogCount >= CLIENT_LOG_MAX_PER_MINUTE) return;
+    clientLogCount += 1;
+    // eslint-disable-next-line no-control-regex -- stripping control chars is the entire point
+    console.log('[lottery-client]', message.replace(/[\u0000-\u001f\u007f]/g, ' '));
+  };
+
   // Short-TTL identity cache (#210): the commissioner's steppers fire one authorized write per
   // tap, and re-asking Discord who they are on every tap would burn rate limit for no new
   // information. Only successful lookups are cached — a failure must be re-attempted, never
@@ -156,7 +175,7 @@ export function startApiServer(
             nextOverall: () => hub.nextOverall(),
             reset: () => hub.reset(),
             clientId,
-            clientLog: (message) => console.log('[lottery-client]', message),
+            clientLog,
             clientScript: () => cachedScript,
             exchangeToken,
             identify,
