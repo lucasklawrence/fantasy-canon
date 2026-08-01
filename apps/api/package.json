@@ -25,6 +25,6 @@
   "devDependencies": {
     "@types/matter-js": "^0.20.2",
     "@types/ws": "^8.18.1",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.28.1"
   }
 }
