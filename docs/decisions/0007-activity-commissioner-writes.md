@@ -142,3 +142,35 @@ stage — deferred, not dropped.
   tracked separately.
 - Nothing here touches a committed or live run, so the epic's fairness story (ADR 0006) is
   unchanged: the commitment still binds a bag that was published in the channel first.
+
+> **Amended again by #219 (2026-07-31).** Editing now covers display names and an ESPN re-import,
+> which forces two refinements.
+>
+> **Renaming needs no new fairness argument.** `commitmentPreimage` hashes the algorithm tag, the
+> seed, `baseBallCount`, and per-team `{ teamId, balls }` — display names are absent. A rename
+> therefore cannot change what a commitment binds, so it rides the same pending-delta channel as the
+> ball edits and drains at the same `begin`. Uniqueness is enforced twice, because the two sides
+> know different things: the stage rejects a name another _row_ already holds (so the league never
+> sees a name the ceremony would choke on), and `applyLobbyRenames` re-checks against the _session_
+> and refuses the batch atomically, since that map is the authority `createCeremony` validates.
+>
+> **Re-import is the one place the watcher mutates, and that is deliberate.** The api has no league
+> config and no ESPN cookies, so `POST /api/lottery/reimport` can only raise a flag; the bot's
+> watcher performs the refetch, publishes a fresh public odds preview, and re-arms the lobby. That
+> makes #220's "read-only" claim precise rather than absolute: the watcher is read-only **for
+> edits**, and re-import is a second, named responsibility. It stays outside the fairness path for
+> the same reason `setup` does — the bag it produces is published in-channel and then drained at
+> `begin` like any other.
+>
+> Consequences accepted: a re-import **discards every pending edit**, because a ball count or a
+> rename made against the roster it replaces is stale; the re-arm therefore carries no
+> `keepAdjustments`. The league id and season are stamped onto the session at `setup` and re-used
+> verbatim, so a re-import can never silently retarget a different league than the one the ceremony
+> opened — and a manual `teams:` setup, which has no league id, is refused outright. The watcher
+> guards one in-flight import per guild so a broadcast storm or a reconnect snapshot cannot launch
+> a second ESPN refetch.
+>
+> Finally, the client's ball cap is now **injected by the page shell** from core's `MAX_TEAM_BALLS`
+> rather than hand-copied. The bundle cannot import core (it reaches `node:crypto` — see the
+> `lotteryTypes.ts` note), and a second literal would drift silently from the value the server
+> enforces.

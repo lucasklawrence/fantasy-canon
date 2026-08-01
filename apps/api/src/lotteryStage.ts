@@ -40,6 +40,8 @@ import type {
   LotteryLobbyRequest,
   LotteryOddsRow,
   LotteryPhase,
+  LotteryRename,
+  LotteryRenameDetail,
   LotteryReveal,
   LotterySnapshot,
   LotteryStart,
@@ -64,6 +66,18 @@ export class StageNotEditableError extends Error {
   constructor(message = 'only a pre-commitment lobby can be adjusted') {
     super(message);
     this.name = 'StageNotEditableError';
+  }
+}
+
+/**
+ * Thrown by {@link LotteryStage.rename} when the new name already belongs to another row.
+ * `createCeremony` rejects duplicate display names case-insensitively, so accepting one here
+ * would only defer the failure to `begin` — after the league had already seen the new name.
+ */
+export class DuplicateTeamNameError extends Error {
+  constructor(name: string) {
+    super(`another team is already called "${name}"`);
+    this.name = 'DuplicateTeamNameError';
   }
 }
 
@@ -95,6 +109,19 @@ export interface LotteryStage {
    * {@link LotteryStage.isCommissioner} first.
    */
   adjust(adjustment: LotteryAdjustment): void;
+  /**
+   * Apply a commissioner's in-Activity display-name fix (#219) and re-broadcast the lobby. Same
+   * lobby-only guard as {@link LotteryStage.adjust}; additionally throws
+   * {@link DuplicateTeamNameError} when the name collides with another row. Cosmetic by
+   * construction — the commitment preimage never sees a display name.
+   */
+  rename(rename: LotteryRename): void;
+  /**
+   * Flag that the commissioner wants the league refetched from ESPN (#219). This process cannot
+   * do it — no league config, no cookies — so the flag is a request the bot's stage watcher
+   * honours, clearing it when it re-arms the lobby with fresh data.
+   */
+  requestReimport(): void;
   /**
    * Is this Discord user id allowed to {@link LotteryStage.adjust}? False whenever no lobby is
    * armed, so a stale token can never edit a committed or finished run.
@@ -326,6 +353,41 @@ export function parseLotteryLobby(body: string): Parsed<LotteryLobbyRequest> {
  * integer inside the same 1..{@link MAX_TEAM_BALLS} window the bot's `balls:` override enforces,
  * so a hostile client cannot hand the odds DP a 10-million-ball bag.
  */
+/** True for any C0/C7F control character — newlines and friends have no place in a team name. */
+function hasControlCharacters(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+/** Longest display name the odds table and the renderer's card can show without clipping. */
+export const MAX_TEAM_NAME_LENGTH = 40;
+
+/**
+ * Guard for `POST /api/lottery/rename` (#219). Like {@link parseLotteryAdjust} this body comes
+ * from the *public* Activity client, so the name is trimmed, length-capped, and rejected if it
+ * carries control characters or newlines — it ends up in Discord message content and on a rendered
+ * card, and neither should have to cope with a 10KB single-line "name".
+ */
+export function parseLotteryRename(body: string): Parsed<LotteryRename> {
+  const parsed = parseJson(body);
+  if ('error' in parsed) return parsed;
+  const r = parsed.value;
+  if (!isStr(r.teamId)) return { error: 'rename needs a teamId' };
+  if (typeof r.displayName !== 'string') return { error: 'rename needs a displayName' };
+  const displayName = r.displayName.trim();
+  if (!displayName) return { error: 'displayName cannot be blank' };
+  if (displayName.length > MAX_TEAM_NAME_LENGTH) {
+    return { error: `displayName is capped at ${MAX_TEAM_NAME_LENGTH} characters` };
+  }
+  if (hasControlCharacters(displayName)) {
+    return { error: 'displayName cannot contain control characters or line breaks' };
+  }
+  return { value: { teamId: r.teamId, displayName } };
+}
+
 export function parseLotteryAdjust(body: string): Parsed<LotteryAdjustment> {
   const parsed = parseJson(body);
   if ('error' in parsed) return parsed;
@@ -394,6 +456,28 @@ function applyAdjustments(
   });
 }
 
+/**
+ * Overlay pending display-name fixes onto a row set (#219). Names are cosmetic — the commitment
+ * preimage hashes `teamId` and ball counts only — so unlike {@link applyAdjustments} this can
+ * never fail, and needs no odds recomputation.
+ */
+function applyRenames(
+  rows: LotteryOddsRow[],
+  names: ReadonlyMap<string, string>,
+): LotteryOddsRow[] {
+  if (names.size === 0) return rows;
+  return rows.map((row) => {
+    const renamed = row.teamId !== undefined ? names.get(row.teamId) : undefined;
+    return renamed === undefined ? row : { ...row, team: renamed };
+  });
+}
+
+/** Case-insensitive, so a rename can't produce the collision `createCeremony` would reject. */
+function nameTakenByAnother(rows: LotteryOddsRow[], teamId: string, name: string): boolean {
+  const key = name.trim().toLowerCase();
+  return rows.some((row) => row.teamId !== teamId && row.team.trim().toLowerCase() === key);
+}
+
 export function createLotteryStage(): LotteryStage {
   let phase: LotteryPhase = 'idle';
   let lobby: LotteryLobby | undefined;
@@ -401,6 +485,10 @@ export function createLotteryStage(): LotteryStage {
   let commissionerIds: string[] = [];
   /** Pending in-Activity edits, teamId → new total balls, drained by the bot at `begin`. */
   let adjustments = new Map<string, number>();
+  /** Pending display-name fixes, teamId → new name, drained alongside the ball edits (#219). */
+  let renames = new Map<string, string>();
+  /** The commissioner asked for an ESPN refetch; only the bot can honour it (#219). */
+  let reimportRequested = false;
   let start: LotteryStart | undefined;
   let pendingBeat: LotteryBeat | undefined;
   let reveals: LotteryReveal[] = [];
@@ -413,10 +501,20 @@ export function createLotteryStage(): LotteryStage {
   }
 
   /** The pending edit set as the wire carries it — omitted entirely when there is nothing pending. */
-  function pendingAdjustments(): { adjustments?: LotteryAdjustment[] } {
-    return adjustments.size > 0
-      ? { adjustments: [...adjustments].map(([teamId, balls]) => ({ teamId, balls })) }
-      : {};
+  function pendingAdjustments(): {
+    adjustments?: LotteryAdjustment[];
+    renames?: LotteryRename[];
+    reimportRequested?: boolean;
+  } {
+    return {
+      ...(adjustments.size > 0
+        ? { adjustments: [...adjustments].map(([teamId, balls]) => ({ teamId, balls })) }
+        : {}),
+      ...(renames.size > 0
+        ? { renames: [...renames].map(([teamId, displayName]) => ({ teamId, displayName })) }
+        : {}),
+      ...(reimportRequested ? { reimportRequested: true } : {}),
+    };
   }
 
   /**
@@ -428,6 +526,8 @@ export function createLotteryStage(): LotteryStage {
     lobby = undefined;
     commissionerIds = [];
     adjustments = new Map();
+    renames = new Map();
+    reimportRequested = false;
   }
 
   return {
@@ -473,18 +573,29 @@ export function createLotteryStage(): LotteryStage {
         keepAdjustments && adjustments.size > 0
           ? new Map<string, number>(adjustments)
           : new Map<string, number>();
-      let rows = publicLobby.rows;
+      // Renames ride with the ball edits: both are pending until `begin` drains them, so a re-arm
+      // that keeps one must keep the other or the lobby would show a name the bot no longer has.
+      let carriedNames =
+        keepAdjustments && renames.size > 0
+          ? new Map<string, string>(renames)
+          : new Map<string, string>();
+      let rows = applyRenames(publicLobby.rows, carriedNames);
       if (carried.size > 0) {
         try {
-          rows = applyAdjustments(publicLobby.rows, carried);
+          rows = applyAdjustments(rows, carried);
         } catch {
           carried = new Map();
+          carriedNames = new Map();
           rows = publicLobby.rows;
         }
       }
       phase = 'lobby';
       commissionerIds = [...editors];
       adjustments = carried;
+      renames = carriedNames;
+      // A re-arm is the bot publishing a bag it just derived, so any outstanding refetch request
+      // has either been honoured or is moot.
+      reimportRequested = false;
       lobby = {
         ...publicLobby,
         rows,
@@ -495,8 +606,8 @@ export function createLotteryStage(): LotteryStage {
       reveals = [];
       finish = undefined;
       abort = undefined;
-      // `adjustments` rides along so a subscriber can dedupe on stage state (#220): a re-arm that
-      // kept pending edits and one that dropped them look identical otherwise.
+      // `adjustments`/`renames` ride along so a subscriber can dedupe on stage state (#220): a
+      // re-arm that kept pending edits and one that dropped them look identical otherwise.
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
     adjust(next) {
@@ -523,6 +634,33 @@ export function createLotteryStage(): LotteryStage {
       // rides along for the bot's audit post (#220): it distinguishes this from a re-arm and says
       // exactly what changed, so nobody has to diff two lobbies to describe a human's action.
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), adjusted: detail });
+    },
+    rename(next) {
+      if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
+      const target = lobby.rows.find((row) => row.teamId === next.teamId);
+      if (!target) throw new UnknownTeamError(next.teamId);
+      // `createCeremony` rejects duplicate display names case-insensitively, so a colliding rename
+      // has to be refused *here* — draining it at `begin` would blow up the ceremony instead.
+      if (nameTakenByAnother(lobby.rows, next.teamId, next.displayName)) {
+        throw new DuplicateTeamNameError(next.displayName);
+      }
+      const detail: LotteryRenameDetail = {
+        teamId: next.teamId,
+        from: target.team,
+        to: next.displayName,
+        ...(lobby.guildId ? { guildId: lobby.guildId } : {}),
+      };
+      renames = new Map(renames).set(next.teamId, next.displayName);
+      const rows = applyRenames(lobby.rows, renames);
+      lobby = { ...lobby, rows };
+      emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), renamed: detail });
+    },
+    requestReimport() {
+      if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
+      // Only a flag: this process has no ESPN league config and no cookies, so the refetch is the
+      // bot's to perform. It clears when the bot re-arms the lobby with what it fetched.
+      reimportRequested = true;
+      emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
     clear(next) {
       // Narrow by design: only an armed lobby is disarmable, so this can never tear down a

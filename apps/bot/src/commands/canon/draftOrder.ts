@@ -31,6 +31,7 @@ import { buildTeamNameMap } from '../../lib/teamNames.js';
 import { deriveStandingsBaseBalls, extractFinalRanks } from '../../lib/finalStandings.js';
 import {
   applyLobbyAdjustments,
+  applyLobbyRenames,
   buildAdjustedPreviewPost,
   buildHypePost,
   buildPreviewPost,
@@ -299,6 +300,7 @@ export async function handleDraftOrderSetupSubcommand(
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
     const notes: string[] = [];
+    let resolvedLeagueId: string | undefined;
     let teams: SetupTeam[];
     if (manualTeams) {
       teams = parseManualTeams(manualTeams).map((team, index) => ({
@@ -307,7 +309,8 @@ export async function handleDraftOrderSetupSubcommand(
         bonusBalls: team.bonusBalls,
       }));
     } else {
-      const leagueId = await resolveLeagueId(interaction, context);
+      resolvedLeagueId = await resolveLeagueId(interaction, context);
+      const leagueId = resolvedLeagueId;
       if (!leagueId) {
         throw new Error(
           'League ID is required — set it via /canon config set, ESPN_LEAGUE_ID, or pass a manual `teams` list.',
@@ -349,6 +352,12 @@ export async function handleDraftOrderSetupSubcommand(
     // Where the odds preview just landed — the audit line for an in-Activity edit (#220) posts
     // here, since it fires before `begin` has captured `channelId`.
     session.lobbyChannelId = interaction.channelId;
+    // What an in-Activity re-import (#219) refetches: the exact league + season this setup opened,
+    // and the member allowed to ask for it. A manual `teams:` setup leaves leagueId unset, so a
+    // re-import correctly refuses — there is no ESPN league behind it.
+    session.leagueId = resolvedLeagueId;
+    session.season = season;
+    session.commissionerIds = [interaction.user.id];
     setCeremony(session);
 
     // Best-effort: arm the Activity lobby (#198) so members can join before `begin`.
@@ -573,10 +582,11 @@ async function foldInActivityEdits(
     // another guild's edits must never land in this guild's bag.
     if (snapshot.phase !== 'lobby' || snapshot.lobby?.guildId !== session.guildId) return;
     const applied = applyLobbyAdjustments(session, snapshot.adjustments ?? []);
-    if (applied.length === 0) return;
-    await channelIo(channel).post(await buildAdjustedPreviewPost(session, applied));
+    const renamed = applyLobbyRenames(session, snapshot.renames ?? []);
+    if (applied.length === 0 && renamed.length === 0) return;
+    await channelIo(channel).post(await buildAdjustedPreviewPost(session, applied, renamed));
     console.log(
-      `[draftorder] folded ${applied.length} in-Activity ball edit(s) into the bag before committing`,
+      `[draftorder] folded ${applied.length} ball edit(s) and ${renamed.length} rename(s) into the bag before committing`,
     );
   } catch (error) {
     restoreBag(session, before);
@@ -631,14 +641,99 @@ export function postActivityEditLine(
 }
 
 /**
- * Start watching the stage for commissioner edits (#220). Best-effort and non-blocking: an
- * unreachable api just retries with backoff, and nothing about the ceremony depends on it —
- * `begin` still re-posts the full odds card before the commitment.
+ * Honour an in-Activity "re-import from ESPN" request (#219).
+ *
+ * The api has no league config and no ESPN cookies, so the Activity can only *ask*; this is where
+ * the refetch actually happens. It rebuilds the bag exactly the way `setup` does — `resolveEspnTeams`
+ * for the roster, then last season's standings weights (#165) — publishes a fresh public odds
+ * preview, and re-arms the lobby with the result.
+ *
+ * **Pending edits are dropped**, which is why the re-arm carries no `keepAdjustments`: the whole
+ * point of a refetch is to start from what ESPN says now, and a ball edit or rename made against
+ * the roster it replaces is stale. The fresh preview shows exactly what survived.
+ *
+ * Season and league come from the session and the guild's config, so a re-import can never
+ * silently retarget a different league than the one `setup` opened.
  */
-export function watchActivityEdits(client: Client, env: NodeJS.ProcessEnv = process.env): void {
+export function performActivityReimport(
+  client: Client,
+  context: BotContext,
+  stage: InspectableRevealStage = stageFromEnv(),
+): (guildId: string | undefined) => Promise<boolean> {
+  return async (guildId) => {
+    if (!guildId) return false;
+    const session = getCeremony(guildId);
+    if (!session || session.state !== 'GAME_OPEN' || !session.lobbyChannelId) return false;
+    const { leagueId, season } = session;
+    if (!leagueId || season === undefined) {
+      // A manual `teams:` setup has no ESPN league behind it, so there is nothing to refetch.
+      console.error('[draftorder] re-import requested for a ceremony with no ESPN league');
+      return false;
+    }
+    const channel = await client.channels.fetch(session.lobbyChannelId);
+    if (!channel?.isSendable()) return false;
+
+    const teams = await resolveEspnTeams(context, leagueId, season);
+    const notes = await applyStandingsWeights(context, leagueId, season, teams);
+    // Re-validate after the ESPN round-trip — a `begin`/`abort`/replacing `setup` can land while
+    // we were fetching, and rebuilding a session that is no longer current would be a silent
+    // clobber of whatever replaced it.
+    const current = getCeremony(guildId);
+    if (current !== session || current.state !== 'GAME_OPEN') return false;
+
+    session.config.teams = teams.map((team) => ({
+      teamId: team.teamId,
+      displayName: team.name,
+      baseBalls: team.baseBalls,
+      bonusBalls: team.bonusBalls,
+    }));
+    session.names = new Map(teams.map((team) => [team.teamId, team.name]));
+    // A refetched roster invalidates whatever the mini-game awarded against the old one.
+    session.miniGameBonuses = undefined;
+
+    const rows = oddsRows(session);
+    await channel.send({
+      content: [
+        `🔄 **${session.title}** — the commissioner re-imported the league from ESPN.`,
+        `${teams.length} teams, ${rows.reduce((sum, row) => sum + row.balls, 0)} balls. Any earlier in-Activity edits were reset.`,
+        ...notes,
+      ].join('\n'),
+      allowedMentions: { parse: [] },
+    });
+    await channelIo(channel).post(await buildPreviewPost(session));
+    // Best-effort: the refetch and the public preview have already landed, so a stage that is
+    // down must not turn a completed re-import into a failure. The next `setup`/`begin` re-arms.
+    await stage
+      .lobby({
+        title: session.title,
+        teamCount: session.config.teams.length,
+        totalBalls: rows.reduce((sum, row) => sum + row.balls, 0),
+        rows,
+        guildId,
+        commissionerIds: session.commissionerIds ?? [],
+      })
+      .catch((error: unknown) => {
+        console.error('[draftorder] re-imported, but could not re-arm the Activity lobby:', error);
+      });
+    console.log(`[draftorder] re-imported ${teams.length} teams from ESPN for guild ${guildId}`);
+    return true;
+  };
+}
+
+/**
+ * Start watching the stage for commissioner activity (#220 edits, #219 re-import requests).
+ * Best-effort and non-blocking: an unreachable api just retries with backoff, and nothing about
+ * the ceremony depends on it — `begin` still re-posts the full odds card before the commitment.
+ */
+export function watchActivityEdits(
+  client: Client,
+  context: BotContext,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
   const watcher = createStageWatcher({
     baseUrl: env.FANTASY_STAGE_URL ?? DEFAULT_STAGE_URL,
     post: postActivityEditLine(client),
+    reimport: performActivityReimport(client, context),
   });
   watcher.start();
 }

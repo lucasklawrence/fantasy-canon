@@ -7,10 +7,11 @@
  * injected via `window.__DRAFT_CONFIG__`.
  */
 
+import { MAX_TEAM_BALLS } from '@fantasy-canon/core';
 import { jsonForScript } from './scriptIsland.js';
 
 /** The lottery-machine HTML for the given Discord application (client) id (`''` in dev). */
-export function lotteryHtml(clientId: string): string {
+export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BALLS): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -67,6 +68,12 @@ export function lotteryHtml(clientId: string): string {
   .stepval { display: inline-block; min-width: 26px; text-align: center; font-weight: 700;
     vertical-align: middle; }
   #edit-hint { text-align: center; color: #f5d67b; font-size: 13px; margin: 10px 0 0; }
+  #edit-actions { text-align: center; margin: 14px 0 0; }
+  /* Renaming: the team cell becomes an input in place, so the row never reflows (#219). */
+  .rename { font: inherit; font-size: 14px; color: #e7e9ee; background: #10141d;
+    border: 1px solid #2a3145; border-radius: 6px; padding: 3px 6px; width: 170px; }
+  .rename:focus { outline: none; border-color: rgba(245,214,123,.6); }
+  .teamname.editable { cursor: text; border-bottom: 1px dashed #3a4258; }
 
   /* the machine */
   .machine { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
@@ -190,7 +197,8 @@ export function lotteryHtml(clientId: string): string {
       <tbody id="odds-rows"></tbody>
     </table>
     <p class="pulse">Waiting for the commissioner to seal the bag…</p>
-    <p id="edit-hint" class="hidden">You're the commissioner &mdash; adjust the balls above before you run <code>/canon draftorder begin</code>. Everyone watching sees the odds update live, and the bot re-posts the final odds card in the channel before the commitment.</p>
+    <p id="edit-actions" class="hidden"><button id="reimport-btn" class="replay" type="button">&#128260; Re-import from ESPN</button></p>
+    <p id="edit-hint" class="hidden">You're the commissioner &mdash; adjust the balls or tap a team name to rename it, before you run <code>/canon draftorder begin</code>. Everyone watching sees the changes live, each one is posted in the channel, and the bot re-posts the final odds card before the commitment.</p>
   </section>
 
   <section class="card hidden" id="stage">
@@ -236,7 +244,7 @@ export function lotteryHtml(clientId: string): string {
     <p id="abort-reason" style="margin:0"></p>
   </section>
 </main>
-<script>window.__DRAFT_CONFIG__ = { clientId: ${jsonForScript(clientId)} };</script>
+<script>window.__DRAFT_CONFIG__ = { clientId: ${jsonForScript(clientId)}, maxTeamBalls: ${jsonForScript(maxTeamBalls)} };</script>
 <script type="module" src="./client/lottery.js"></script>
 </body>
 </html>`;

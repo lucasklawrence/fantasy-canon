@@ -75,6 +75,15 @@ export interface CeremonySession {
    * odds preview was posted to.
    */
   lobbyChannelId?: string;
+  /**
+   * The ESPN league + season `setup` opened this ceremony against (#219). Stored so an in-Activity
+   * re-import refetches *exactly* that league rather than re-resolving and possibly retargeting.
+   * Absent for a manual `teams:` setup, which has no ESPN league to refetch.
+   */
+  leagueId?: string;
+  season?: number;
+  /** Discord user ids allowed to edit from inside the Activity (#210) — the `setup` runner. */
+  commissionerIds?: string[];
   title: string;
   createdAt: number;
   state: DraftOrderState;
@@ -316,10 +325,71 @@ export interface AppliedAdjustment {
   to: number;
 }
 
+/** One display-name fix folded in by {@link applyLobbyRenames}, for the audit post. */
+export interface AppliedRename {
+  teamId: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * Fold the commissioner's in-Activity display-name fixes (#219) into the session, returning the
+ * ones that actually changed something.
+ *
+ * Cosmetic by construction: `commitmentPreimage` hashes `teamId` and resolved ball counts only, so
+ * a rename can never alter what the commitment binds — which is why this can run at the same
+ * `begin` drain point as the ball edits without touching the fairness argument. It updates both
+ * `session.names` (what every card and post renders) and the config's `displayName`, so the two
+ * can't drift.
+ *
+ * Refuses the whole batch if it would leave two teams sharing a name case-insensitively — the same
+ * rule `createCeremony` enforces, checked here because the stage validates against *its* row set
+ * and this session is the authority.
+ */
+export function applyLobbyRenames(
+  session: CeremonySession,
+  renames: { teamId: string; displayName: string }[],
+): AppliedRename[] {
+  if (renames.length === 0) return [];
+  if (session.state !== 'GAME_OPEN') {
+    throw new Error(`Lobby renames can only be applied in GAME_OPEN (state: ${session.state})`);
+  }
+  const applied: AppliedRename[] = [];
+  const next = new Map(session.names);
+  for (const rename of renames) {
+    const from = next.get(rename.teamId);
+    // A stale id from a ceremony this one replaced must never block a draw.
+    if (from === undefined || from === rename.displayName) continue;
+    next.set(rename.teamId, rename.displayName);
+    applied.push({ teamId: rename.teamId, from, to: rename.displayName });
+  }
+  if (applied.length === 0) return [];
+
+  const seen = new Set<string>();
+  for (const name of next.values()) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      throw new Error(`Duplicate team name "${name}" — names must be unique for the ceremony.`);
+    }
+    seen.add(key);
+  }
+
+  // Committed only after the uniqueness check, so a rejected batch leaves the session untouched.
+  for (const [teamId, name] of next) session.names.set(teamId, name);
+  for (const team of session.config.teams) {
+    const name = next.get(team.teamId);
+    if (name !== undefined) team.displayName = name;
+  }
+  return applied;
+}
+
 /** Everything {@link applyLobbyAdjustments} can change, captured for {@link restoreBag}. */
 export interface BagSnapshot {
   ballsByTeam: Map<string, { baseBalls?: number; bonusBalls?: number }>;
   miniGameBonuses?: Record<string, number>;
+  /** Display names too — a rename (#219) is folded in on the same path and must roll back with it. */
+  names: Map<string, string>;
+  displayNameByTeam: Map<string, string | undefined>;
 }
 
 /**
@@ -337,6 +407,8 @@ export function captureBag(session: CeremonySession): BagSnapshot {
       ]),
     ),
     ...(session.miniGameBonuses ? { miniGameBonuses: { ...session.miniGameBonuses } } : {}),
+    names: new Map(session.names),
+    displayNameByTeam: new Map(session.config.teams.map((team) => [team.teamId, team.displayName])),
   };
 }
 
@@ -349,6 +421,11 @@ export function restoreBag(session: CeremonySession, snapshot: BagSnapshot): voi
     team.bonusBalls = previous.bonusBalls;
   }
   session.miniGameBonuses = snapshot.miniGameBonuses ? { ...snapshot.miniGameBonuses } : undefined;
+  session.names.clear();
+  for (const [teamId, name] of snapshot.names) session.names.set(teamId, name);
+  for (const team of session.config.teams) {
+    team.displayName = snapshot.displayNameByTeam.get(team.teamId);
+  }
 }
 
 /**
@@ -418,15 +495,19 @@ export function applyLobbyAdjustments(
 export async function buildAdjustedPreviewPost(
   session: CeremonySession,
   applied: AppliedAdjustment[],
+  renamed: AppliedRename[] = [],
 ): Promise<CeremonyPost> {
   const image = await renderLotteryOddsCard({
     title: session.title,
     subtitle: `${session.config.teams.length} teams • ${totalBalls(session.config)} balls in the hopper`,
     rows: oddsRows(session),
   });
-  const changes = applied
-    .map((change) => `• **${change.team}**: ${change.from} → ${change.to} ball(s)`)
-    .join('\n');
+  const changes = [
+    ...applied.map((change) => `• **${change.team}**: ${change.from} → ${change.to} ball(s)`),
+    // Renames read differently from ball moves, and `change.to` is already the new name the odds
+    // card above renders — so name both sides rather than showing an arrow between counts.
+    ...renamed.map((change) => `• **${change.from}** is now **${change.to}**`),
+  ].join('\n');
   return {
     kind: 'preview',
     content: [

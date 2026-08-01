@@ -7,8 +7,10 @@ import {
   parseLotteryClear,
   parseLotteryFinish,
   parseLotteryLobby,
+  parseLotteryRename,
   parseLotteryReveal,
   parseLotteryStart,
+  DuplicateTeamNameError,
   StageNotEditableError,
   UnknownTeamError,
   type LotteryEvent,
@@ -463,7 +465,116 @@ describe('adjust() — commissioner lobby edits (#210)', () => {
   });
 });
 
+describe('rename + re-import — the rest of the in-Activity field edits (#219)', () => {
+  it('renames a row without touching a single ball or odds figure', () => {
+    const stage = createLotteryStage();
+    stage.lobby({ ...EDITABLE, guildId: 'g1' });
+    const before = stage.snapshot().lobby as LotteryLobby;
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+
+    stage.rename({ teamId: 't-a', displayName: 'Alpha Antlers' });
+
+    const after = stage.snapshot().lobby as LotteryLobby;
+    expect(after.rows.map((r) => r.team)).toEqual(['C', 'B', 'Alpha Antlers']);
+    // Display names are cosmetic — `commitmentPreimage` hashes teamId + balls only.
+    expect(after.rows.map((r) => r.balls)).toEqual(before.rows.map((r) => r.balls));
+    expect(after.rows.map((r) => r.firstPct)).toEqual(before.rows.map((r) => r.firstPct));
+    expect(after.totalBalls).toBe(before.totalBalls);
+
+    const event = events[0] as { renamed?: unknown; renames?: unknown };
+    expect(event.renamed).toEqual({ teamId: 't-a', from: 'A', to: 'Alpha Antlers', guildId: 'g1' });
+    expect(event.renames).toEqual([{ teamId: 't-a', displayName: 'Alpha Antlers' }]);
+    expect(stage.snapshot().renames).toEqual([{ teamId: 't-a', displayName: 'Alpha Antlers' }]);
+  });
+
+  it('refuses a name another row already has, case-insensitively', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    // `createCeremony` would reject this at drain time — refusing here means the league never
+    // sees a name the ceremony is going to choke on.
+    expect(() => stage.rename({ teamId: 't-a', displayName: 'b' })).toThrow(DuplicateTeamNameError);
+    // Renaming a row to what it already is stays legal (idempotent retap).
+    expect(() => stage.rename({ teamId: 't-a', displayName: 'A' })).not.toThrow();
+    expect(stage.snapshot().lobby?.rows.map((r) => r.team)).toEqual(['C', 'B', 'A']);
+  });
+
+  it('refuses an unknown team and anything past the commitment', () => {
+    const stage = createLotteryStage();
+    expect(() => stage.rename({ teamId: 't-a', displayName: 'X' })).toThrow(StageNotEditableError);
+    stage.lobby(EDITABLE);
+    expect(() => stage.rename({ teamId: 'nope', displayName: 'X' })).toThrow(UnknownTeamError);
+    stage.start(START);
+    expect(() => stage.rename({ teamId: 't-a', displayName: 'X' })).toThrow(StageNotEditableError);
+  });
+
+  it('carries renames through a keepAdjustments re-arm and drops them on a fresh one', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    stage.rename({ teamId: 't-a', displayName: 'Alpha Antlers' });
+
+    stage.lobby({ ...EDITABLE, keepAdjustments: true });
+    expect(stage.snapshot().lobby?.rows.map((r) => r.team)).toEqual(['C', 'B', 'Alpha Antlers']);
+    expect(stage.snapshot().renames).toHaveLength(1);
+
+    stage.lobby(EDITABLE);
+    expect(stage.snapshot().lobby?.rows.map((r) => r.team)).toEqual(['C', 'B', 'A']);
+    expect(stage.snapshot().renames).toBeUndefined();
+  });
+
+  it('flags a re-import request and clears it when the bot re-arms with fresh data', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+
+    stage.requestReimport();
+    expect(stage.snapshot().reimportRequested).toBe(true);
+    expect((events[0] as { reimportRequested?: boolean }).reimportRequested).toBe(true);
+
+    // The api has no ESPN access, so the flag only survives until the bot answers it.
+    stage.lobby(EDITABLE);
+    expect(stage.snapshot().reimportRequested).toBeUndefined();
+  });
+
+  it('refuses a re-import request when nothing is armed', () => {
+    const stage = createLotteryStage();
+    expect(() => stage.requestReimport()).toThrow(StageNotEditableError);
+    stage.lobby(EDITABLE);
+    stage.start(START);
+    expect(() => stage.requestReimport()).toThrow(StageNotEditableError);
+  });
+
+  it('drops renames and the re-import flag with the lobby they belonged to', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    stage.rename({ teamId: 't-a', displayName: 'Alpha Antlers' });
+    stage.requestReimport();
+
+    stage.clear({});
+    expect(stage.snapshot().renames).toBeUndefined();
+    expect(stage.snapshot().reimportRequested).toBeUndefined();
+  });
+});
+
 describe('lottery payload guards', () => {
+  it('parseLotteryRename trims, caps, and rejects unusable names', () => {
+    expect(parseLotteryRename(JSON.stringify({ teamId: 't1', displayName: '  Ducks  ' }))).toEqual({
+      value: { teamId: 't1', displayName: 'Ducks' },
+    });
+    for (const displayName of ['', '   ', 'x'.repeat(41), 'a\nb', 'a\tb', 42, null]) {
+      expect('error' in parseLotteryRename(JSON.stringify({ teamId: 't1', displayName }))).toBe(
+        true,
+      );
+    }
+    expect('error' in parseLotteryRename(JSON.stringify({ displayName: 'Ducks' }))).toBe(true);
+    expect('error' in parseLotteryRename('{bad')).toBe(true);
+    // Exactly at the cap is fine.
+    expect(
+      'value' in parseLotteryRename(JSON.stringify({ teamId: 't1', displayName: 'x'.repeat(40) })),
+    ).toBe(true);
+  });
+
   it('parseLotteryAdjust clamps to a sane, integral ball count', () => {
     const ok = parseLotteryAdjust(JSON.stringify({ teamId: 't-a', balls: 7 }));
     expect(ok).toEqual({ value: { teamId: 't-a', balls: 7 } });

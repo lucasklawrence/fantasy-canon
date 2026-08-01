@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { composeDrawSeed, computeCommitment, verifyHardenedDraw } from '@fantasy-canon/core';
 import {
   applyLobbyAdjustments,
+  applyLobbyRenames,
   applyMiniGameBonuses,
+  captureBag,
+  restoreBag,
   buildAdjustedPreviewPost,
   buildPreviewPost,
   CeremonyAborted,
@@ -310,7 +313,14 @@ describe('applyLobbyAdjustments (#210)', () => {
    */
   function adjustableSession() {
     const teams = TEAMS.map((team) => ({ ...team }));
-    const session = createCeremony('guild-1', '2026 Draft Lottery', { ...CONFIG, teams }, NAMES);
+    // The names map is stored by reference too, and `applyLobbyRenames` writes through it — so
+    // clone both halves, or one test's rename leaks into every later one.
+    const session = createCeremony(
+      'guild-1',
+      '2026 Draft Lottery',
+      { ...CONFIG, teams },
+      new Map(NAMES),
+    );
     markPreviewPosted(session);
     return session;
   }
@@ -380,13 +390,62 @@ describe('applyLobbyAdjustments (#210)', () => {
     expect(() => applyLobbyAdjustments(session, [{ teamId: 't1', balls: 4 }])).toThrow('GAME_OPEN');
   });
 
+  it('folds renames into both the name map and the config, and reports them (#219)', () => {
+    const session = adjustableSession();
+    const applied = applyLobbyRenames(session, [
+      { teamId: 't1', displayName: 'Duck Dynasty' },
+      { teamId: 't2', displayName: 'Team 2' }, // unchanged ⇒ not reported
+      { teamId: 'gone', displayName: 'Ghosts' }, // stale id ⇒ ignored, never blocks a draw
+    ]);
+
+    expect(applied).toEqual([{ teamId: 't1', from: 'Team 1', to: 'Duck Dynasty' }]);
+    expect(session.names.get('t1')).toBe('Duck Dynasty');
+    // The config's displayName tracks the map, so the two can't drift.
+    expect(session.config.teams.find((t) => t.teamId === 't1')?.displayName).toBe('Duck Dynasty');
+    expect(oddsRows(session).find((r) => r.teamId === 't1')?.team).toBe('Duck Dynasty');
+    // Cosmetic only: ball counts are untouched.
+    expect(oddsRows(session).find((r) => r.teamId === 't1')?.balls).toBe(1);
+  });
+
+  it('refuses a rename batch that would leave two teams sharing a name, atomically', () => {
+    const session = adjustableSession();
+    expect(() => applyLobbyRenames(session, [{ teamId: 't1', displayName: 'team 2' }])).toThrow(
+      'Duplicate team name',
+    );
+    // Nothing applied — the same rule `createCeremony` enforces, checked before committing.
+    expect(session.names.get('t1')).toBe('Team 1');
+    expect(session.config.teams.find((t) => t.teamId === 't1')?.displayName).toBe('Team 1');
+  });
+
+  it('refuses to rename a bag that is no longer mutable', () => {
+    const session = createCeremony('guild-1', 'Lottery', CONFIG, NAMES); // still CREATED
+    expect(() => applyLobbyRenames(session, [{ teamId: 't1', displayName: 'X' }])).toThrow(
+      'GAME_OPEN',
+    );
+  });
+
+  it('rolls renames back with the bag, so a failed audit post reverts both (#219)', () => {
+    const session = adjustableSession();
+    const before = captureBag(session);
+    applyLobbyAdjustments(session, [{ teamId: 't1', balls: 5 }]);
+    applyLobbyRenames(session, [{ teamId: 't1', displayName: 'Duck Dynasty' }]);
+
+    restoreBag(session, before);
+
+    expect(session.names.get('t1')).toBe('Team 1');
+    expect(session.config.teams.find((t) => t.teamId === 't1')?.displayName).toBe('Team 1');
+    expect(oddsRows(session).find((r) => r.teamId === 't1')?.balls).toBe(1);
+  });
+
   it('the adjusted preview names every change and re-renders the odds card', async () => {
     const session = adjustableSession();
     const applied = applyLobbyAdjustments(session, [{ teamId: 't1', balls: 6 }]);
-    const post = await buildAdjustedPreviewPost(session, applied);
+    const renamed = applyLobbyRenames(session, [{ teamId: 't2', displayName: 'Duck Dynasty' }]);
+    const post = await buildAdjustedPreviewPost(session, applied, renamed);
     expect(post.kind).toBe('preview');
     expect(post.content).toContain('Team 1');
     expect(post.content).toContain('6 ball(s)');
+    expect(post.content).toContain('**Team 2** is now **Duck Dynasty**');
     expect(post.content).toContain('commitment posts next');
     expect(post.image?.data.length).toBeGreaterThan(0);
   });

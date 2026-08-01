@@ -43,7 +43,10 @@ function fakeSocket(): {
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** Harness: records posts, captures scheduled reconnects so a test can run them deterministically. */
-function harness(deliver: (attempt: number) => Promise<boolean> = () => Promise.resolve(true)) {
+function harness(
+  deliver: (attempt: number) => Promise<boolean> = () => Promise.resolve(true),
+  reimport?: (guildId: string | undefined) => Promise<boolean>,
+) {
   const posts: { guildId: string | undefined; content: string }[] = [];
   const sockets: ReturnType<typeof fakeSocket>[] = [];
   const scheduled: { fn: () => void; ms: number }[] = [];
@@ -60,6 +63,7 @@ function harness(deliver: (attempt: number) => Promise<boolean> = () => Promise.
       sockets.push(next);
       return next.socket;
     },
+    ...(reimport ? { reimport } : {}),
     schedule: (fn, ms) => {
       scheduled.push({ fn, ms });
       return scheduled.length;
@@ -327,6 +331,104 @@ describe('createStageWatcher (#220)', () => {
     expect(h.sockets).toHaveLength(2);
     stale.send(EDIT());
     await flush();
+    expect(h.posts).toHaveLength(0);
+  });
+
+  it('posts a line for a rename, independently of the ball edits (#219)', async () => {
+    const h = harness();
+    h.watcher.start();
+    h.latest().open();
+
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [{ teamId: 't1', team: 'Duck Dynasty', balls: 1 }] },
+      renames: [{ teamId: 't1', displayName: 'Duck Dynasty' }],
+      renamed: { teamId: 't1', from: 'Delta Ducks', to: 'Duck Dynasty', guildId: 'g1' },
+    });
+    expect(h.contents()).toEqual([
+      '🛠 Commissioner renamed **Delta Ducks** to **Duck Dynasty** in the Lottery Machine.',
+    ]);
+
+    // A ball edit on the *same* team is separate news — the two pending sets don't shadow one
+    // another. The stage always broadcasts both sets in full, so the rename rides along.
+    await h.send({
+      ...EDIT({ teamId: 't1', team: 'Duck Dynasty', from: 1, to: 4 }),
+      renames: [{ teamId: 't1', displayName: 'Duck Dynasty' }],
+    });
+    expect(h.posts).toHaveLength(2);
+    expect(h.contents()[1]).toContain('to 4 balls');
+
+    // Re-broadcasting the same rename is not news.
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [{ teamId: 't1', team: 'Duck Dynasty', balls: 4 }] },
+      adjustments: [{ teamId: 't1', balls: 4 }],
+      renames: [{ teamId: 't1', displayName: 'Duck Dynasty' }],
+    });
+    expect(h.posts).toHaveLength(2);
+  });
+
+  it('catches up on a rename made while disconnected, without inventing the old name', async () => {
+    const h = harness();
+    h.watcher.start();
+    h.latest().open();
+
+    await h.send({
+      type: 'lottery-state',
+      snapshot: {
+        phase: 'lobby',
+        lobby: { guildId: 'g1', rows: [{ teamId: 't1', team: 'Duck Dynasty', balls: 1 }] },
+        renames: [{ teamId: 't1', displayName: 'Duck Dynasty' }],
+        reveals: [],
+      },
+    });
+    expect(h.contents()).toEqual([
+      '🛠 Commissioner renamed a team to **Duck Dynasty** in the Lottery Machine.',
+    ]);
+  });
+
+  it('honours a re-import request exactly once while it is in flight (#219)', async () => {
+    const calls: (string | undefined)[] = [];
+    let release: (() => void) | undefined;
+    const h = harness(undefined, (guildId) => {
+      calls.push(guildId);
+      return new Promise<boolean>((resolve) => {
+        release = () => resolve(true);
+      });
+    });
+    h.watcher.start();
+    h.latest().open();
+
+    const flagged = {
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      reimportRequested: true,
+    };
+    await h.send(flagged);
+    // A repeated broadcast (or a reconnect snapshot) must not launch a second ESPN refetch.
+    await h.send(flagged);
+    await h.send({
+      type: 'lottery-state',
+      snapshot: { phase: 'lobby', lobby: { guildId: 'g1' }, reimportRequested: true, reveals: [] },
+    });
+    expect(calls).toEqual(['g1']);
+
+    // Once it settles, a *later* request is honoured again.
+    release?.();
+    await flush();
+    await h.send(flagged);
+    expect(calls).toEqual(['g1', 'g1']);
+  });
+
+  it('ignores a re-import request when no handler is wired', async () => {
+    const h = harness();
+    h.watcher.start();
+    h.latest().open();
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      reimportRequested: true,
+    });
     expect(h.posts).toHaveLength(0);
   });
 

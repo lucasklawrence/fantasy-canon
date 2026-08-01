@@ -161,6 +161,15 @@ export interface LotterySnapshot {
    * rows the commissioner touched.
    */
   adjustments?: LotteryAdjustment[];
+  /** In-Activity display-name fixes not yet folded into the bot's session (#219). */
+  renames?: LotteryRename[];
+  /**
+   * The commissioner asked the Activity to refetch the league from ESPN (#219). The api has no
+   * ESPN access, so this is a *request*: the bot's stage watcher performs the import, publishes a
+   * fresh public preview, and re-arms the lobby — which clears this flag along with every pending
+   * edit, since they were made against the field the refetch replaces.
+   */
+  reimportRequested?: boolean;
 }
 
 /**
@@ -179,6 +188,28 @@ export interface LotteryAdjustmentDetail {
   guildId?: string;
 }
 
+/**
+ * A commissioner's in-Activity display-name fix (#219), pending until the bot folds it in at
+ * `begin`. Kept in a set parallel to {@link LotteryAdjustment} rather than merged into it: the two
+ * are independently pending, and a subscriber deduping ball edits must not be perturbed by a
+ * rename (or vice versa).
+ *
+ * Renaming is **purely cosmetic w.r.t. fairness** — `commitmentPreimage` hashes only `teamId` and
+ * resolved ball counts, so a display name can never change what a commitment binds.
+ */
+export interface LotteryRename {
+  teamId: string;
+  displayName: string;
+}
+
+/** What one rename changed, carried on the broadcast for the bot's audit line (#219/#220). */
+export interface LotteryRenameDetail {
+  teamId: string;
+  from: string;
+  to: string;
+  guildId?: string;
+}
+
 /** The events fanned out over the WS, tagged for the client. */
 export type LotteryEvent =
   | { type: 'lottery-state'; snapshot: LotterySnapshot }
@@ -193,8 +224,14 @@ export type LotteryEvent =
        * and the bot would re-announce a retained edit on its next reconnect. Omitted when empty.
        */
       adjustments?: LotteryAdjustment[];
+      /** The complete pending rename set after this broadcast; same rationale as `adjustments`. */
+      renames?: LotteryRename[];
+      /** Mirrors {@link LotterySnapshot.reimportRequested}. */
+      reimportRequested?: boolean;
       /** Set only when this broadcast came from a commissioner edit rather than a bot re-arm. */
       adjusted?: LotteryAdjustmentDetail;
+      /** Set only when this broadcast came from a commissioner rename. */
+      renamed?: LotteryRenameDetail;
     }
   | { type: 'lottery-start'; start: LotteryStart }
   | { type: 'lottery-beat'; beat: LotteryBeat }

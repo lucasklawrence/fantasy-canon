@@ -44,7 +44,7 @@ import {
   toPendingSteps,
   type CatchUpContext,
 } from './replayTimeline.js';
-import { runHandshake } from './sdk.js';
+import { configuredMaxTeamBalls, runHandshake } from './sdk.js';
 import { apiPath, isDiscordActivity, proxyBase, wsUrl } from './transport.js';
 
 function byId(id: string): HTMLElement {
@@ -158,7 +158,9 @@ function renderOddsTable(
     const dot = el('span', 'swatch');
     dot.style.background = `hsl(${ranges[i].hue} 60% 62%)`;
     teamCell.appendChild(dot);
-    teamCell.appendChild(document.createTextNode(row.team));
+    teamCell.appendChild(
+      editable && row.teamId !== undefined ? renameTarget(row) : document.createTextNode(row.team),
+    );
     tr.appendChild(teamCell);
     const ballsCell =
       editable && row.teamId !== undefined ? stepperCell(row) : el('td', 'num', String(row.balls));
@@ -180,9 +182,14 @@ function renderOddsTable(
 
 // --- commissioner editing (#210): only ever offered on a pre-commitment lobby ---
 
-/** Bounds mirror core's `MAX_TEAM_BALLS`; the backend re-checks, this just stops silly requests. */
+/**
+ * Lower bound is structural (a team with no balls could never be drawn). The upper bound is
+ * injected by the page shell from core's `MAX_TEAM_BALLS` (#219) rather than hand-copied — core
+ * reaches `node:crypto`, so this bundle cannot import it, and a second literal would drift the
+ * moment the cap changed. The backend re-checks either way; this only stops silly requests.
+ */
 const MIN_EDIT_BALLS = 1;
-const MAX_EDIT_BALLS = 30;
+const MAX_EDIT_BALLS = configuredMaxTeamBalls();
 
 /** The bearer the backend re-verifies with Discord. Null outside the Activity (dev/standalone). */
 let accessToken: string | null = null;
@@ -250,6 +257,100 @@ async function sendAdjust(teamId: string, balls: number): Promise<void> {
   }
 }
 
+/** Longest name the backend accepts; keeping the input in step avoids a pointless round-trip. */
+const MAX_NAME_LENGTH = 40;
+
+/**
+ * The team name as a click-to-edit target. Committing on Enter or blur and reverting on Escape is
+ * the least surprising behaviour for a field that is really a one-off correction, and it avoids a
+ * per-keystroke request against a name the server would have to validate for uniqueness anyway.
+ */
+function renameTarget(row: LotteryOddsRow): HTMLElement {
+  const teamId = row.teamId as string;
+  const label = el('span', 'teamname editable', row.team);
+  label.setAttribute('role', 'button');
+  label.setAttribute('tabindex', '0');
+  label.setAttribute('title', 'Rename this team');
+  const open = (): void => {
+    const input = el('input', 'rename') as HTMLInputElement;
+    input.value = row.team;
+    input.maxLength = MAX_NAME_LENGTH;
+    input.setAttribute('aria-label', `Rename ${row.team}`);
+    let settled = false;
+    const commit = (send: boolean): void => {
+      if (settled) return;
+      settled = true;
+      const next = input.value.trim();
+      input.replaceWith(label);
+      if (send && next && next !== row.team) void sendRename(teamId, next);
+    };
+    input.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Enter') commit(true);
+      else if (event.key === 'Escape') commit(false);
+    });
+    input.addEventListener('blur', () => commit(true));
+    label.replaceWith(input);
+    input.focus();
+    input.select();
+  };
+  label.addEventListener('click', open);
+  label.addEventListener('keydown', (event: KeyboardEvent) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      open();
+    }
+  });
+  return label;
+}
+
+/** Push a display-name fix. Same wait-for-the-echo discipline as {@link sendAdjust}. */
+async function sendRename(teamId: string, displayName: string): Promise<void> {
+  await commissionerPost('/api/lottery/rename', { teamId, displayName }, (status) =>
+    status === 409 ? 'that name is already taken' : 'rename rejected',
+  );
+}
+
+/**
+ * Ask the bot to refetch the league from ESPN (#219). The api cannot do it, so this only raises a
+ * request; the bot performs the import, posts a fresh odds card in the channel, and re-arms the
+ * lobby — which is what repaints this page.
+ */
+async function sendReimport(): Promise<void> {
+  const button = byId('reimport-btn') as HTMLButtonElement;
+  button.disabled = true;
+  setStatus('re-importing from ESPN…', 'live');
+  await commissionerPost('/api/lottery/reimport', {}, () => 're-import rejected');
+  // The bot's re-arm is what actually clears this; re-enable after a beat so a failed request
+  // doesn't leave a permanently dead button.
+  setTimeout(() => {
+    button.disabled = false;
+  }, 5000);
+}
+
+/** Shared POST plumbing for the commissioner routes: bearer, error surfacing, no optimistic paint. */
+async function commissionerPost(
+  route: string,
+  body: Record<string, unknown>,
+  describe: (status: number) => string,
+): Promise<boolean> {
+  if (!accessToken) return false;
+  try {
+    const res = await fetch(apiPath(activityBase, route), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      setStatus(describe(res.status), 'err');
+      return false;
+    }
+    return true;
+  } catch {
+    setStatus('edit failed — backend offline', 'err');
+    return false;
+  }
+}
+
 /** Re-render the odds table in place so disabled/enabled steppers reflect what's in flight. */
 function repaintLobbyEdits(): void {
   if (currentLobby) renderOddsTable(currentLobby.rows, [], commissioner);
@@ -297,6 +398,9 @@ function renderLobby(lobby: LotteryLobby): void {
   byId('commit').textContent = 'Commissioner will begin the draw soon…';
   renderOddsTable(lobby.rows, [], commissioner);
   show('edit-hint', commissioner);
+  // Re-import only makes sense for an ESPN-backed ceremony, but the client can't tell — the bot
+  // refuses a manual `teams:` setup server-side and says so.
+  show('edit-actions', commissioner);
   // The answer is lobby-scoped server-side, so a client that booted while the stage was idle was
   // told "not a commissioner" and would otherwise sit there read-only through the whole lobby —
   // exactly the case where the commissioner already had the Activity open before running `setup`.
@@ -314,6 +418,7 @@ function renderWaiting(start: LotteryStart, drawnTeams: string[] = []): void {
   // lobby we were holding and retract the offer (#210).
   currentLobby = undefined;
   show('edit-hint', false);
+  show('edit-actions', false);
   byId('title').textContent = start.title;
   byId('waiting-sub').textContent =
     `${start.teamCount} teams · ${start.totalBalls} balls in the hopper`;
@@ -921,6 +1026,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       // No lobby ⇒ nothing to edit (#210); the stage refuses adjustments in this phase anyway.
       currentLobby = undefined;
       show('edit-hint', false);
+      show('edit-actions', false);
       hopper().sync([], []); // empty the pile — the canvas clears on the next frame
       break;
     case 'lobby':
@@ -1139,6 +1245,7 @@ async function boot(): Promise<void> {
     else startCatchUp();
   });
   byId('replay-skip').addEventListener('click', skipReplay);
+  byId('reimport-btn').addEventListener('click', () => void sendReimport());
   byId('sound-btn').addEventListener('click', () => audio.toggle());
   document.addEventListener('visibilitychange', onVisibilityChange);
   const inDiscord = isDiscordActivity(window.location);
