@@ -68,6 +68,13 @@ export interface CeremonySession {
   guildId: string;
   /** Origin channel id — persisted at commit so startup recovery can disclose the seed there (#176). */
   channelId?: string;
+  /**
+   * Where `setup` ran. Separate from {@link CeremonySession.channelId}, which is deliberately
+   * captured at `begin` so the seed disclosure lands beside the commitment (#176) — but the
+   * in-Activity edit audit line (#220) fires *before* `begin` exists, so it needs the channel the
+   * odds preview was posted to.
+   */
+  lobbyChannelId?: string;
   title: string;
   createdAt: number;
   state: DraftOrderState;

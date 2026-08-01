@@ -109,6 +109,25 @@ open the Activity still see the bag the commitment binds, named team by team, be
 A per-edit live channel post would be a stronger trail but requires the bot to subscribe to the
 stage — deferred, not dropped.
 
+> **Amended by #220 (2026-07-31).** The gap this left — the channel showing the _original_ preview
+> for however many days sit between an edit and `begin` — was judged worth closing, so the bot now
+> does subscribe. `apps/bot/src/lib/lotteryStageWatcher.ts` opens an **outbound** WebSocket to
+> `/api/lottery/ws` (backoff to a 60s ceiling; the bot still exposes no inbound surface) and posts
+> one line per edit to the channel where `setup` ran.
+>
+> Two things did **not** change, deliberately. The watcher is **read-only**: it never touches a
+> `CeremonySession`, so `begin` remains the single authoritative drain (Decision 4 stands, and
+> `keepAdjustments` stays). And the `begin` preview still posts in full — the live lines are an
+> addition to the audit trail, not a replacement, so a ceremony whose socket was down the whole
+> time still commits a bag published in-channel first.
+>
+> The edit detail rides on the existing `lottery-lobby` broadcast as an `adjusted` field rather
+> than a new event type: the bot needs to tell a human edit from a bot-driven re-arm, and diffing
+> two lobbies to recover that is both fragile and unable to name the previous ball count. Routing
+> is guarded twice — the stage stamps the lobby's `guildId` onto the detail, and the bot only posts
+> if _this_ process holds a `GAME_OPEN` ceremony for that guild, so a stale lobby on the shared
+> process-wide stage (#191) can never make the bot post into a league it isn't running.
+
 ## Consequences
 
 - `LotteryOddsRow` gains an optional `teamId`. A lobby armed without ids is not editable: display

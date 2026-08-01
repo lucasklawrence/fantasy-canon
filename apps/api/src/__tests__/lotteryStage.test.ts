@@ -313,8 +313,49 @@ describe('adjust() — commissioner lobby edits (#210)', () => {
     // 3/2/4 of 9 balls — every row's odds move, not just the edited one.
     expect(lobby.rows[0].firstPct).toBeCloseTo((3 / 9) * 100, 5);
     expect(lobby.rows[2].firstPct).toBeCloseTo((4 / 9) * 100, 5);
-    // Fanned out as the ordinary lobby event, so clients need no new branch.
-    expect(events).toEqual([{ type: 'lottery-lobby', lobby }]);
+    // Fanned out as the ordinary lobby event, so clients need no new branch; `adjusted` rides
+    // along for the bot's audit line (#220) and is ignored by the browser.
+    expect(events).toEqual([
+      {
+        type: 'lottery-lobby',
+        lobby,
+        // The cumulative pending set, so a subscriber dedupes on stage state rather than on the
+        // events it happened to witness (#220).
+        adjustments: [{ teamId: 't-a', balls: 4 }],
+        adjusted: { teamId: 't-a', team: 'A', from: 1, to: 4 },
+      },
+    ]);
+  });
+
+  it('carries what changed on the broadcast, so the bot never has to diff two lobbies (#220)', () => {
+    const stage = createLotteryStage();
+    stage.lobby({ ...EDITABLE, guildId: 'g1' });
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+
+    stage.adjust({ teamId: 't-a', balls: 4 });
+
+    const event = events[0] as { type: 'lottery-lobby'; adjusted?: unknown };
+    expect(event.adjusted).toEqual({
+      teamId: 't-a',
+      team: 'A',
+      from: 1, // the count *before* this edit, read off the row it replaced
+      to: 4,
+      guildId: 'g1',
+    });
+
+    // A second edit to the same team reports the previous edit's value as `from`, not the
+    // original — the audit line has to read as a chain of changes.
+    stage.adjust({ teamId: 't-a', balls: 6 });
+    expect((events[1] as { adjusted?: { from: number } }).adjusted?.from).toBe(4);
+  });
+
+  it('leaves `adjusted` off a bot-driven re-arm — only a human edit sets it', () => {
+    const stage = createLotteryStage();
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+    stage.lobby(EDITABLE);
+    expect(events[0]).not.toHaveProperty('adjusted');
   });
 
   it('records edits as pending until the bot drains them, one entry per team', () => {
