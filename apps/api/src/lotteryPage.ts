@@ -85,17 +85,13 @@ export function lotteryHtml(clientId: string): string {
   .chute.active { border-color: rgba(245,214,123,.5);
     box-shadow: 0 0 14px rgba(245,214,123,.28), inset 0 0 8px rgba(245,214,123,.18); }
 
-  /* the pull (#195): one ball is sucked to the chute mouth, slides the tube, and waits at the
-     exit until the reveal hands it off to the big drop ball (FLIP in the client). */
+  /* the exit (#215): once the reveal lands, the drawn ball leaves the pile (canvas, hopperSim),
+     then this tinted ball slides the clear tube and FLIPs into the big drop ball (client). */
   .pullball { position: absolute; border-radius: 50%;
     background: radial-gradient(circle at 32% 28%, #fff 0%, #f5d67b 35%, #c8912e 100%);
     box-shadow: 0 2px 5px rgba(0,0,0,.5); opacity: 0; pointer-events: none; }
-  #suck-ball { width: 26px; height: 26px; left: calc(50% - 13px); top: 40%; }
   #tube-ball { width: 14px; height: 14px; left: calc(50% - 7px); top: -14px; }
-  .machine-left.pulling #suck-ball { animation: suck .5s cubic-bezier(.55,0,.85,.55) forwards; }
-  .machine-left.pulling #tube-ball {
-    animation: tube .55s .42s cubic-bezier(.45,0,.85,.6) forwards,
-      held-pulse .9s 1.1s ease-in-out infinite; }
+  #tube-ball.transit { animation: tube .4s cubic-bezier(.45,0,.85,.6) forwards; }
   #drum .now { font-size: 22px; font-weight: 800; text-align: center; color: #f5d67b;
     animation: pulse 0.9s ease-in-out infinite; margin: 8px 0 12px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
@@ -148,13 +144,8 @@ export function lotteryHtml(clientId: string): string {
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
   @keyframes agitate { 0%,100% { transform: translate(0,0) } 25% { transform: translate(1px,-1px) }
     50% { transform: translate(-1px,1px) } 75% { transform: translate(1px,1px) } }
-  @keyframes suck { 0% { opacity: 0; transform: translate(0,0) scale(1) } 12% { opacity: 1 }
-    55% { transform: translate(-7px,70px) scale(.85) }
-    100% { opacity: 1; transform: translate(0,165px) scale(.55) } }
   @keyframes tube { 0% { opacity: 0; transform: translateY(0) } 20% { opacity: 1 }
     100% { opacity: 1; transform: translateY(46px) } }
-  @keyframes held-pulse { 0%,100% { box-shadow: 0 0 4px rgba(245,214,123,.5) }
-    50% { box-shadow: 0 0 12px rgba(245,214,123,.95) } }
   @keyframes drop { 0% { transform: translateY(-220px) scale(.6); opacity: 0 }
     60% { transform: translateY(12px) scale(1.04); opacity: 1 } 80% { transform: translateY(-8px) }
     100% { transform: translateY(0) scale(1) } }
@@ -196,7 +187,7 @@ export function lotteryHtml(clientId: string): string {
   <section class="card hidden" id="stage">
     <div class="machine">
       <div class="machine-left" id="machine-left">
-        <div class="hopper" id="hopper"><canvas id="hopper-canvas"></canvas><div class="pullball" id="suck-ball"></div></div>
+        <div class="hopper" id="hopper"><canvas id="hopper-canvas"></canvas></div>
         <div class="chute" id="chute"><div class="pullball" id="tube-ball"></div></div>
       </div>
       <div>

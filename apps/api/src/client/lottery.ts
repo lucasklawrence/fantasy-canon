@@ -4,9 +4,10 @@
  *
  * Pure presentation: every state change arrives from the backend stage (WS push, polling
  * fallback), which the bot paces — this client never draws, times, or decides anything. It
- * renders the full drama: waiting-room odds table → hopper spin + drum-roll → the pull (a ball
- * drawn through the chute, timed against the beat window, #195) → ball drop with a per-pick odds
- * flash → the growing order board → final board + seed-verify panel (or the abort banner).
+ * renders the full drama: waiting-room odds table → cage spin + drum-roll (chute glowing) → the
+ * drawn ball's exit (#215: the actual numbered ball swims out of the pile, slides the tube, and
+ * lands as the drop ball) → per-pick odds flash → the growing order board → final board +
+ * seed-verify panel (or the abort banner).
  * Inside Discord it runs the shared SDK handshake and `/.proxy` transport; standalone (dev) it
  * skips the SDK — same split as the draft board client.
  */
@@ -321,44 +322,51 @@ function renderWaiting(start: LotteryStart, drawnTeams: string[] = []): void {
   renderOddsTable(start.rows, drawnTeams);
 }
 
-// --- the pull (#195): a ball leaves the hopper through the chute during the drum-roll window ---
+// --- the exit (#215): the drawn ball leaves the drum through the chute when the reveal lands ---
+//
+// This retires #195's pre-reveal anonymous pull. The client cannot know the winner before the
+// reveal event — publishing it earlier (even encoded) would leak the pick — so a *specific* ball
+// can only start moving once the reveal is public. The drum-roll's tension cue is now the chute
+// glow; the payoff is real: the actual numbered ball (the same `drawnBallFor` derivation every
+// viewer shows) swims out of the pile, slides the tube, and lands as the drop ball.
 
-/** Suck-to-chute + tube descent (must track the `suck`/`tube` keyframe timings in the CSS). */
-const PULL_MS = 1000;
-let pullTimer: ReturnType<typeof setTimeout> | null = null;
-/** Beat pick the pull is armed for — poll repaints of the same beat must not restart it. */
+/** Chute-glow lead before the reveal is due — the drum-roll's "something's coming" cue. */
+const CHUTE_GLOW_LEAD_MS = 1150;
+/** Tube descent duration; a fixed timer rather than animationend so it settles even when hidden. */
+const TUBE_MS = 420;
+let chuteTimer: ReturnType<typeof setTimeout> | null = null;
+/** Beat pick the glow is armed for — poll repaints of the same beat must not restart it. */
 let armedPick: number | null = null;
 /** Last reveal actually animated — repeat paints of the same reveal only refresh text. */
 let lastDropPick: number | null = null;
-// The live pacing, kept for scheduling the pull against the beat window.
+// The live pacing, kept for scheduling the chute glow against the beat window.
 let currentStart: LotteryStart | undefined;
+/** Monotonic token — anything that supersedes a running exit choreography bumps it. */
+let choreoToken = 0;
+/** Pick whose exit is mid-flight, so a poll repaint doesn't reveal the drop ball early. */
+let exitInFlight: number | null = null;
 
-/**
- * Schedule the pull so the ball reaches the chute exit just before the reveal lands: the bot
- * paces `beat → delayMs → reveal`, so the pull starts at `windowMs - PULL_MS`. Network jitter is
- * fine either way — the ball waits pulsing at the exit, or the reveal fast-forwards past the pull.
- */
-function armPull(pick: number, windowMs: number): void {
+function armChute(pick: number, windowMs: number): void {
   if (armedPick === pick) return;
-  cancelPull();
+  resetChute();
   armedPick = pick;
-  const lead = Math.max(0, windowMs - PULL_MS - 150);
-  pullTimer = setTimeout(() => {
-    byId('machine-left').classList.add('pulling');
-    byId('chute').classList.add('active');
-    // Extraction recoil (#211): the pile reacts to a ball being yanked toward the chute.
-    hopper().pulse();
-  }, lead);
+  const lead = Math.max(0, windowMs - CHUTE_GLOW_LEAD_MS);
+  chuteTimer = setTimeout(() => byId('chute').classList.add('active'), lead);
 }
 
-function cancelPull(): void {
-  if (pullTimer) {
-    clearTimeout(pullTimer);
-    pullTimer = null;
+/** Tear down glow + any exit in flight. Every path that leaves the current reveal calls this. */
+function resetChute(): void {
+  choreoToken += 1;
+  exitInFlight = null;
+  if (chuteTimer) {
+    clearTimeout(chuteTimer);
+    chuteTimer = null;
   }
   armedPick = null;
-  byId('machine-left').classList.remove('pulling');
   byId('chute').classList.remove('active');
+  const tube = byId('tube-ball');
+  tube.classList.remove('transit');
+  tube.style.background = '';
 }
 
 /** Swap a node for a bare clone — the only way to retrigger its CSS animations. */
@@ -403,9 +411,9 @@ function renderDrum(pick: number, remaining: string[], windowMs?: number): void 
   hopper().agitate(true); // the boil (#211); .spinning still shakes the container
   byId('drum-now').textContent = `Drawing pick #${pick}…`;
   const win = windowMs ?? currentStart?.delayMs ?? 4000;
-  armPull(pick, win);
-  // The roll spans the same window the pull is scheduled against; a poll repaint of the same
-  // beat must not restart the crescendo (same dedupe rule as `armPull`).
+  armChute(pick, win);
+  // The roll spans the same window the chute glow is scheduled against; a poll repaint of the
+  // same beat must not restart the crescendo (same dedupe rule as `armChute`).
   if (rolledPick !== pick) {
     rolledPick = pick;
     audio.drumRoll(win);
@@ -415,49 +423,105 @@ function renderDrum(pick: number, remaining: string[], windowMs?: number): void 
   for (const team of remaining) chips.appendChild(el('span', 'chip', team));
 }
 
+/** The drawn ball's face on DOM elements (tube ball, drop ball) — matches the pile's sprites. */
+function ballFace(hue: number): string {
+  return `radial-gradient(circle at 32% 28%, #fff 0%, hsl(${hue} 65% 68%) 32%, hsl(${hue} 55% 38%) 100%)`;
+}
+
+/**
+ * The exit (#215): steer the drawn ball out of the pile, slide it down the tube, then land it as
+ * the drop ball. Strictly cosmetic and strictly bounded — every await is capped, any superseding
+ * state change (a newer reveal, an abort, a repaint from scratch) bumps `choreoToken` and the
+ * stale run stops touching the DOM. The board/headline were already updated by `renderDrop`; only
+ * the drop ball itself waits for the flight.
+ */
+async function runExitChoreography(
+  reveal: LotteryReveal,
+  num: number | null,
+  hue: number | undefined,
+  oddsText: string,
+): Promise<void> {
+  const token = ++choreoToken;
+  exitInFlight = reveal.pick;
+  // Glow through the exit even when the reveal outran the glow's lead timer.
+  byId('chute').classList.add('active');
+  // The extraction resolves from the sim's rAF loop — which never runs in a hidden tab. The race
+  // keeps the reveal bounded regardless: setTimeout fires even hidden (clamped, but it fires), so
+  // a backgrounded viewer still has the correct drop state waiting when they return.
+  const flew =
+    num !== null
+      ? await Promise.race([
+          hopper().extractBall(num),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1800)),
+        ])
+      : false;
+  if (token !== choreoToken) return;
+  if (flew) {
+    const tube = byId('tube-ball');
+    if (hue !== undefined) tube.style.background = ballFace(hue);
+    tube.classList.remove('transit');
+    void tube.offsetWidth; // restart the CSS animation for this transit
+    tube.classList.add('transit');
+    await new Promise((resolve) => setTimeout(resolve, TUBE_MS));
+    if (token !== choreoToken) return;
+  }
+  exitInFlight = null;
+  // Measure the chute exit BEFORE tearing the transit down — the FLIP starts where the tube ends.
+  const chuteRect = byId('chute').getBoundingClientRect();
+  const tube = byId('tube-ball');
+  tube.classList.remove('transit');
+  tube.style.background = '';
+  byId('chute').classList.remove('active');
+  show('drop', true);
+  const ball = replaceNode('drop-pick');
+  ball.textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
+  // The clone carries the previous reveal's inline tint — set or clear it explicitly.
+  ball.style.background = num !== null && hue !== undefined ? ballFace(hue) : '';
+  replaceNode('drop-team').textContent = reveal.team;
+  replaceNode('drop-odds').textContent = oddsText;
+  flipFromChute(ball, chuteRect);
+}
+
 function renderDrop(reveal: LotteryReveal): void {
   show('stage', true);
   byId('hopper').classList.remove('spinning');
   hopper().agitate(false);
-  // The drawn team's balls leave the pile — the hopper now shows the live bag for the next draw.
-  hopper().removeTeam(reveal.team);
-  show('drop', true);
   const rerun = lastDropPick !== reveal.pick;
   lastDropPick = reveal.pick;
-  // Measure the chute exit BEFORE tearing down the pull so the handoff starts where it ended.
-  const chuteRect = byId('chute').getBoundingClientRect();
-  cancelPull();
-  // Which ball came out (#211): cosmetic but stable — every viewer, poll repaint, and replay
+  // Which ball came out (#211/#215): cosmetic but stable — every viewer, poll repaint, and replay
   // derives the same number from the public commitment. See `drawnBallFor`.
   const range = currentStart
     ? assignBallRanges(currentStart.rows).find((r) => r.team === reveal.team)
     : undefined;
-  const ballText =
+  const num =
     range && range.end >= range.start
-      ? `ball #${drawnBallFor(currentStart?.commitment ?? '', reveal.pick, range)} · `
-      : '';
-  const oddsText = `${ballText}${reveal.balls} ball${reveal.balls === 1 ? '' : 's'} · ${reveal.oddsPct.toFixed(1)}% chance at this slot`;
-  if (rerun) {
-    // The reveal is here — end the roll (early if the network beat the schedule) and land the hit.
-    // Poll repaints of an already-shown reveal stay silent, same rule as the animations below.
-    audio.stopRoll();
-    audio.hit();
-    // Replace the animated nodes to retrigger their CSS animations for this reveal.
-    const ball = replaceNode('drop-pick');
-    ball.textContent = `#${reveal.pick}`;
-    replaceNode('drop-team').textContent = reveal.team;
-    replaceNode('drop-odds').textContent = oddsText;
-    flipFromChute(ball, chuteRect);
-  } else {
-    // A polling repaint of an already-shown reveal refreshes text without re-animating.
-    byId('drop-pick').textContent = `#${reveal.pick}`;
-    byId('drop-team').textContent = reveal.team;
-    byId('drop-odds').textContent = oddsText;
-  }
+      ? drawnBallFor(currentStart?.commitment ?? '', reveal.pick, range)
+      : null;
+  const oddsText = `${num !== null ? `ball #${num} · ` : ''}${reveal.balls} ball${reveal.balls === 1 ? '' : 's'} · ${reveal.oddsPct.toFixed(1)}% chance at this slot`;
+  // The reveal's *information* is public the moment the event lands — headline, board, chips all
+  // update immediately. Only the drop ball's appearance waits for the exit choreography.
   const chips = byId('drum-remaining');
   clear(chips);
   for (const team of reveal.remaining) chips.appendChild(el('span', 'chip', team));
   byId('drum-now').textContent = `Pick #${reveal.pick}: ${reveal.team}!`;
+  if (rerun) {
+    // End the roll (early if the network beat the schedule) and land the hit. Poll repaints of an
+    // already-shown reveal stay silent, same rule as the animations.
+    audio.stopRoll();
+    audio.hit();
+    show('drop', false); // the drop ball appears when the ball actually comes out
+    void runExitChoreography(reveal, num, range?.hue, oddsText);
+  } else {
+    // A polling repaint of an already-shown reveal refreshes text without re-animating — and
+    // must not unveil the drop ball while its exit is still in flight.
+    if (exitInFlight !== reveal.pick) show('drop', true);
+    byId('drop-pick').textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
+    byId('drop-team').textContent = reveal.team;
+    byId('drop-odds').textContent = oddsText;
+  }
+  // The drawn team's other balls fade from the pile (the extracted one exits via the chute) —
+  // started AFTER the choreography grabbed its ball, so the fade exemption sees the extraction.
+  hopper().removeTeam(reveal.team);
 }
 
 // One celebration per finished ceremony — a polling client re-rendering a finished snapshot
@@ -465,7 +529,7 @@ function renderDrop(reveal: LotteryReveal): void {
 let celebrated = false;
 
 function renderFinish(snapshot: LotterySnapshot): void {
-  cancelPull();
+  resetChute();
   hopper().agitate(false); // stage is leaving the screen; let the pile settle and the loop park
   audio.stopRoll(); // a finish can land mid-roll (a skip, or a finish with no drop before it)
   show('waiting', false);
@@ -712,7 +776,7 @@ function stopPlayback(options: { keepPull?: boolean } = {}): void {
   // very pick the merge lands on, so both survive.
   if (!options.keepPull) {
     audio.stopRoll();
-    cancelPull();
+    resetChute();
   }
 }
 
@@ -827,7 +891,7 @@ function onVisibilityChange(): void {
     if (onHiddenAction(playbackMode) === 'pause') {
       cursor.pause();
       // The pull is a CSS animation the browser freezes too; drop it and re-arm on the way back.
-      cancelPull();
+      resetChute();
       return;
     }
     // Cancel (a catch-up): keep every published pick it had queued — those are public results the
@@ -854,12 +918,12 @@ function onVisibilityChange(): void {
     return;
   }
   if (!cursor.isPaused()) return;
-  // Re-arm the pull against what is genuinely left of the drum-roll window. A short remainder is
-  // fine: `armPull` clamps its lead to 0, so the ball snaps to the chute and the reveal lands on it.
+  // Re-arm the chute glow against what is genuinely left of the drum-roll window. A short
+  // remainder is fine: `armChute` clamps its lead to 0 and the glow just comes on immediately.
   const next = cursor.peek();
   const leftMs = cursor.remainingMs();
   cursor.resume();
-  if (next?.event.type === 'lottery-reveal') armPull(next.event.reveal.pick, leftMs);
+  if (next?.event.type === 'lottery-reveal') armChute(next.event.reveal.pick, leftMs);
 }
 
 function confetti(): void {
@@ -898,7 +962,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
     celebrated = false;
     lastDropPick = null;
     rolledPick = null;
-    cancelPull();
+    resetChute();
     // Any exit from a drum-roll must kill the boil — and the roll (#216) follows the same rule:
     // only drop/finish end them otherwise, and idle() can never park the sim's loop while
     // agitating, even over an empty pile.
@@ -963,7 +1027,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       renderFinish(snapshot);
       break;
     case 'aborted':
-      cancelPull();
+      resetChute();
       // An abort mid-drum-roll arrives with the boil on, and no drop/finish will ever follow to
       // turn it off — without this the sim agitates a hidden pile at 60fps for as long as the
       // iframe stays open on the abort screen. Same for the roll: an abort must not drum on.
