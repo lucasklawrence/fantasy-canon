@@ -699,3 +699,21 @@ describe('lottery payload guards', () => {
     );
   });
 });
+
+describe('armedSeq (#232)', () => {
+  it('bumps on every arm and holds steady across edit echoes', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    const first = stage.snapshot().lobby?.armedSeq;
+    expect(first).toBeGreaterThan(0);
+
+    // An in-lobby edit re-broadcasts the lobby but is NOT a re-arm — same commissioner stamp,
+    // same seq, so clients don't re-ask /me on every stepper tap.
+    stage.adjust({ teamId: 't-a', balls: 4 });
+    expect(stage.snapshot().lobby?.armedSeq).toBe(first);
+
+    // A re-arm may carry a different stamp — the seq moving is the client's re-check signal.
+    stage.lobby({ ...EDITABLE, commissionerIds: ['someone-else'] });
+    expect(stage.snapshot().lobby?.armedSeq).toBe((first as number) + 1);
+  });
+});

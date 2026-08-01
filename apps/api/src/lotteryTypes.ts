@@ -101,6 +101,13 @@ export interface LotteryLobby {
    * gate the busy check — {@link LotteryStage.lobby} refuses a committed run guild-agnostically.
    */
   guildId?: string;
+  /**
+   * Arm counter, assigned by the stage — bumps on every {@link LotteryStage.lobby} call and stays
+   * fixed across edit echoes. Lets a client distinguish "a new/re-armed lobby" (whose commissioner
+   * stamp may differ — re-check `/api/lottery/me`, #232) from "the lobby I'm looking at changed".
+   * Never sent by the bot; absent only from stages predating this field.
+   */
+  armedSeq?: number;
 }
 
 /**

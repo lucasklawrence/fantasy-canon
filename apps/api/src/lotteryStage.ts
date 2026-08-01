@@ -489,6 +489,12 @@ export function createLotteryStage(): LotteryStage {
   let renames = new Map<string, string>();
   /** The commissioner asked for an ESPN refetch; only the bot can honour it (#219). */
   let reimportRequested = false;
+  /**
+   * Monotonic arm counter for {@link LotteryLobby.armedSeq} (#232). Seeded from the clock so the
+   * values a restarted api hands out never collide with the previous process's — a client that
+   * kept its iframe open across the restart must still see the next arm as new.
+   */
+  let lobbySeq = Date.now();
   let start: LotteryStart | undefined;
   let pendingBeat: LotteryBeat | undefined;
   let reveals: LotteryReveal[] = [];
@@ -600,6 +606,9 @@ export function createLotteryStage(): LotteryStage {
         ...publicLobby,
         rows,
         totalBalls: rows.reduce((sum, row) => sum + row.balls, 0),
+        // Bumps per arm, never per edit — the client-side signal that the commissioner stamp may
+        // have changed and `/api/lottery/me` is worth re-asking (#232).
+        armedSeq: ++lobbySeq,
       };
       start = undefined;
       pendingBeat = undefined;

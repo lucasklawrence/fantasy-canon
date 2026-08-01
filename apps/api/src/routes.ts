@@ -65,6 +65,11 @@ export interface RouteDeps {
    * only as trustworthy as this call — never derive the caller's id from the request body.
    */
   identify: (accessToken: string) => Promise<DiscordUser>;
+  /**
+   * Sink for client-reported diagnostics (#231) — the Activity iframe's console is unreachable
+   * from the operator's machine, so handshake failures beacon here. Log-only, never stored.
+   */
+  clientLog?: (message: string) => void;
   /** The lottery-machine reveal stage the bot paces via `POST /api/lottery/*` (#169). */
   lottery: LotteryStage;
   /** The lottery client bundle (`dist/client/lottery.js`), or `undefined` if `build:client` hasn't run. */
@@ -136,7 +141,7 @@ export async function routeRequest(
     return { status: 200, contentType: 'text/javascript; charset=utf-8', body: script };
   }
   if (path.startsWith('/api/lottery/')) {
-    return await lotteryRoute(method, path, body, deps, headers);
+    return await lotteryRoute(method, path, body, deps, headers, url.split('?')[1]);
   }
   if (method === 'GET' && path === '/api/state') {
     return json(200, deps.getEnvelope());
@@ -194,9 +199,20 @@ async function lotteryRoute(
   body: string,
   deps: RouteDeps,
   headers: Record<string, string | string[] | undefined>,
+  /** Raw query string (normalizePath strips it from `path`); only `/diag` reads it (#231). */
+  query?: string,
 ): Promise<HttpReply> {
   if (method === 'GET' && path === '/api/lottery/state') {
     return json(200, deps.lottery.snapshot());
+  }
+  if (method === 'GET' && path === '/api/lottery/diag') {
+    // Client-side failure beacon (#231): a GET with a query param is the one request shape proven
+    // to traverse every layer between the iframe and this process (Discord proxy, tunnel), so the
+    // handshake reports its own death here. Unauthenticated by design — it fires exactly when
+    // auth is broken — and bounded: truncated, log-only, nothing stored or echoed back.
+    const message = new URLSearchParams(query ?? '').get('msg') ?? '';
+    deps.clientLog?.(message.slice(0, 300));
+    return { status: 204, contentType: 'text/plain', body: '' };
   }
   if (method === 'GET' && path === '/api/lottery/me') {
     const caller = await identifyCaller(deps, headers);
