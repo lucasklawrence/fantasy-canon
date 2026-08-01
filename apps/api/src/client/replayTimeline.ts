@@ -70,6 +70,11 @@ export function buildReplayTimeline(snapshot: LotterySnapshot): ReplayStep[] {
   }
   if (snapshot.finish) {
     steps.push({ atMs: t, event: { type: 'lottery-finish', finish: snapshot.finish } });
+  } else if (snapshot.pendingBeat) {
+    // The draw was mid-drum-roll when this snapshot was taken (#207): the pick in flight has a
+    // beat but no reveal yet. Without this step a catch-up started during a drum-roll plays that
+    // pick as a bare drop — stopped hopper, no pull — because nothing ever re-arms the suspense.
+    steps.push({ atMs: t, event: { type: 'lottery-beat', beat: snapshot.pendingBeat } });
   }
   return steps;
 }
@@ -97,6 +102,12 @@ export interface CatchUpContext {
    * history — so a mismatch here is the only reliable "this is a different ceremony" signal.
    */
   commitment?: string;
+  /**
+   * The pick of the last drum-roll beat the catch-up has queued or played (#207). Polling re-serves
+   * the same `pendingBeat` every couple of seconds, so without this the fallback transport would
+   * queue the same drum-roll over and over.
+   */
+  beatPick?: number;
 }
 
 /** Two finishes describe the same sealed result. Shared so both modes' echo rules cannot drift. */
@@ -116,6 +127,25 @@ export function sameFinishOrder(
 export interface PendingStep {
   delayMs: number;
   event: LotteryEvent;
+}
+
+/**
+ * Catch-up pacing (#207): how much of a step's delay to actually wait, given how deep the queue
+ * is. At the bot's 5s delay floor, full catch-up pacing costs 4.3s a pick — 700ms/pick of
+ * headroom — so a catch-up started several picks in could never reach the present; it trailed
+ * until the buffered finish played. Hurry while far behind, breathe near the merge:
+ *
+ *   depth > 6 — sprint (35%): the viewer is way back; picks flash by, the gap closes fast.
+ *   depth > 2 — hurry (60%): 60% of 4.3s = 2.6s/pick, decisively under the 5s floor.
+ *   otherwise — full pacing: the last pick or two before the merge get their whole drum-roll.
+ *
+ * Nonzero delays are floored so a hurried step is never instantaneous — the reveal still needs
+ * its drop animation. A zero delay stays zero: the timeline's first step fires immediately.
+ */
+export function catchUpPace(delayMs: number, queueDepth: number): number {
+  if (delayMs <= 0) return 0;
+  const factor = queueDepth > 6 ? 0.35 : queueDepth > 2 ? 0.6 : 1;
+  return Math.max(250, Math.round(delayMs * factor));
 }
 
 /** Absolute `atMs` schedule → per-step gaps, for a chained playback cursor. */
@@ -174,11 +204,13 @@ export function classifyDuringCatchUp(
         // would throw away the catch-up and repaint the board a pick backwards.
         return identified ? 'ignore' : 'cancel';
       }
-      // Otherwise it describes the same run. No new picks and no new finish ⇒ pure echo from the
-      // polling fallback. If it *has* advanced past us, buffer the remainder so a poll-only
-      // client still merges — repainting mid-catch-up would blow the board away instead.
+      // Otherwise it describes the same run. If it *has* advanced past us — new picks, a new
+      // finish, or a drum-roll we haven't queued (#207) — buffer the remainder so a poll-only
+      // client still merges; repainting mid-catch-up would blow the board away instead. With
+      // nothing new it is a pure echo from the polling fallback.
       if (snapshot.reveals.length > context.known) return 'buffer';
       if (snapshot.finish && !sameFinishOrder(snapshot.finish, context.finish)) return 'buffer';
+      if (snapshot.pendingBeat && snapshot.pendingBeat.pick !== context.beatPick) return 'buffer';
       return 'ignore';
     }
     default: {
@@ -215,6 +247,11 @@ export function catchUpTailFromSnapshot(
   }
   if (snapshot.finish && !sameFinishOrder(snapshot.finish, context.finish)) {
     tail.push({ type: 'lottery-finish', finish: snapshot.finish });
+  } else if (snapshot.pendingBeat && snapshot.pendingBeat.pick !== context.beatPick) {
+    // The live draw is mid-drum-roll for a pick we haven't queued (#207): splice its beat onto
+    // the tail so the poll-only path re-arms the suspense — and so the queue drains right after
+    // a *beat*, which is what lets the handoff keep the pull for the pick the merge lands on.
+    tail.push({ type: 'lottery-beat', beat: snapshot.pendingBeat });
   }
   return tail;
 }

@@ -12,6 +12,7 @@
  */
 
 import type {
+  LotteryBeat,
   LotteryEvent,
   LotteryFinish,
   LotteryLobby,
@@ -33,6 +34,7 @@ import {
 } from './playbackCursor.js';
 import {
   buildReplayTimeline,
+  catchUpPace,
   catchUpTailFromSnapshot,
   classifyDuringCatchUp,
   REPLAY_DWELL_MS,
@@ -532,8 +534,14 @@ let catchUpKnown = 0;
 let catchUpFinish: LotteryFinish | undefined;
 /** Commitment of the ceremony being caught up on, so a re-run is recognised as a different one. */
 let catchUpCommitment: string | undefined;
+/** Pick of the last drum-roll the catch-up queued or sourced — polling re-serves the same
+ * `pendingBeat` every couple of seconds, and this is what keeps it from re-queueing (#207). */
+let catchUpBeatPick: number | undefined;
 /** Last phase the server reported — catch-up is only meaningful while a draw is actually running. */
 let livePhase: LotteryPhase = 'idle';
+/** The drum-roll the live ceremony is inside right now, if any — a catch-up started mid-beat
+ * carries it so the pick in flight keeps its suspense (#207). */
+let livePendingBeat: LotteryBeat | null = null;
 
 /** The context the pure catch-up policy needs, assembled from the running catch-up's state. */
 function catchUpContext(): CatchUpContext {
@@ -541,6 +549,7 @@ function catchUpContext(): CatchUpContext {
     known: catchUpKnown,
     ...(catchUpFinish ? { finish: catchUpFinish } : {}),
     ...(catchUpCommitment ? { commitment: catchUpCommitment } : {}),
+    ...(catchUpBeatPick !== undefined ? { beatPick: catchUpBeatPick } : {}),
   };
 }
 
@@ -629,6 +638,9 @@ function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
     applyReplayStep,
     () => onPlaybackDrained(mode),
     browserClock,
+    // A catch-up races the live draw, so it hurries while the queue is deep (#207); a sealed
+    // replay races nothing and keeps its full pacing.
+    mode === 'catchup' ? catchUpPace : undefined,
   );
   replayWindowMs = replayStepMs(source);
   // Playback re-runs the draw from pick one, so the pile must be full again; drops re-empty it.
@@ -655,7 +667,7 @@ function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
 
 function startReplay(): void {
   const source = finishedSnapshot;
-  if (!source || isPlaying()) return;
+  if (!source || isPlaying() || document.hidden) return;
   beginPlayback('replay', source);
 }
 
@@ -668,15 +680,23 @@ function startCatchUp(): void {
   // Only while a draw is actually running. An aborted ceremony leaves the board (and this button)
   // on screen, and re-animating a discarded draw under the abort banner — ending on a full board
   // labelled "live reveal" — is the worst possible screen for a fairness-critical lottery.
-  if (isPlaying() || livePhase !== 'revealing' || reveals.length === 0) return;
+  // `document.hidden` here is unreachable for a human (you can't click a hidden tab's button),
+  // but synthetic clicks — tests, automation — can do it, and a playback *started* hidden dodges
+  // the #208 visibility handler (it acts on transitions) while Chrome throttles its chained
+  // timers toward one fire a minute. Refuse in both starters rather than run in molasses.
+  if (isPlaying() || livePhase !== 'revealing' || reveals.length === 0 || document.hidden) return;
   const source: LotterySnapshot = {
     phase: 'revealing',
     reveals: [...reveals],
     ...(currentStart ? { start: currentStart } : {}),
+    // The drum-roll in flight when the viewer clicked (#207): carried so the timeline ends on its
+    // beat and the pick the catch-up merges on keeps its suspense instead of landing as a bare drop.
+    ...(livePendingBeat ? { pendingBeat: livePendingBeat } : {}),
   };
   catchUpKnown = source.reveals.length;
   catchUpFinish = undefined;
   catchUpCommitment = currentStart?.commitment;
+  catchUpBeatPick = livePendingBeat?.pick;
   beginPlayback('catchup', source);
 }
 
@@ -685,6 +705,7 @@ function stopPlayback(options: { keepPull?: boolean } = {}): void {
   cursor = null;
   playbackMode = null;
   catchUpCommitment = undefined;
+  catchUpBeatPick = undefined;
   show('replay-skip', false);
   // A skip or cancel mid-roll must not leave the crescendo playing. `keepPull` is the catch-up
   // handoff landing mid-drum-roll of the live ceremony — the pull *and* the roll belong to the
@@ -721,6 +742,10 @@ function catchUpHasPick(pick: number): boolean {
 function bufferCatchUpEvent(event: LotteryEvent): void {
   switch (event.type) {
     case 'lottery-beat':
+      // The same drum-roll can arrive as a live WS frame and inside a poll snapshot's
+      // `pendingBeat` — one roll per pick, whichever transport lands it first (#207).
+      if (event.beat.pick === catchUpBeatPick) return;
+      catchUpBeatPick = event.beat.pick;
       cursor?.append({ delayMs: REPLAY_DWELL_MS, event });
       break;
     case 'lottery-reveal':
@@ -856,6 +881,9 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
   // and the replay offer are both phase-gated, and a replay renders a finished snapshot while the
   // live ceremony may be something else entirely.
   livePhase = snapshot.phase;
+  // Same for the drum-roll in flight (#207): only a mid-reveal snapshot has one; any other phase
+  // means whatever beat we knew about has been consumed or discarded.
+  livePendingBeat = snapshot.phase === 'revealing' ? (snapshot.pendingBeat ?? null) : null;
   // A fresh phase repaints from scratch: hide the sections a previous run may have left visible
   // (a re-run start after a finished/aborted ceremony must not show stale board/verify/abort),
   // and re-arm the one-shot celebration.
@@ -974,6 +1002,7 @@ function applyEvent(event: LotteryEvent): void {
       // are the *only* signal that `waiting` became `revealing` — without this the catch-up offer
       // would never appear for anyone except a strict mid-ceremony joiner.
       livePhase = 'revealing';
+      livePendingBeat = event.beat; // the drum-roll now in flight, for a catch-up started mid-beat
       // Keep the "a draw is running ⇒ no sealed result in hand" invariant local to this path
       // rather than resting on `lottery-start` having arrived first: a stale `finishedSnapshot`
       // would route this button's click into a replay of the *previous* lottery.
@@ -983,6 +1012,7 @@ function applyEvent(event: LotteryEvent): void {
       break;
     case 'lottery-reveal':
       livePhase = 'revealing';
+      livePendingBeat = null; // the reveal consumes the beat
       reveals.push(event.reveal);
       renderDrop(event.reveal);
       renderBoard(reveals);
