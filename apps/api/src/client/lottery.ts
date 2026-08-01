@@ -148,6 +148,9 @@ function renderOddsTable(
   editable = false,
 ): void {
   const rows = byId('odds-rows');
+  // A repaint mid-rename must not eat the commissioner's typing (#227): capture the focused
+  // editor's state before the rebuild destroys it, and hand it to the matching new row.
+  const draft = captureRenameDraft();
   clear(rows);
   const ranges = assignBallRanges(oddsRows);
   const maxBalls = Math.max(...oddsRows.map((r) => r.balls), 1);
@@ -160,7 +163,9 @@ function renderOddsTable(
     dot.style.background = `hsl(${ranges[i].hue} 60% 62%)`;
     teamCell.appendChild(dot);
     teamCell.appendChild(
-      editable && row.teamId !== undefined ? renameTarget(row) : document.createTextNode(row.team),
+      editable && row.teamId !== undefined
+        ? renameTarget(row, draft ?? undefined)
+        : document.createTextNode(row.team),
     );
     tr.appendChild(teamCell);
     const ballsCell =
@@ -198,6 +203,8 @@ let accessToken: string | null = null;
 let commissioner = false;
 /** Team ids with an edit in flight — their steppers stay disabled until the WS echo lands. */
 const editsInFlight = new Set<string>();
+/** Server-truth "an ESPN re-import is pending" (#227) — drives the re-import button's state. */
+let reimportPending = false;
 
 /**
  * A `Balls` cell with −/+ steppers. One edit per row at a time: the buttons disable on click and
@@ -261,21 +268,52 @@ async function sendAdjust(teamId: string, balls: number): Promise<void> {
 /** Longest name the backend accepts; keeping the input in step avoids a pointless round-trip. */
 const MAX_NAME_LENGTH = 40;
 
+/** An uncommitted rename captured off a focused input the instant before a repaint destroys it. */
+interface RenameDraft {
+  teamId: string;
+  value: string;
+  selStart: number | null;
+  selEnd: number | null;
+}
+
+/**
+ * If the element being repainted away is a focused rename input, capture what the commissioner
+ * had typed (and where their caret was) so the rebuilt row can pick up mid-keystroke (#227). Only
+ * another actor's lobby change can trigger this — in practice the bot's mini-game re-arm — but
+ * losing typed text to a background broadcast is the kind of glitch that erodes trust in the UI.
+ */
+function captureRenameDraft(): RenameDraft | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLInputElement) || !active.classList.contains('rename')) return null;
+  const teamId = active.dataset.teamId;
+  if (!teamId) return null;
+  return {
+    teamId,
+    value: active.value,
+    selStart: active.selectionStart,
+    selEnd: active.selectionEnd,
+  };
+}
+
 /**
  * The team name as a click-to-edit target. Committing on Enter or blur and reverting on Escape is
  * the least surprising behaviour for a field that is really a one-off correction, and it avoids a
  * per-keystroke request against a name the server would have to validate for uniqueness anyway.
+ *
+ * `restore` re-opens the editor mid-keystroke after a repaint (#227): deferred a microtask so the
+ * label is in the rebuilt DOM before `replaceWith` swaps it (a detached label can't be replaced).
  */
-function renameTarget(row: LotteryOddsRow): HTMLElement {
+function renameTarget(row: LotteryOddsRow, restore?: RenameDraft): HTMLElement {
   const teamId = row.teamId as string;
   const label = el('span', 'teamname editable', row.team);
   label.setAttribute('role', 'button');
   label.setAttribute('tabindex', '0');
   label.setAttribute('title', 'Rename this team');
-  const open = (): void => {
+  const open = (draft?: RenameDraft): void => {
     const input = el('input', 'rename') as HTMLInputElement;
-    input.value = row.team;
+    input.value = draft ? draft.value : row.team;
     input.maxLength = MAX_NAME_LENGTH;
+    input.dataset.teamId = teamId; // lets a repaint recognise and preserve this editor
     input.setAttribute('aria-label', `Rename ${row.team}`);
     let settled = false;
     const commit = (send: boolean): void => {
@@ -292,15 +330,19 @@ function renameTarget(row: LotteryOddsRow): HTMLElement {
     input.addEventListener('blur', () => commit(true));
     label.replaceWith(input);
     input.focus();
-    input.select();
+    if (draft) input.setSelectionRange(draft.selStart, draft.selEnd);
+    else input.select();
   };
-  label.addEventListener('click', open);
+  label.addEventListener('click', () => open());
   label.addEventListener('keydown', (event: KeyboardEvent) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       open();
     }
   });
+  if (restore && restore.teamId === teamId) {
+    queueMicrotask(() => open(restore));
+  }
   return label;
 }
 
@@ -320,12 +362,12 @@ async function sendReimport(): Promise<void> {
   const button = byId('reimport-btn') as HTMLButtonElement;
   button.disabled = true;
   setStatus('re-importing from ESPN…', 'live');
-  await commissionerPost('/api/lottery/reimport', {}, () => 're-import rejected');
-  // The bot's re-arm is what actually clears this; re-enable after a beat so a failed request
-  // doesn't leave a permanently dead button.
-  setTimeout(() => {
-    button.disabled = false;
-  }, 5000);
+  const accepted = await commissionerPost('/api/lottery/reimport', {}, () => 're-import rejected');
+  // No timer (#227): an accepted request broadcasts `reimportRequested`, and the button tracks
+  // that flag through `renderLobby` until the bot's re-arm clears it — disabled for exactly as
+  // long as an import is genuinely pending. Only a rejected/failed POST re-enables here, since
+  // no broadcast will.
+  if (!accepted) button.disabled = false;
 }
 
 /** Shared POST plumbing for the commissioner routes: bearer, error surfacing, no optimistic paint. */
@@ -402,6 +444,10 @@ function renderLobby(lobby: LotteryLobby): void {
   // Re-import only makes sense for an ESPN-backed ceremony, but the client can't tell — the bot
   // refuses a manual `teams:` setup server-side and says so.
   show('edit-actions', commissioner);
+  // The button follows the broadcast, not a timer (#227): `reimportRequested` is set the moment
+  // the request is accepted and cleared by the bot's re-arm — the exact lifetime of "an import is
+  // actually pending". Every viewer's snapshot agrees, so late joiners see the true state too.
+  (byId('reimport-btn') as HTMLButtonElement).disabled = reimportPending;
   // The answer is lobby-scoped server-side, so a client that booted while the stage was idle was
   // told "not a commissioner" and would otherwise sit there read-only through the whole lobby —
   // exactly the case where the commissioner already had the Activity open before running `setup`.
@@ -1109,6 +1155,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       break;
     case 'lobby':
       // Pre-commitment lobby (#198): show odds without the commitment hash.
+      reimportPending = snapshot.reimportRequested === true;
       if (snapshot.lobby) renderLobby(snapshot.lobby);
       setStatus('setup complete — draw pending', 'live');
       show('waiting', true);
@@ -1180,9 +1227,15 @@ function applyEvent(event: LotteryEvent): void {
       renderSnapshot(event.snapshot);
       break;
     case 'lottery-lobby':
-      // Pre-commitment lobby (#198): arm the waiting room from setup onward.
+      // Pre-commitment lobby (#198): arm the waiting room from setup onward. The re-import flag
+      // rides the event beside the lobby, so carry it into the synthetic snapshot (#227).
       reveals = [];
-      renderSnapshot({ phase: 'lobby', lobby: event.lobby, reveals: [] });
+      renderSnapshot({
+        phase: 'lobby',
+        lobby: event.lobby,
+        reveals: [],
+        ...(event.reimportRequested ? { reimportRequested: true } : {}),
+      });
       break;
     case 'lottery-start':
       // A start (re)opens the stage — drop any previous run's reveals before repainting.
