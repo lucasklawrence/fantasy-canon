@@ -17,6 +17,8 @@ import {
   type CeremonySession,
   requestAbort,
   resetCeremoniesForTests,
+  type RunCeremonyOptions,
+  runCeremony,
   setCeremony,
 } from '../../../lib/draftOrderCeremony.js';
 import {
@@ -30,12 +32,14 @@ import {
   handleDraftOrderSetupSubcommand,
   handleDraftOrderStatusSubcommand,
   parseManualTeams,
+  performActivityBegin,
   performActivityReimport,
   postActivityEditLine,
   recoverInterruptedCeremonies,
 } from '../draftOrder.js';
 import type { ButtonInteraction } from 'discord.js';
 import { createMemoryCeremonyStore, type PersistedCeremony } from '../../../lib/ceremonyStore.js';
+import type { StageBeginRequest } from '../../../lib/lotteryStageWatcher.js';
 import type {
   InspectableRevealStage,
   StageStateSnapshot,
@@ -1261,5 +1265,212 @@ describe('performActivityReimport (#219)', () => {
     espnSession({ lobbyChannelId: undefined });
     await expect(run('guild-1')).resolves.toBe(false);
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('performActivityBegin (#233)', () => {
+  function beginClient(sent: ChannelPost[], sendable = true): Client {
+    return {
+      channels: {
+        fetch: () =>
+          Promise.resolve({
+            isSendable: () => sendable,
+            send: (p: ChannelPost) => {
+              sent.push(p);
+              return Promise.resolve({ id: `m${sent.length}` });
+            },
+          }),
+      },
+    } as unknown as Client;
+  }
+
+  /** A session as `setup` leaves it, open for `begin` from either front door. */
+  function openSession(over: Partial<CeremonySession> = {}) {
+    const session = createCeremony(
+      'guild-1',
+      '2026 Draft Lottery',
+      { teams: [{ teamId: 'a' }, { teamId: 'b' }], baseBallCount: 2 },
+      new Map([
+        ['a', 'Alpha'],
+        ['b', 'Bravo'],
+      ]),
+    );
+    markPreviewPosted(session);
+    session.lobbyChannelId = 'lobby-chan';
+    session.commissionerIds = ['commish'];
+    Object.assign(session, over);
+    setCeremony(session);
+    return session;
+  }
+
+  const REQUEST: StageBeginRequest = {
+    delaySeconds: 10,
+    direction: 'first-to-last',
+    requestedBy: 'commish',
+  };
+
+  /** A `runCeremony` stand-in: records its options, never actually draws. */
+  function fakeRun(calls: RunCeremonyOptions[]): typeof runCeremony {
+    return (_session, _io, options) => {
+      calls.push(options);
+      return Promise.resolve([]);
+    };
+  }
+
+  it('runs the slash-begin flow: audit line + launch button in-channel, then the paced reveal', async () => {
+    const session = openSession();
+    const sent: ChannelPost[] = [];
+    const calls: RunCeremonyOptions[] = [];
+    const stage = stageHolding();
+
+    await expect(
+      performActivityBegin(beginClient(sent), stage, fakeRun(calls))('guild-1', REQUEST),
+    ).resolves.toBe(true);
+
+    // The commitment + reveal anchor where `setup` ran — an Activity press has no "this channel".
+    expect(session.channelId).toBe('lobby-chan');
+    // One post: who sealed (mention renders, never pings — #222), and the launch invite.
+    expect(sent).toHaveLength(1);
+    expect(sent[0].content).toContain('<@commish> sealed the bag');
+    expect(sent[0].content).toContain('~10s');
+    expect(sent[0].allowedMentions).toEqual({ parse: [] });
+    expect(JSON.stringify(sent[0])).toContain(DRAFT_ORDER_LAUNCH_ID);
+    // The ceremony gets the Activity's options — and the stage, since this is activity mode.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].delayMs).toBe(10_000);
+    expect(calls[0].direction).toBe('first-to-last');
+    expect(calls[0].stage).toBe(stage);
+  });
+
+  it('drains pending Activity edits into the bag before sealing, exactly like slash begin (#210)', async () => {
+    const session = openSession();
+    const sent: ChannelPost[] = [];
+    const calls: RunCeremonyOptions[] = [];
+    const stage = stageHolding({
+      phase: 'lobby',
+      lobby: { guildId: 'guild-1' },
+      adjustments: [{ teamId: 'a', balls: 5 }],
+    });
+
+    await expect(
+      performActivityBegin(beginClient(sent), stage, fakeRun(calls))('guild-1', REQUEST),
+    ).resolves.toBe(true);
+
+    // The edit became the authoritative bag before anything could bind it…
+    expect(oddsRows(session).find((r) => r.teamId === 'a')?.balls).toBe(5);
+    // …and its fresh public odds card posted before the seal line (ADR 0006's ordering).
+    expect(sent.length).toBeGreaterThanOrEqual(2);
+    expect(sent[sent.length - 1].content).toContain('sealed the bag');
+  });
+
+  it('falls back to the default delay when the request carries junk pacing', async () => {
+    openSession();
+    const sent: ChannelPost[] = [];
+    const calls: RunCeremonyOptions[] = [];
+
+    await expect(
+      performActivityBegin(
+        beginClient(sent),
+        stageHolding(),
+        fakeRun(calls),
+      )('guild-1', {
+        delaySeconds: 9999,
+        direction: 'worst-to-first',
+      }),
+    ).resolves.toBe(true);
+    expect(calls[0].delayMs).toBe(20_000);
+    expect(calls[0].direction).toBe('worst-to-first');
+  });
+
+  it('releases the press with a keepAdjustments re-arm when the channel is unusable', async () => {
+    const sent: ChannelPost[] = [];
+    const calls: RunCeremonyOptions[] = [];
+    const rearms: { keepAdjustments?: boolean; guildId?: string }[] = [];
+    const stage: InspectableRevealStage = {
+      ...stageHolding(),
+      lobby: (req) => {
+        rearms.push({ keepAdjustments: req.keepAdjustments, guildId: req.guildId });
+        return Promise.resolve();
+      },
+    };
+
+    // Nothing else will ever re-arm this lobby, so a silent false would strand every
+    // commissioner's button on "sealing…" — the re-arm clears the request at the source.
+    openSession();
+    await expect(
+      performActivityBegin(beginClient(sent, false), stage, fakeRun(calls))('guild-1', REQUEST),
+    ).resolves.toBe(false);
+    expect(rearms).toEqual([{ keepAdjustments: true, guildId: 'guild-1' }]);
+
+    resetCeremoniesForTests();
+    openSession({ lobbyChannelId: undefined });
+    await expect(
+      performActivityBegin(beginClient(sent), stage, fakeRun(calls))('guild-1', REQUEST),
+    ).resolves.toBe(false);
+    expect(rearms).toHaveLength(2);
+    expect(sent).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses to start the ceremony when a replacing setup lands while the seal line posts', async () => {
+    const session = openSession();
+    const calls: RunCeremonyOptions[] = [];
+    const client = {
+      channels: {
+        fetch: () =>
+          Promise.resolve({
+            isSendable: () => true,
+            send: () => {
+              // A concurrent `setup` replaces the registry entry mid-await; the detached old
+              // session must not commit after the replacement's fresh preview.
+              resetCeremoniesForTests();
+              return Promise.resolve({ id: 'm1' });
+            },
+          }),
+      },
+    } as unknown as Client;
+
+    await expect(
+      performActivityBegin(client, stageHolding(), fakeRun(calls))('guild-1', REQUEST),
+    ).resolves.toBe(false);
+    expect(calls).toHaveLength(0);
+    expect(session.state).toBe('GAME_OPEN');
+  });
+
+  it('refuses whenever the slash command would: state, interlocks, channel — and posts nothing', async () => {
+    const sent: ChannelPost[] = [];
+    const calls: RunCeremonyOptions[] = [];
+    const begin = performActivityBegin(beginClient(sent), stageHolding(), fakeRun(calls));
+
+    // No ceremony at all / wrong guild / no guild.
+    await expect(begin('guild-1', REQUEST)).resolves.toBe(false);
+    openSession({ state: 'LOTTERY_RUNNING' });
+    await expect(begin('guild-1', REQUEST)).resolves.toBe(false);
+    await expect(begin('guild-2', REQUEST)).resolves.toBe(false);
+    await expect(begin(undefined, REQUEST)).resolves.toBe(false);
+
+    // A bag in flux is not sealable — same interlocks as the slash handler.
+    resetCeremoniesForTests();
+    openSession({ miniGameActive: true });
+    await expect(begin('guild-1', REQUEST)).resolves.toBe(false);
+    resetCeremoniesForTests();
+    openSession({ reimportActive: true });
+    await expect(begin('guild-1', REQUEST)).resolves.toBe(false);
+    resetCeremoniesForTests();
+    openSession({ lobbyChannelId: undefined });
+    await expect(begin('guild-1', REQUEST)).resolves.toBe(false);
+
+    // Nowhere to post ⇒ nowhere for the commitment either.
+    resetCeremoniesForTests();
+    openSession();
+    const unsendable = performActivityBegin(
+      beginClient(sent, false),
+      stageHolding(),
+      fakeRun(calls),
+    );
+    await expect(unsendable('guild-1', REQUEST)).resolves.toBe(false);
+
+    expect(sent).toHaveLength(0);
+    expect(calls).toHaveLength(0);
   });
 });

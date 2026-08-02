@@ -41,6 +41,18 @@ export interface StageRenameDetail {
   guildId?: string;
 }
 
+/**
+ * The Activity's "seal the bag & start the draw" request (#233); mirrors the api's
+ * `LotteryBeginRequest`. Values are re-validated bot-side — the stage already rejects anything
+ * outside its closed vocabulary, but this process must not trust a frame it didn't author.
+ */
+export interface StageBeginRequest {
+  delaySeconds: number;
+  direction: 'worst-to-first' | 'first-to-last';
+  /** Discord user id of the commissioner who pressed the button, stamped by the api's route. */
+  requestedBy?: string;
+}
+
 /** The subset of a `WebSocket` this module drives — satisfied by both `ws` and the browser global. */
 export interface StageSocket {
   addEventListener(type: 'open' | 'close' | 'error', listener: () => void): void;
@@ -60,6 +72,12 @@ export interface StageWatcherOptions {
    * Omitted ⇒ re-import requests are ignored.
    */
   reimport?: (guildId: string | undefined) => Promise<boolean>;
+  /**
+   * Honour an in-Activity "seal the bag & start the draw" request (#233) — run the identical flow
+   * as `/canon draftorder begin`. Resolves false when there is nothing to begin (wrong guild, no
+   * open ceremony, a bag in flux). Omitted ⇒ begin requests are ignored.
+   */
+  begin?: (guildId: string | undefined, request: StageBeginRequest) => Promise<boolean>;
   /** Injected for tests; defaults to a `ws` socket (works on every Node this repo runs on). */
   socketFactory?: (url: string) => StageSocket;
   /** Injected for tests; defaults to `setTimeout`. Must return a handle `clearReconnect` accepts. */
@@ -120,6 +138,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     baseUrl,
     post,
     reimport,
+    begin,
     // `ws`, not the global `WebSocket`. Node only exposes that global from 22 onward, and the
     // repo's `engines: node >= 24` is a floor we declare, not one anything enforces — a bot
     // started on Node 20 threw `ReferenceError: WebSocket is not defined` here on every reconnect
@@ -140,6 +159,8 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
   const announcedNames = new Map<string, AnnouncedNames>();
   /** Guilds whose re-import is already running, so one request is honoured exactly once. */
   const reimporting = new Set<string>();
+  /** Guilds whose begin is already running — a broadcast storm must not seal a bag twice (#233). */
+  const beginning = new Set<string>();
 
   const key = (guildId: string | undefined): string => guildId ?? '';
   /** Lines currently being delivered, so a duplicate frame can't double-post while one is in flight. */
@@ -197,6 +218,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     pending: { teamId: string; balls: number }[],
     pendingNames: { teamId: string; displayName: string }[],
     reimportRequested: boolean,
+    beginRequest?: StageBeginRequest,
     detail?: StageAdjustmentDetail,
     renamed?: StageRenameDetail,
   ): void {
@@ -251,9 +273,9 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       });
     }
 
-    // The one mutating path (#219): the api cannot reach ESPN, so a refetch request is ours to
-    // honour. Guarded so a broadcast storm or a reconnect snapshot cannot launch it twice; the
-    // re-arm that follows a successful import clears the flag at the source.
+    // The mutating paths. Re-import (#219) first: the api cannot reach ESPN, so a refetch request
+    // is ours to honour. Guarded so a broadcast storm or a reconnect snapshot cannot launch it
+    // twice; the re-arm that follows a successful import clears the flag at the source.
     if (reimportRequested && reimport && guildId && !reimporting.has(guildId)) {
       reimporting.add(guildId);
       void reimport(guildId)
@@ -261,6 +283,20 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
           console.error('[draftorder] in-Activity re-import failed:', error);
         })
         .finally(() => reimporting.delete(guildId));
+    }
+
+    // Begin (#233): same single-flight discipline. A pending re-import suppresses it outright —
+    // the import's re-arm replaces the bag AND drops the begin request at the source, so sealing
+    // now would commit a bag about to be replaced by one the league hasn't seen re-confirmed.
+    // On the bot side `runCeremony` flips the session out of GAME_OPEN synchronously, so a frame
+    // that arrives after this flight resolves gets a clean refusal rather than a second draw.
+    if (beginRequest && begin && guildId && !reimportRequested && !beginning.has(guildId)) {
+      beginning.add(guildId);
+      void begin(guildId, beginRequest)
+        .catch((error: unknown) => {
+          console.error('[draftorder] in-Activity begin failed:', error);
+        })
+        .finally(() => beginning.delete(guildId));
     }
   }
 
@@ -272,6 +308,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       renamed?: unknown;
       renames?: unknown;
       reimportRequested?: unknown;
+      beginRequested?: unknown;
       lobby?: unknown;
       snapshot?: unknown;
     };
@@ -287,6 +324,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
         adjustments?: unknown;
         renames?: unknown;
         reimportRequested?: unknown;
+        beginRequested?: unknown;
       };
       if (snapshot.phase !== 'lobby') {
         // Nothing armed ⇒ nothing editable, and any prior lobby is behind us.
@@ -300,6 +338,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
         toAdjustments(snapshot.adjustments),
         toRenames(snapshot.renames),
         snapshot.reimportRequested === true,
+        toBeginRequest(snapshot.beginRequested),
       );
       return;
     }
@@ -319,6 +358,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       toAdjustments(event.adjustments),
       toRenames(event.renames),
       event.reimportRequested === true,
+      toBeginRequest(event.beginRequested),
       toDetail(event.adjusted),
       toRenameDetail(event.renamed),
     );
@@ -388,6 +428,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       announcedNames.clear();
       // Otherwise a guild whose import was in flight at stop() stays blocked after the next start.
       reimporting.clear();
+      beginning.clear();
       if (open) {
         try {
           open.close();
@@ -412,6 +453,24 @@ function toDetail(raw: unknown): StageAdjustmentDetail | undefined {
     from: d.from,
     to: d.to,
     ...(typeof d.guildId === 'string' ? { guildId: d.guildId } : {}),
+  };
+}
+
+/**
+ * Guard the begin request off an untrusted frame (#233). Bot-side vocabulary check on purpose,
+ * even though the api's parser already enforced it — a frame is not something this process
+ * authored, and the delay it carries becomes a real `setTimeout` pacing a real ceremony.
+ */
+function toBeginRequest(raw: unknown): StageBeginRequest | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const d = raw as Record<string, unknown>;
+  if (typeof d.delaySeconds !== 'number' || !Number.isInteger(d.delaySeconds)) return undefined;
+  if (d.delaySeconds < 5 || d.delaySeconds > 60) return undefined;
+  if (d.direction !== 'worst-to-first' && d.direction !== 'first-to-last') return undefined;
+  return {
+    delaySeconds: d.delaySeconds,
+    direction: d.direction,
+    ...(typeof d.requestedBy === 'string' ? { requestedBy: d.requestedBy } : {}),
   };
 }
 

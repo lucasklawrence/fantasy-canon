@@ -589,6 +589,87 @@ describe('commissioner lobby edits (#210)', () => {
     ).toBe(409);
   });
 
+  it('records a begin request stamped with the verified caller, commissioner-gated (#233)', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+    const body = JSON.stringify({ delaySeconds: 10, direction: 'first-to-last' });
+
+    // Same gate ladder as every commissioner write.
+    expect((await routeRequest('POST', '/api/lottery/begin', body, d)).status).toBe(401);
+    expect(
+      (
+        await routeRequest('POST', '/api/lottery/begin', body, d, {
+          authorization: 'Bearer user-rando',
+        })
+      ).status,
+    ).toBe(403);
+
+    const accepted = await routeRequest('POST', '/api/lottery/begin', body, d, asCommissioner);
+    expect(accepted.status).toBe(200);
+
+    const state = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    // `requestedBy` is the identity the bearer proved, not anything the body said — the audit
+    // line the bot posts must name whoever actually pressed the button.
+    expect(state.beginRequested).toEqual({
+      delaySeconds: 10,
+      direction: 'first-to-last',
+      requestedBy: 'commish',
+    });
+    // A doorbell, not a draw: the lobby is still armed and untouched.
+    expect(state.phase).toBe('lobby');
+    expect(state.lobby?.totalBalls).toBe(3);
+  });
+
+  it('400s a begin outside the picker vocabulary and ignores a spoofed requestedBy (#233)', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+
+    for (const bad of [
+      { delaySeconds: 0, direction: 'worst-to-first' },
+      { delaySeconds: 7, direction: 'worst-to-first' },
+      { delaySeconds: 20, direction: 'sideways' },
+      {},
+    ]) {
+      const reply = await routeRequest(
+        'POST',
+        '/api/lottery/begin',
+        JSON.stringify(bad),
+        d,
+        asCommissioner,
+      );
+      expect(reply.status).toBe(400);
+    }
+
+    const spoofed = await routeRequest(
+      'POST',
+      '/api/lottery/begin',
+      JSON.stringify({ delaySeconds: 5, direction: 'worst-to-first', requestedBy: 'victim' }),
+      d,
+      asCommissioner,
+    );
+    expect(spoofed.status).toBe(200);
+    const state = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(state.beginRequested?.requestedBy).toBe('commish');
+
+    // And like every commissioner write, a sealed bag is nobody's to begin again.
+    await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d);
+    expect(
+      (
+        await routeRequest(
+          'POST',
+          '/api/lottery/begin',
+          JSON.stringify({ delaySeconds: 5, direction: 'worst-to-first' }),
+          d,
+          asCommissioner,
+        )
+      ).status,
+    ).toBe(409);
+  });
+
   it('never accepts the bot’s stage key in place of a bearer (the two auth paths stay disjoint)', async () => {
     const d = deps(hub(), { stageKey: 'sekrit' });
     await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d, {

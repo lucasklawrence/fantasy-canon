@@ -73,6 +73,14 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     vertical-align: middle; }
   #edit-hint { text-align: center; color: #f5d67b; font-size: 13px; margin: 10px 0 0; }
   #edit-actions { text-align: center; margin: 14px 0 0; }
+  /* Seal & start (#233): the commissioner's begin controls, under the re-import button. */
+  #begin-actions { text-align: center; margin: 12px 0 0; display: flex; flex-wrap: wrap;
+    justify-content: center; align-items: center; gap: 8px; }
+  .pickwrap { color: #7c869e; font-size: 12px; }
+  .picker { font: inherit; font-size: 12px; color: #cdd4e4; background: #1b2233;
+    border: 1px solid #2a3145; border-radius: 8px; padding: 4px 6px; margin-left: 4px; }
+  .replay:disabled { opacity: .4; cursor: default; box-shadow: none; }
+  .picker:disabled { opacity: .4; cursor: default; }
   /* Renaming: the team cell becomes an input in place, so the row never reflows (#219). */
   .rename { font: inherit; font-size: 14px; color: #e7e9ee; background: #10141d;
     border: 1px solid #2a3145; border-radius: 6px; padding: 3px 6px; width: 170px; }
@@ -194,7 +202,24 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     </table>
     <p class="pulse">Waiting for the commissioner to seal the bag…</p>
     <p id="edit-actions" class="hidden"><button id="reimport-btn" class="replay" type="button">&#128260; Re-import from ESPN</button></p>
-    <p id="edit-hint" class="hidden">You're the commissioner &mdash; adjust the balls or tap a team name to rename it, before you run <code>/canon draftorder begin</code>. Everyone watching sees the changes live, each one is posted in the channel, and the bot re-posts the final odds card before the commitment.</p>
+    <div id="begin-actions" class="hidden">
+      <label class="pickwrap">Reveal every
+        <select id="begin-delay" class="picker">
+          <option value="5">5s</option>
+          <option value="10">10s</option>
+          <option value="20" selected>20s</option>
+          <option value="30">30s</option>
+        </select>
+      </label>
+      <label class="pickwrap">Order
+        <select id="begin-direction" class="picker">
+          <option value="worst-to-first" selected>last pick &rarr; pick #1</option>
+          <option value="first-to-last">pick #1 &rarr; last pick</option>
+        </select>
+      </label>
+      <button id="begin-btn" class="replay" type="button">&#128274; Seal the bag &amp; start the draw</button>
+    </div>
+    <p id="edit-hint" class="hidden">You're the commissioner &mdash; adjust the balls or tap a team name to rename it, then seal the bag right here (or with <code>/canon draftorder begin</code>). Everyone watching sees the changes live, each one is posted in the channel, and the bot re-posts the final odds card before the commitment.</p>
   </section>
 
   <section class="card hidden" id="stage">

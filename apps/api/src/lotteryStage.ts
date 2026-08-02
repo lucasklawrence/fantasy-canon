@@ -33,6 +33,7 @@ import type {
   LotteryAdjustment,
   LotteryAdjustmentDetail,
   LotteryBeat,
+  LotteryBeginRequest,
   LotteryClear,
   LotteryEvent,
   LotteryFinish,
@@ -122,6 +123,17 @@ export interface LotteryStage {
    * honours, clearing it when it re-arms the lobby with fresh data.
    */
   requestReimport(): void;
+  /**
+   * Flag that the commissioner wants the bag sealed and the draw started (#233). Same shape as
+   * {@link LotteryStage.requestReimport}: this process can never commit or draw (ADR 0006), so
+   * the flag is a doorbell the bot's stage watcher answers by running the identical flow as
+   * `/canon draftorder begin`. While it is pending the lobby is frozen — `adjust`, `rename`,
+   * `requestReimport`, and a second `requestBegin` all throw {@link StageNotEditableError}, so
+   * no write can land between the bot's drain and its commitment. Cleared when the bot's `start`
+   * replaces the lobby, or by any re-arm/teardown — a bag that changed after the press must be
+   * re-confirmed against what the league can see.
+   */
+  requestBegin(request: LotteryBeginRequest): void;
   /**
    * Is this Discord user id allowed to {@link LotteryStage.adjust}? False whenever no lobby is
    * armed, so a stale token can never edit a committed or finished run.
@@ -399,6 +411,35 @@ export function parseLotteryAdjust(body: string): Parsed<LotteryAdjustment> {
   return { value: { teamId: r.teamId, balls: r.balls } };
 }
 
+/** The reveal pacings the Activity's picker offers — the same spread the slash `delay` gets used at. */
+export const BEGIN_DELAY_CHOICES = [5, 10, 20, 30] as const;
+
+/**
+ * Guard for `POST /api/lottery/begin` (#233). Public-client body like adjust/rename, so it is a
+ * closed vocabulary: only the picker's exact delay values and the two reveal orders pass — a
+ * hostile client must not be able to ask the bot for a 0s (or 10-hour) pacing. `requestedBy` is
+ * deliberately NOT read from the body; the route stamps it from the verified bearer.
+ */
+export function parseLotteryBegin(
+  body: string,
+): Parsed<Pick<LotteryBeginRequest, 'delaySeconds' | 'direction'>> {
+  const parsed = parseJson(body);
+  if ('error' in parsed) return parsed;
+  const r = parsed.value;
+  if (!(BEGIN_DELAY_CHOICES as readonly number[]).includes(r.delaySeconds as number)) {
+    return { error: `begin needs delaySeconds in {${BEGIN_DELAY_CHOICES.join(', ')}}` };
+  }
+  if (r.direction !== 'worst-to-first' && r.direction !== 'first-to-last') {
+    return { error: 'begin needs direction "worst-to-first" or "first-to-last"' };
+  }
+  return {
+    value: {
+      delaySeconds: r.delaySeconds as number,
+      direction: r.direction,
+    },
+  };
+}
+
 /** Guard for `POST /api/lottery/clear` — an optional guild scope is the whole payload. */
 export function parseLotteryClear(body: string): Parsed<LotteryClear> {
   const parsed = parseJson(body);
@@ -489,6 +530,8 @@ export function createLotteryStage(): LotteryStage {
   let renames = new Map<string, string>();
   /** The commissioner asked for an ESPN refetch; only the bot can honour it (#219). */
   let reimportRequested = false;
+  /** The commissioner asked to seal the bag and start the draw; only the bot can (#233). */
+  let beginRequested: LotteryBeginRequest | undefined;
   /**
    * Monotonic arm counter for {@link LotteryLobby.armedSeq} (#232). Seeded from the clock so the
    * values a restarted api hands out never collide with the previous process's — a client that
@@ -506,11 +549,16 @@ export function createLotteryStage(): LotteryStage {
     for (const listener of listeners) listener(event);
   }
 
-  /** The pending edit set as the wire carries it — omitted entirely when there is nothing pending. */
+  /**
+   * The pending edit-and-request set as the wire carries it — omitted entirely when there is
+   * nothing pending. The begin request (#233) rides the same envelope as the edits: it is pending
+   * bot work against this specific lobby, with the same lifetime.
+   */
   function pendingAdjustments(): {
     adjustments?: LotteryAdjustment[];
     renames?: LotteryRename[];
     reimportRequested?: boolean;
+    beginRequested?: LotteryBeginRequest;
   } {
     return {
       ...(adjustments.size > 0
@@ -520,6 +568,7 @@ export function createLotteryStage(): LotteryStage {
         ? { renames: [...renames].map(([teamId, displayName]) => ({ teamId, displayName })) }
         : {}),
       ...(reimportRequested ? { reimportRequested: true } : {}),
+      ...(beginRequested ? { beginRequested } : {}),
     };
   }
 
@@ -534,6 +583,7 @@ export function createLotteryStage(): LotteryStage {
     adjustments = new Map();
     renames = new Map();
     reimportRequested = false;
+    beginRequested = undefined;
   }
 
   return {
@@ -600,8 +650,11 @@ export function createLotteryStage(): LotteryStage {
       adjustments = carried;
       renames = carriedNames;
       // A re-arm is the bot publishing a bag it just derived, so any outstanding refetch request
-      // has either been honoured or is moot.
+      // has either been honoured or is moot. A pending begin dies with it too: the bag the
+      // commissioner pressed the button against is not the bag now on screen (ADR 0006 — any
+      // change after the press must be re-confirmed against a fresh public preview).
       reimportRequested = false;
+      beginRequested = undefined;
       lobby = {
         ...publicLobby,
         rows,
@@ -620,7 +673,7 @@ export function createLotteryStage(): LotteryStage {
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
     adjust(next) {
-      if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
+      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
       const target = lobby.rows.find((row) => row.teamId === next.teamId);
       if (!target) {
         throw new UnknownTeamError(next.teamId);
@@ -645,7 +698,7 @@ export function createLotteryStage(): LotteryStage {
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), adjusted: detail });
     },
     rename(next) {
-      if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
+      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
       const target = lobby.rows.find((row) => row.teamId === next.teamId);
       if (!target) throw new UnknownTeamError(next.teamId);
       // `createCeremony` rejects duplicate display names case-insensitively, so a colliding rename
@@ -665,10 +718,22 @@ export function createLotteryStage(): LotteryStage {
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), renamed: detail });
     },
     requestReimport() {
-      if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
+      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
       // Only a flag: this process has no ESPN league config and no cookies, so the refetch is the
       // bot's to perform. It clears when the bot re-arms the lobby with what it fetched.
       reimportRequested = true;
+      emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
+    },
+    requestBegin(request) {
+      // A pending begin freezes the whole lobby (adjust/rename/re-import/begin all 409): the bot
+      // is about to drain the pending set and commit, and a write landing after that read would
+      // put a bag on screen the commitment doesn't bind. The freeze lifts when the bot's `start`
+      // replaces the lobby or a re-arm voids the press — never silently.
+      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
+      // Only a request: the bot is the sole committer (ADR 0006), so all this does is broadcast
+      // "sealing…" — which is also what disables every viewer's begin button until the bot's
+      // `start` replaces the lobby or a re-arm invalidates the press.
+      beginRequested = request;
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
     clear(next) {

@@ -5,6 +5,7 @@ import {
   createStageWatcher,
   MAX_BACKOFF_MS,
   stageWsUrl,
+  type StageBeginRequest,
   type StageSocket,
 } from '../lotteryStageWatcher.js';
 
@@ -46,6 +47,7 @@ const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 
 function harness(
   deliver: (attempt: number) => Promise<boolean> = () => Promise.resolve(true),
   reimport?: (guildId: string | undefined) => Promise<boolean>,
+  begin?: (guildId: string | undefined, request: StageBeginRequest) => Promise<boolean>,
 ) {
   const posts: { guildId: string | undefined; content: string }[] = [];
   const sockets: ReturnType<typeof fakeSocket>[] = [];
@@ -64,6 +66,7 @@ function harness(
       return next.socket;
     },
     ...(reimport ? { reimport } : {}),
+    ...(begin ? { begin } : {}),
     schedule: (fn, ms) => {
       scheduled.push({ fn, ms });
       return scheduled.length;
@@ -430,6 +433,92 @@ describe('createStageWatcher (#220)', () => {
       reimportRequested: true,
     });
     expect(h.posts).toHaveLength(0);
+  });
+
+  it('honours a begin request exactly once while it is in flight (#233)', async () => {
+    const calls: { guildId: string | undefined; request: StageBeginRequest }[] = [];
+    let release: (() => void) | undefined;
+    const h = harness(undefined, undefined, (guildId, request) => {
+      calls.push({ guildId, request });
+      return new Promise<boolean>((resolve) => {
+        release = () => resolve(true);
+      });
+    });
+    h.watcher.start();
+    h.latest().open();
+
+    const flagged = {
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      beginRequested: { delaySeconds: 10, direction: 'first-to-last', requestedBy: 'commish' },
+    };
+    await h.send(flagged);
+    // A repeated broadcast (or a reconnect snapshot) must not seal the bag twice.
+    await h.send(flagged);
+    await h.send({
+      type: 'lottery-state',
+      snapshot: {
+        phase: 'lobby',
+        lobby: { guildId: 'g1' },
+        beginRequested: { delaySeconds: 10, direction: 'first-to-last' },
+        reveals: [],
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      guildId: 'g1',
+      request: { delaySeconds: 10, direction: 'first-to-last', requestedBy: 'commish' },
+    });
+
+    // Once it settles, a later request is honoured again (the bot-side state guard is what
+    // refuses a stale one — the watcher only guarantees single-flight).
+    release?.();
+    await flush();
+    await h.send(flagged);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('lets a pending re-import suppress a begin — the import re-arm voids the press (#233)', async () => {
+    const begins: (string | undefined)[] = [];
+    const h = harness(
+      undefined,
+      () => Promise.resolve(true),
+      (guildId) => {
+        begins.push(guildId);
+        return Promise.resolve(true);
+      },
+    );
+    h.watcher.start();
+    h.latest().open();
+
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      reimportRequested: true,
+      beginRequested: { delaySeconds: 20, direction: 'worst-to-first' },
+    });
+    // Sealing now would commit a bag the refetch is about to replace.
+    expect(begins).toHaveLength(0);
+  });
+
+  it('drops a begin request whose frame fails the vocabulary guard (#233)', async () => {
+    const begins: StageBeginRequest[] = [];
+    const h = harness(undefined, undefined, (_guildId, request) => {
+      begins.push(request);
+      return Promise.resolve(true);
+    });
+    h.watcher.start();
+    h.latest().open();
+
+    for (const beginRequested of [
+      { delaySeconds: 0, direction: 'worst-to-first' }, // instant pacing — refused, not honoured
+      { delaySeconds: 20, direction: 'sideways' },
+      { delaySeconds: 'twenty', direction: 'worst-to-first' },
+      'begin!',
+    ]) {
+      await h.send({ type: 'lottery-lobby', lobby: { guildId: 'g1', rows: [] }, beginRequested });
+    }
+    expect(begins).toHaveLength(0);
   });
 
   it('reconnects with exponential backoff, capped, and resets the delay after a good connect', () => {

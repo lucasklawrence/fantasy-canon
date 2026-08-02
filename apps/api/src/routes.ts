@@ -23,6 +23,7 @@ import { lotteryHtml } from './lotteryPage.js';
 import {
   parseLotteryAbort,
   parseLotteryAdjust,
+  parseLotteryBegin,
   parseLotteryBeat,
   parseLotteryClear,
   parseLotteryFinish,
@@ -178,6 +179,7 @@ export async function routeRequest(
  *   POST /api/lottery/adjust  → nudge a team's balls in the armed lobby (#210, commissioner only)
  *   POST /api/lottery/rename  → fix a team's display name (#219, commissioner only)
  *   POST /api/lottery/reimport→ ask the bot to refetch the league from ESPN (#219, commissioner only)
+ *   POST /api/lottery/begin   → ask the bot to seal the bag and start the draw (#233, commissioner only)
  *   POST /api/lottery/lobby   → arm the pre-commitment lobby from setup onward (#198, bot only)
  *   POST /api/lottery/clear   → disarm that lobby, back to idle (#198, bot only)
  *   POST /api/lottery/start   → open the stage (bot only)
@@ -224,12 +226,14 @@ async function lotteryRoute(
   }
   if (method !== 'POST') return json(404, { error: 'not found' });
 
-  // The commissioner's edits (#210 balls, #219 rename/re-import) are the POSTs that are *not*
-  // bot-only, so they resolve their own identity and return before the `x-stage-key` gate below.
+  // The commissioner's edits (#210 balls, #219 rename/re-import, #233 begin) are the POSTs that
+  // are *not* bot-only, so they resolve their own identity and return before the `x-stage-key`
+  // gate below.
   if (
     path === '/api/lottery/adjust' ||
     path === '/api/lottery/rename' ||
-    path === '/api/lottery/reimport'
+    path === '/api/lottery/reimport' ||
+    path === '/api/lottery/begin'
   ) {
     return await commissionerRoute(path, body, deps, headers);
   }
@@ -325,11 +329,11 @@ async function identifyCaller(
 }
 
 /**
- * The commissioner-authenticated writes: `adjust` (#210), `rename` and `reimport` (#219).
- * Guarded in order: phase (cheap, local) → identity (server-side, via Discord) → commissioner →
- * payload. The 403 is deliberately indistinguishable for "not a commissioner" and "no lobby
- * armed", since `isCommissioner` is false in both cases and neither is something a caller can
- * act on.
+ * The commissioner-authenticated writes: `adjust` (#210), `rename` and `reimport` (#219),
+ * `begin` (#233). Guarded in order: phase (cheap, local) → identity (server-side, via Discord) →
+ * commissioner → payload. The 403 is deliberately indistinguishable for "not a commissioner" and
+ * "no lobby armed", since `isCommissioner` is false in both cases and neither is something a
+ * caller can act on.
  */
 async function commissionerRoute(
   path: string,
@@ -353,6 +357,12 @@ async function commissionerRoute(
     if (path === '/api/lottery/reimport') {
       // No payload: the api cannot reach ESPN, so this only raises a flag the bot honours.
       deps.lottery.requestReimport();
+    } else if (path === '/api/lottery/begin') {
+      const parsed = parseLotteryBegin(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      // `requestedBy` comes from the verified bearer, never the body — the audit line the bot
+      // posts names whoever actually pressed the button, and a client cannot forge it.
+      deps.lottery.requestBegin({ ...parsed.value, requestedBy: caller.user.id });
     } else if (path === '/api/lottery/rename') {
       const parsed = parseLotteryRename(body);
       if ('error' in parsed) return json(400, { error: parsed.error });
