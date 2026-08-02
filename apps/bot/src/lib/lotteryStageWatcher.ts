@@ -49,6 +49,8 @@ export interface StageRenameDetail {
 export interface StageBeginRequest {
   delaySeconds: number;
   direction: 'worst-to-first' | 'first-to-last';
+  /** Reveal visualization (#235). Absent (an older api) ⇒ the machine. */
+  visual?: 'machine' | 'race';
   /** Discord user id of the commissioner who pressed the button, stamped by the api's route. */
   requestedBy?: string;
 }
@@ -467,9 +469,13 @@ function toBeginRequest(raw: unknown): StageBeginRequest | undefined {
   if (typeof d.delaySeconds !== 'number' || !Number.isInteger(d.delaySeconds)) return undefined;
   if (d.delaySeconds < 5 || d.delaySeconds > 60) return undefined;
   if (d.direction !== 'worst-to-first' && d.direction !== 'first-to-last') return undefined;
+  // Same closed-vocabulary rule as the rest of the frame (#235): absent means an older api and
+  // defaults machine downstream, but present-and-junk voids the whole request.
+  if (d.visual !== undefined && d.visual !== 'machine' && d.visual !== 'race') return undefined;
   return {
     delaySeconds: d.delaySeconds,
     direction: d.direction,
+    ...(d.visual === 'machine' || d.visual === 'race' ? { visual: d.visual } : {}),
     ...(typeof d.requestedBy === 'string' ? { requestedBy: d.requestedBy } : {}),
   };
 }

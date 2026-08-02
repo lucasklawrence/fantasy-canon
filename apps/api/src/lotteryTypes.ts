@@ -24,6 +24,13 @@ export interface LotteryOddsRow {
   top3Pct: number;
 }
 
+/**
+ * How the ceremony renders (#235): the classic ball machine, or the 12-lane race. Presentation
+ * only — either way the client consumes the same paced beat→reveal stream and never receives the
+ * final order early (ADR 0006), so the choice can never affect fairness.
+ */
+export type LotteryVisual = 'machine' | 'race';
+
 /** Opens the stage: everything the waiting room needs before the first ball drops. */
 export interface LotteryStart {
   title: string;
@@ -34,6 +41,12 @@ export interface LotteryStart {
   /** Bot's reveal pacing, so the client can size its drum-roll animation. */
   delayMs: number;
   rows: LotteryOddsRow[];
+  /**
+   * The reveal visualization every viewer renders (#235). Rides `start` — not the begin request —
+   * because it is part of the shared ceremony (one spectacle, one crowd), and a slash-started
+   * draw picks it too. Absent (an older bot) ⇒ `'machine'`.
+   */
+  visual?: LotteryVisual;
   /**
    * Originating guild. The single process-wide stage serves one live ceremony at a time; a
    * different guild's `start` during a live reveal is rejected (that bot falls back to its
@@ -235,6 +248,8 @@ export interface LotteryBeginRequest {
   delaySeconds: number;
   /** Reveal order (#200): worst odds first (default) or pick #1 first. */
   direction: 'worst-to-first' | 'first-to-last';
+  /** Reveal visualization (#235) — the bot echoes it onto {@link LotteryStart.visual}. */
+  visual: LotteryVisual;
   /**
    * Discord user id of the commissioner who pressed the button, stamped server-side from the
    * verified bearer — never client-supplied — so the in-channel audit line can name them.

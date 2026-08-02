@@ -1340,6 +1340,23 @@ describe('performActivityBegin (#233)', () => {
     expect(calls[0].delayMs).toBe(10_000);
     expect(calls[0].direction).toBe('first-to-last');
     expect(calls[0].stage).toBe(stage);
+    // No visual on the request (an older api) ⇒ the machine, never undefined pass-through.
+    expect(calls[0].visual).toBe('machine');
+  });
+
+  it('passes the race visual through to the ceremony (#235)', async () => {
+    openSession();
+    const sent: ChannelPost[] = [];
+    const calls: RunCeremonyOptions[] = [];
+
+    await expect(
+      performActivityBegin(
+        beginClient(sent),
+        stageHolding(),
+        fakeRun(calls),
+      )('guild-1', { ...REQUEST, visual: 'race' }),
+    ).resolves.toBe(true);
+    expect(calls[0].visual).toBe('race');
   });
 
   it('drains pending Activity edits into the bag before sealing, exactly like slash begin (#210)', async () => {

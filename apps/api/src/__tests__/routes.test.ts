@@ -611,10 +611,12 @@ describe('commissioner lobby edits (#210)', () => {
       (await routeRequest('GET', '/api/lottery/state', '', d)).body,
     ) as LotterySnapshot;
     // `requestedBy` is the identity the bearer proved, not anything the body said — the audit
-    // line the bot posts must name whoever actually pressed the button.
+    // line the bot posts must name whoever actually pressed the button. `visual` defaults to the
+    // machine when the picker didn't send one (#235).
     expect(state.beginRequested).toEqual({
       delaySeconds: 10,
       direction: 'first-to-last',
+      visual: 'machine',
       requestedBy: 'commish',
     });
     // A doorbell, not a draw: the lobby is still armed and untouched.
@@ -630,6 +632,7 @@ describe('commissioner lobby edits (#210)', () => {
       { delaySeconds: 0, direction: 'worst-to-first' },
       { delaySeconds: 7, direction: 'worst-to-first' },
       { delaySeconds: 20, direction: 'sideways' },
+      { delaySeconds: 20, direction: 'worst-to-first', visual: 'zoetrope' },
       {},
     ]) {
       const reply = await routeRequest(
@@ -668,6 +671,34 @@ describe('commissioner lobby edits (#210)', () => {
         )
       ).status,
     ).toBe(409);
+  });
+
+  it('carries the race visual from the begin picker and the bot’s start to every snapshot (#235)', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+    const begun = await routeRequest(
+      'POST',
+      '/api/lottery/begin',
+      JSON.stringify({ delaySeconds: 5, direction: 'worst-to-first', visual: 'race' }),
+      d,
+      asCommissioner,
+    );
+    expect(begun.status).toBe(200);
+    let state = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(state.beginRequested?.visual).toBe('race');
+
+    // The bot echoes it onto `start` — the field every client actually renders from.
+    const raceStart = JSON.stringify({
+      ...(JSON.parse(LOTTERY_START_BODY) as Record<string, unknown>),
+      visual: 'race',
+    });
+    await routeRequest('POST', '/api/lottery/start', raceStart, d);
+    state = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(state.start?.visual).toBe('race');
   });
 
   it('never accepts the bot’s stage key in place of a bearer (the two auth paths stay disjoint)', async () => {

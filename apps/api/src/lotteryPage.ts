@@ -104,6 +104,14 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   .chute.active { border-color: rgba(245,214,123,.5);
     box-shadow: 0 0 14px rgba(245,214,123,.28), inset 0 0 8px rgba(245,214,123,.18); }
 
+  /* the race (#235): swaps in for the hopper+chute when the ceremony's visual is 'race'.
+     Everything on it is canvas (raceSim.ts); the shell only provides the framed track. */
+  .racetrack { position: relative; margin: 10px auto 0; border-radius: 12px;
+    border: 1px solid #2b3550; overflow: hidden;
+    background: linear-gradient(180deg, #10141f 0%, #151a2a 100%);
+    box-shadow: inset 0 -12px 30px rgba(0,0,0,.4), 0 0 40px rgba(245,214,123,.05); }
+  #race-canvas { display: block; width: 100%; }
+
   /* the exit (#215): once the reveal lands, the drawn ball leaves the pile (canvas, hopperSim),
      then this tinted ball slides the clear tube and FLIPs into the big drop ball (client). */
   .pullball { position: absolute; border-radius: 50%;
@@ -217,6 +225,12 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
           <option value="first-to-last">pick #1 &rarr; last pick</option>
         </select>
       </label>
+      <label class="pickwrap">Visual
+        <select id="begin-visual" class="picker">
+          <option value="machine" selected>the ball machine</option>
+          <option value="race">the lane race</option>
+        </select>
+      </label>
       <button id="begin-btn" class="replay" type="button">&#128274; Seal the bag &amp; start the draw</button>
     </div>
     <p id="edit-hint" class="hidden">You're the commissioner &mdash; adjust the balls or tap a team name to rename it, then seal the bag right here (or with <code>/canon draftorder begin</code>). Everyone watching sees the changes live, each one is posted in the channel, and the bot re-posts the final odds card before the commitment.</p>
@@ -227,6 +241,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
       <div class="machine-left" id="machine-left">
         <div class="hopper" id="hopper"><canvas id="hopper-canvas"></canvas></div>
         <div class="chute" id="chute"><div class="pullball" id="tube-ball"></div></div>
+        <div class="racetrack hidden" id="racetrack"><canvas id="race-canvas"></canvas></div>
       </div>
       <div>
         <div id="drum">

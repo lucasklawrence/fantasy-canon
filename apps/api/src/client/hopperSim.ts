@@ -17,7 +17,8 @@
 
 import Matter from 'matter-js';
 
-import { assignBallRanges, ballRadius, NUMBER_MIN_RADIUS } from './ballAssignments.js';
+import { assignBallRanges, ballRadius } from './ballAssignments.js';
+import { buildBallSprite } from './ballSprite.js';
 
 const { Bodies, Body, Composite, Engine, Sleeping } = Matter;
 
@@ -73,37 +74,6 @@ interface BallMeta {
   sprite: HTMLCanvasElement;
   /** Fade start timestamp once the team is drawn; the body is removed when the fade ends. */
   fadeStart?: number;
-}
-
-/** Pre-render one ball face — colored sphere with a highlight and its number — at device scale. */
-function buildSprite(num: number, hue: number, radius: number, dpr: number): HTMLCanvasElement {
-  const size = Math.ceil(radius * 2 * dpr);
-  const sprite = document.createElement('canvas');
-  sprite.width = size;
-  sprite.height = size;
-  const ctx = sprite.getContext('2d');
-  if (!ctx) return sprite;
-  ctx.scale(dpr, dpr);
-  const r = radius;
-  const face = ctx.createRadialGradient(r * 0.68, r * 0.6, r * 0.15, r, r, r);
-  face.addColorStop(0, `hsl(${hue} 70% 82%)`);
-  face.addColorStop(0.45, `hsl(${hue} 60% 62%)`);
-  face.addColorStop(1, `hsl(${hue} 55% 40%)`);
-  ctx.fillStyle = face;
-  ctx.beginPath();
-  ctx.arc(r, r, r, 0, Math.PI * 2);
-  ctx.fill();
-  // The number rides the sprite, so it tumbles with the body's rotation in the frame loop.
-  // Skipped once the ball is too small to read — a hundreds-ball override bag keeps its colors
-  // (the team association survives) without smearing unreadable digits across the pile.
-  if (r >= NUMBER_MIN_RADIUS) {
-    ctx.fillStyle = 'rgba(16, 18, 28, 0.88)';
-    ctx.font = `800 ${Math.max(7, r * 0.95)}px system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(num), r, r + 0.5);
-  }
-  return sprite;
 }
 
 export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
@@ -315,7 +285,13 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
           { restitution: 0.72, friction: 0.02, frictionAir: 0.012 },
         );
         Body.setAngle(body, Math.random() * Math.PI * 2);
-        meta.set(body, { num, team: range.team, sprite: buildSprite(num, range.hue, radius, dpr) });
+        // Number skipped below NUMBER_MIN_RADIUS (inside the builder) — a hundreds-ball override
+        // bag keeps its colors without smearing unreadable digits across the pile.
+        meta.set(body, {
+          num,
+          team: range.team,
+          sprite: buildBallSprite(String(num), range.hue, radius, dpr),
+        });
         Composite.add(engine.world, body);
       }
     }

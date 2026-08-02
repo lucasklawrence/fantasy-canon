@@ -729,6 +729,17 @@ export const canonCommand = new SlashCommandBuilder()
                   value: 'first-to-last',
                 },
               ),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('visual')
+              .setDescription(
+                'Activity visualization (default: machine; only applies with stage: activity)',
+              )
+              .addChoices(
+                { name: 'machine — the ball machine drum', value: 'machine' },
+                { name: 'race — lane race, finishing order = draft order', value: 'race' },
+              ),
           ),
       )
       .addSubcommand((sub) =>

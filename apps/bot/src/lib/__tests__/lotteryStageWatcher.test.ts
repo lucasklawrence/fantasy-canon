@@ -514,11 +514,39 @@ describe('createStageWatcher (#220)', () => {
       { delaySeconds: 0, direction: 'worst-to-first' }, // instant pacing — refused, not honoured
       { delaySeconds: 20, direction: 'sideways' },
       { delaySeconds: 'twenty', direction: 'worst-to-first' },
+      { delaySeconds: 20, direction: 'worst-to-first', visual: 'zoetrope' }, // junk visual (#235)
       'begin!',
     ]) {
       await h.send({ type: 'lottery-lobby', lobby: { guildId: 'g1', rows: [] }, beginRequested });
     }
     expect(begins).toHaveLength(0);
+  });
+
+  it('carries the race visual through the begin request; absent means an older api (#235)', async () => {
+    const begins: StageBeginRequest[] = [];
+    const h = harness(undefined, undefined, (_guildId, request) => {
+      begins.push(request);
+      return Promise.resolve(true);
+    });
+    h.watcher.start();
+    h.latest().open();
+
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      beginRequested: { delaySeconds: 10, direction: 'worst-to-first', visual: 'race' },
+    });
+    expect(begins).toHaveLength(1);
+    expect(begins[0].visual).toBe('race');
+
+    // An api that predates the field still begins fine — the visual just defaults downstream.
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g2', rows: [] },
+      beginRequested: { delaySeconds: 10, direction: 'worst-to-first' },
+    });
+    expect(begins).toHaveLength(2);
+    expect(begins[1].visual).toBeUndefined();
   });
 
   it('reconnects with exponential backoff, capped, and resets the delay after a good connect', () => {

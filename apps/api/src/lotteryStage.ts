@@ -218,6 +218,9 @@ export function parseLotteryStart(body: string): Parsed<LotteryStart> {
       delayMs: r.delayMs,
       rows,
       ...(isStr(r.guildId) ? { guildId: r.guildId } : {}),
+      // Unknown values are dropped rather than rejected (#235): the visual is presentation-only,
+      // so a newer bot's vocabulary degrades to the machine instead of stalling the ceremony.
+      ...(r.visual === 'machine' || r.visual === 'race' ? { visual: r.visual } : {}),
     },
   };
 }
@@ -422,7 +425,7 @@ export const BEGIN_DELAY_CHOICES = [5, 10, 20, 30] as const;
  */
 export function parseLotteryBegin(
   body: string,
-): Parsed<Pick<LotteryBeginRequest, 'delaySeconds' | 'direction'>> {
+): Parsed<Pick<LotteryBeginRequest, 'delaySeconds' | 'direction' | 'visual'>> {
   const parsed = parseJson(body);
   if ('error' in parsed) return parsed;
   const r = parsed.value;
@@ -432,10 +435,16 @@ export function parseLotteryBegin(
   if (r.direction !== 'worst-to-first' && r.direction !== 'first-to-last') {
     return { error: 'begin needs direction "worst-to-first" or "first-to-last"' };
   }
+  // Absent defaults to the machine (an older bundle simply doesn't offer the picker, #235);
+  // present-but-junk is rejected like the rest of the vocabulary.
+  if (r.visual !== undefined && r.visual !== 'machine' && r.visual !== 'race') {
+    return { error: 'begin needs visual "machine" or "race"' };
+  }
   return {
     value: {
       delaySeconds: r.delaySeconds as number,
       direction: r.direction,
+      visual: r.visual === 'race' ? 'race' : 'machine',
     },
   };
 }
