@@ -612,15 +612,22 @@ describe('requestBegin — the in-Activity seal-and-start doorbell (#233)', () =
     expect(disarmed.snapshot().beginRequested).toBeUndefined();
   });
 
-  it('last press wins when two commissioners race', () => {
+  it('freezes the lobby while pending — no write can land between drain and commitment', () => {
     const stage = createLotteryStage();
     stage.lobby(EDITABLE);
     stage.requestBegin(REQUEST);
-    stage.requestBegin({ delaySeconds: 5, direction: 'first-to-last' });
-    expect(stage.snapshot().beginRequested).toEqual({
-      delaySeconds: 5,
-      direction: 'first-to-last',
-    });
+
+    // The bot is about to read the pending set and commit against it; an edit accepted now would
+    // put a bag on screen the commitment doesn't bind.
+    expect(() => stage.adjust({ teamId: 't-a', balls: 4 })).toThrow(StageNotEditableError);
+    expect(() => stage.rename({ teamId: 't-a', displayName: 'X' })).toThrow(StageNotEditableError);
+    expect(() => stage.requestReimport()).toThrow(StageNotEditableError);
+    expect(() => stage.requestBegin(REQUEST)).toThrow(StageNotEditableError);
+
+    // A re-arm voids the press and lifts the freeze in the same stroke.
+    stage.lobby(EDITABLE);
+    expect(stage.snapshot().beginRequested).toBeUndefined();
+    expect(() => stage.adjust({ teamId: 't-a', balls: 4 })).not.toThrow();
   });
 });
 

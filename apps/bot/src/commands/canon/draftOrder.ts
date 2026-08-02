@@ -795,6 +795,33 @@ export function performActivityReimport(
 }
 
 /**
+ * Free a pending Activity begin press this bot can never honour from where it stands (#233): a
+ * keepAdjustments re-arm republishes the bag exactly as it is pending edits and all, which clears
+ * `beginRequested` at the source and re-enables every commissioner's button. Fire-and-forget —
+ * the refusal stands either way, and if the stage is down there is no stuck button to free.
+ */
+function releaseBeginRequest(
+  session: CeremonySession,
+  stage: InspectableRevealStage,
+  guildId: string,
+): void {
+  const rows = oddsRows(session);
+  void stage
+    .lobby({
+      title: session.title,
+      teamCount: session.config.teams.length,
+      totalBalls: rows.reduce((sum, row) => sum + row.balls, 0),
+      rows,
+      guildId,
+      commissionerIds: session.commissionerIds ?? [],
+      keepAdjustments: true,
+    })
+    .catch((error: unknown) => {
+      console.error('[draftorder] could not release the pending Activity begin press:', error);
+    });
+}
+
+/**
  * Honour an in-Activity "seal the bag & start the draw" request (#233).
  *
  * The Activity's button is a doorbell: the api records the request and broadcasts it, and this is
@@ -803,10 +830,13 @@ export function performActivityReimport(
  * commit in-channel, start the paced reveal), so ADR 0006's audit trail is byte-for-byte the same
  * shape regardless of which front door was used. The bot stays the sole committer.
  *
- * Refusals return false and post nothing: every terminal cause also tears down or re-arms the
- * lobby (which clears the request at the source, re-enabling the button), and every transient
- * cause (mini-game or re-import in flight) ends in a re-arm too — so a refused press never
- * strands the Activity in "sealing…".
+ * Refusals return false and post nothing, and none of them can strand the Activity in
+ * "sealing…": a press this bot can never honour from here (no lobby channel recorded, channel
+ * unreachable or unsendable) actively *releases* the request via a keepAdjustments re-arm, while
+ * every other refusal is already on a path that clears it — state moved (the winning `begin`'s
+ * `start`/`clear` replaces the lobby), the interlocks (mini-game and re-import both end in a
+ * re-arm), an abort (tears the stage down), or a bot restart (the boot reconciler clears the
+ * orphaned lobby).
  */
 export function performActivityBegin(
   client: Client,
@@ -816,8 +846,13 @@ export function performActivityBegin(
   return async (guildId, request) => {
     if (!guildId) return false;
     const session = getCeremony(guildId);
-    if (!session || session.state !== 'GAME_OPEN' || !session.lobbyChannelId) return false;
+    if (!session || session.state !== 'GAME_OPEN') return false;
     if (session.miniGameActive || session.reimportActive || session.abort.signal.aborted) {
+      return false;
+    }
+    if (!session.lobbyChannelId) {
+      // Defensive — `setup` always records it — but nothing else would ever clear the press.
+      releaseBeginRequest(session, stage, guildId);
       return false;
     }
     // Belt over the watcher's frame guard: this function is exported, and the delay becomes real
@@ -830,8 +865,13 @@ export function performActivityBegin(
         : DEFAULT_REVEAL_DELAY_SECONDS;
     const direction = request.direction === 'first-to-last' ? 'first-to-last' : 'worst-to-first';
 
-    const channel = await client.channels.fetch(session.lobbyChannelId);
-    if (!channel?.isSendable()) return false;
+    const channel = await client.channels.fetch(session.lobbyChannelId).catch(() => null);
+    if (!channel?.isSendable()) {
+      // Misconfiguration (bot lost the channel or its send permission): no re-arm is coming from
+      // anywhere else, so free the press or every commissioner's button stays disabled for good.
+      releaseBeginRequest(session, stage, guildId);
+      return false;
+    }
     // Re-validate after the fetch — same discipline as the slash handler after its reply await: a
     // slash `begin`, an abort, or a replacing `setup` can land while Discord round-trips.
     if (
@@ -887,6 +927,19 @@ export function performActivityBegin(
       });
     } catch (error) {
       console.error('[draftorder] failed to post the Activity-begin seal line:', error);
+    }
+    // Re-validate once more after the seal line's await — the same replacing-`setup` hazard as
+    // the checkpoints above, one await later. A detached session must never commit after the
+    // replacement's fresh preview; the stray seal line (already posted) is cosmetic, the
+    // commitment is what must not follow it.
+    if (
+      getCeremony(guildId) !== session ||
+      session.abort.signal.aborted ||
+      session.miniGameActive ||
+      session.reimportActive ||
+      (session.state as DraftOrderState) !== 'GAME_OPEN'
+    ) {
+      return false;
     }
 
     // Fire and forget, exactly as the slash handler does: the ceremony runs on channel messages.

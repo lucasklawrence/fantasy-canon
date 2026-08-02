@@ -419,7 +419,7 @@ async function commissionerPost(
 
 /** Re-render the odds table in place so disabled/enabled steppers reflect what's in flight. */
 function repaintLobbyEdits(): void {
-  if (currentLobby) renderOddsTable(currentLobby.rows, [], commissioner);
+  if (currentLobby) renderOddsTable(currentLobby.rows, [], commissioner && !beginPending);
 }
 
 /** The lobby currently on screen, kept so an in-flight change can repaint without a refetch. */
@@ -488,8 +488,10 @@ function renderLobby(lobby: LotteryLobby): void {
   byId('commit').textContent = beginPending
     ? 'Sealing the bag — the commitment posts in the channel, then the draw begins…'
     : 'Commissioner will begin the draw soon…';
-  renderOddsTable(lobby.rows, [], commissioner);
-  show('edit-hint', commissioner);
+  // A pending seal freezes the whole lobby server-side (#233) — render the table read-only too,
+  // so the steppers don't offer writes the stage is going to 409.
+  renderOddsTable(lobby.rows, [], commissioner && !beginPending);
+  show('edit-hint', commissioner && !beginPending);
   // Re-import only makes sense for an ESPN-backed ceremony, but the client can't tell — the bot
   // refuses a manual `teams:` setup server-side and says so.
   show('edit-actions', commissioner);
@@ -532,10 +534,12 @@ function renderLobby(lobby: LotteryLobby): void {
 function renderWaiting(start: LotteryStart, drawnTeams: string[] = []): void {
   currentStart = start; // remembered for pull scheduling (delayMs) across later phases
   // The commitment binds the bag: past this point nothing on screen is editable, so drop the
-  // lobby we were holding and retract the offer (#210).
+  // lobby we were holding and retract the offer (#210) — the seal controls with it (#233), or a
+  // slash-started draw would leave a live-looking begin button on the waiting screen.
   currentLobby = undefined;
   show('edit-hint', false);
   show('edit-actions', false);
+  show('begin-actions', false);
   byId('title').textContent = start.title;
   byId('waiting-sub').textContent =
     `${start.teamCount} teams · ${start.totalBalls} balls in the hopper`;
@@ -1221,6 +1225,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       currentLobby = undefined;
       show('edit-hint', false);
       show('edit-actions', false);
+      show('begin-actions', false);
       hopper().sync([], []); // empty the pile — the canvas clears on the next frame
       // An idle stage means an api restart or a cleared lobby — either way the armedSeq space
       // may reset (#232), so forget everything commissioner-related and let the next lobby's

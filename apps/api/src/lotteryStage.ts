@@ -127,9 +127,11 @@ export interface LotteryStage {
    * Flag that the commissioner wants the bag sealed and the draw started (#233). Same shape as
    * {@link LotteryStage.requestReimport}: this process can never commit or draw (ADR 0006), so
    * the flag is a doorbell the bot's stage watcher answers by running the identical flow as
-   * `/canon draftorder begin`. Cleared when the bot's `start` replaces the lobby, or by any
-   * re-arm/teardown — a bag that changed after the press must be re-confirmed against what the
-   * league can see.
+   * `/canon draftorder begin`. While it is pending the lobby is frozen — `adjust`, `rename`,
+   * `requestReimport`, and a second `requestBegin` all throw {@link StageNotEditableError}, so
+   * no write can land between the bot's drain and its commitment. Cleared when the bot's `start`
+   * replaces the lobby, or by any re-arm/teardown — a bag that changed after the press must be
+   * re-confirmed against what the league can see.
    */
   requestBegin(request: LotteryBeginRequest): void;
   /**
@@ -671,7 +673,7 @@ export function createLotteryStage(): LotteryStage {
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
     adjust(next) {
-      if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
+      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
       const target = lobby.rows.find((row) => row.teamId === next.teamId);
       if (!target) {
         throw new UnknownTeamError(next.teamId);
@@ -696,7 +698,7 @@ export function createLotteryStage(): LotteryStage {
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), adjusted: detail });
     },
     rename(next) {
-      if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
+      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
       const target = lobby.rows.find((row) => row.teamId === next.teamId);
       if (!target) throw new UnknownTeamError(next.teamId);
       // `createCeremony` rejects duplicate display names case-insensitively, so a colliding rename
@@ -716,18 +718,21 @@ export function createLotteryStage(): LotteryStage {
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), renamed: detail });
     },
     requestReimport() {
-      if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
+      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
       // Only a flag: this process has no ESPN league config and no cookies, so the refetch is the
       // bot's to perform. It clears when the bot re-arms the lobby with what it fetched.
       reimportRequested = true;
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
     requestBegin(request) {
-      if (phase !== 'lobby' || !lobby) throw new StageNotEditableError();
+      // A pending begin freezes the whole lobby (adjust/rename/re-import/begin all 409): the bot
+      // is about to drain the pending set and commit, and a write landing after that read would
+      // put a bag on screen the commitment doesn't bind. The freeze lifts when the bot's `start`
+      // replaces the lobby or a re-arm voids the press — never silently.
+      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
       // Only a request: the bot is the sole committer (ADR 0006), so all this does is broadcast
       // "sealing…" — which is also what disables every viewer's begin button until the bot's
-      // `start` replaces the lobby or a re-arm invalidates the press. Last press wins if two
-      // commissioners race; the bot honours exactly one via its own single-flight guard.
+      // `start` replaces the lobby or a re-arm invalidates the press.
       beginRequested = request;
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },

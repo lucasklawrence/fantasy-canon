@@ -1382,6 +1382,61 @@ describe('performActivityBegin (#233)', () => {
     expect(calls[0].direction).toBe('worst-to-first');
   });
 
+  it('releases the press with a keepAdjustments re-arm when the channel is unusable', async () => {
+    const sent: ChannelPost[] = [];
+    const calls: RunCeremonyOptions[] = [];
+    const rearms: { keepAdjustments?: boolean; guildId?: string }[] = [];
+    const stage: InspectableRevealStage = {
+      ...stageHolding(),
+      lobby: (req) => {
+        rearms.push({ keepAdjustments: req.keepAdjustments, guildId: req.guildId });
+        return Promise.resolve();
+      },
+    };
+
+    // Nothing else will ever re-arm this lobby, so a silent false would strand every
+    // commissioner's button on "sealing…" — the re-arm clears the request at the source.
+    openSession();
+    await expect(
+      performActivityBegin(beginClient(sent, false), stage, fakeRun(calls))('guild-1', REQUEST),
+    ).resolves.toBe(false);
+    expect(rearms).toEqual([{ keepAdjustments: true, guildId: 'guild-1' }]);
+
+    resetCeremoniesForTests();
+    openSession({ lobbyChannelId: undefined });
+    await expect(
+      performActivityBegin(beginClient(sent), stage, fakeRun(calls))('guild-1', REQUEST),
+    ).resolves.toBe(false);
+    expect(rearms).toHaveLength(2);
+    expect(sent).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses to start the ceremony when a replacing setup lands while the seal line posts', async () => {
+    const session = openSession();
+    const calls: RunCeremonyOptions[] = [];
+    const client = {
+      channels: {
+        fetch: () =>
+          Promise.resolve({
+            isSendable: () => true,
+            send: () => {
+              // A concurrent `setup` replaces the registry entry mid-await; the detached old
+              // session must not commit after the replacement's fresh preview.
+              resetCeremoniesForTests();
+              return Promise.resolve({ id: 'm1' });
+            },
+          }),
+      },
+    } as unknown as Client;
+
+    await expect(
+      performActivityBegin(client, stageHolding(), fakeRun(calls))('guild-1', REQUEST),
+    ).resolves.toBe(false);
+    expect(calls).toHaveLength(0);
+    expect(session.state).toBe('GAME_OPEN');
+  });
+
   it('refuses whenever the slash command would: state, interlocks, channel — and posts nothing', async () => {
     const sent: ChannelPost[] = [];
     const calls: RunCeremonyOptions[] = [];
