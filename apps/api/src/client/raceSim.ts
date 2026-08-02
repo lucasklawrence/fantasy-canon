@@ -136,7 +136,7 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
     return racers.filter((r) => r.locked).map((r) => (r.locked as { pick: number }).pick);
   }
 
-  function draw(now: number): void {
+  function draw(): void {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
@@ -182,7 +182,6 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
       const r = racer.sprite.width / dpr / 2;
       ctx.drawImage(racer.sprite, px - r, py - r, r * 2, r * 2);
     }
-    void now;
   }
 
   /** Nothing left to animate: every racer parked, no lock flight, surge fully eased. */
@@ -214,7 +213,7 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
         racer.frac = Math.min(FINISH_X - 0.02, Math.max(PACK_MIN - 0.1, racer.mid + wander));
       }
     }
-    draw(now);
+    draw();
     if (!idle()) rafId = requestAnimationFrame(frame);
   }
 
@@ -231,7 +230,7 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
       racer.frac =
         PACK_MIN + ((racer.lane + 0.5) / Math.max(1, racers.length)) * (PACK_MAX - PACK_MIN);
     }
-    draw(performance.now());
+    draw();
   }
 
   function repaint(): void {
