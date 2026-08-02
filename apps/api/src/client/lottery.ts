@@ -205,6 +205,8 @@ let commissioner = false;
 const editsInFlight = new Set<string>();
 /** Server-truth "an ESPN re-import is pending" (#227) — drives the re-import button's state. */
 let reimportPending = false;
+/** Server-truth "a seal-and-start is pending" (#233) — same broadcast-driven discipline. */
+let beginPending = false;
 
 /**
  * A `Balls` cell with −/+ steppers. One edit per row at a time: the buttons disable on click and
@@ -370,6 +372,27 @@ async function sendReimport(): Promise<void> {
   if (!accepted) button.disabled = false;
 }
 
+/**
+ * Ask the bot to seal the bag and start the draw (#233). Like re-import, the api cannot do it —
+ * the POST records a request the bot's stage watcher honours by running the identical flow as
+ * `/canon draftorder begin`: drain edits, fresh odds card, commitment in-channel, paced reveal.
+ * No timer (#227): an accepted request broadcasts `beginRequested`, which disables the button for
+ * every commissioner until the draw's `start` replaces the lobby (or a re-arm voids the press).
+ */
+async function sendBegin(): Promise<void> {
+  const button = byId('begin-btn') as HTMLButtonElement;
+  const delaySeconds = Number((byId('begin-delay') as HTMLSelectElement).value);
+  const direction = (byId('begin-direction') as HTMLSelectElement).value;
+  button.disabled = true;
+  setStatus('sealing the bag…', 'live');
+  const accepted = await commissionerPost(
+    '/api/lottery/begin',
+    { delaySeconds, direction },
+    (status) => (status === 409 ? 'the lobby changed — begin rejected' : 'begin rejected'),
+  );
+  if (!accepted) button.disabled = false;
+}
+
 /** Shared POST plumbing for the commissioner routes: bearer, error surfacing, no optimistic paint. */
 async function commissionerPost(
   route: string,
@@ -462,16 +485,24 @@ function renderLobby(lobby: LotteryLobby): void {
   byId('title').textContent = lobby.title;
   byId('waiting-sub').textContent =
     `${lobby.teamCount} teams · ${lobby.totalBalls} balls in the hopper`;
-  byId('commit').textContent = 'Commissioner will begin the draw soon…';
+  byId('commit').textContent = beginPending
+    ? 'Sealing the bag — the commitment posts in the channel, then the draw begins…'
+    : 'Commissioner will begin the draw soon…';
   renderOddsTable(lobby.rows, [], commissioner);
   show('edit-hint', commissioner);
   // Re-import only makes sense for an ESPN-backed ceremony, but the client can't tell — the bot
   // refuses a manual `teams:` setup server-side and says so.
   show('edit-actions', commissioner);
-  // The button follows the broadcast, not a timer (#227): `reimportRequested` is set the moment
-  // the request is accepted and cleared by the bot's re-arm — the exact lifetime of "an import is
-  // actually pending". Every viewer's snapshot agrees, so late joiners see the true state too.
-  (byId('reimport-btn') as HTMLButtonElement).disabled = reimportPending;
+  show('begin-actions', commissioner);
+  // The buttons follow the broadcast, not a timer (#227): each flag is set the moment its request
+  // is accepted and cleared when the bot's re-arm or `start` replaces the lobby — the exact
+  // lifetime of "that work is actually pending". Every viewer's snapshot agrees, so late joiners
+  // see the true state too. The two block each other (#233): a re-import replaces the very bag a
+  // seal would commit, and a seal makes a refetch moot.
+  (byId('reimport-btn') as HTMLButtonElement).disabled = reimportPending || beginPending;
+  (byId('begin-btn') as HTMLButtonElement).disabled = beginPending || reimportPending;
+  (byId('begin-delay') as HTMLSelectElement).disabled = beginPending;
+  (byId('begin-direction') as HTMLSelectElement).disabled = beginPending;
   // The answer is lobby-scoped server-side, and commissioner-ship is stamped fresh at every arm —
   // so re-ask whenever a *newly armed* lobby appears (`armedSeq` bumps per arm, not per edit
   // echo, #232), not just once per page. The once-per-page latch left an open Activity holding a
@@ -1201,8 +1232,12 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
     case 'lobby':
       // Pre-commitment lobby (#198): show odds without the commitment hash.
       reimportPending = snapshot.reimportRequested === true;
+      beginPending = snapshot.beginRequested !== undefined;
       if (snapshot.lobby) renderLobby(snapshot.lobby);
-      setStatus('setup complete — draw pending', 'live');
+      setStatus(
+        beginPending ? 'sealing the bag — draw starting…' : 'setup complete — draw pending',
+        'live',
+      );
       show('waiting', true);
       show('stage', false);
       break;
@@ -1272,14 +1307,15 @@ function applyEvent(event: LotteryEvent): void {
       renderSnapshot(event.snapshot);
       break;
     case 'lottery-lobby':
-      // Pre-commitment lobby (#198): arm the waiting room from setup onward. The re-import flag
-      // rides the event beside the lobby, so carry it into the synthetic snapshot (#227).
+      // Pre-commitment lobby (#198): arm the waiting room from setup onward. The pending-request
+      // flags ride the event beside the lobby, so carry them into the synthetic snapshot (#227).
       reveals = [];
       renderSnapshot({
         phase: 'lobby',
         lobby: event.lobby,
         reveals: [],
         ...(event.reimportRequested ? { reimportRequested: true } : {}),
+        ...(event.beginRequested ? { beginRequested: event.beginRequested } : {}),
       });
       break;
     case 'lottery-start':
@@ -1431,6 +1467,7 @@ async function boot(): Promise<void> {
   });
   byId('replay-skip').addEventListener('click', skipReplay);
   byId('reimport-btn').addEventListener('click', () => void sendReimport());
+  byId('begin-btn').addEventListener('click', () => void sendBegin());
   byId('sound-btn').addEventListener('click', () => audio.toggle());
   document.addEventListener('visibilitychange', onVisibilityChange);
   const inDiscord = isDiscordActivity(window.location);

@@ -63,7 +63,7 @@ import {
   stageFromEnv,
   type InspectableRevealStage,
 } from '../../lib/lotteryStageClient.js';
-import { createStageWatcher } from '../../lib/lotteryStageWatcher.js';
+import { createStageWatcher, type StageBeginRequest } from '../../lib/lotteryStageWatcher.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
@@ -498,7 +498,12 @@ export async function handleDraftOrderBeginSubcommand(
   // delta; this is where they become the authoritative bag, and it has to happen before the
   // commitment binds anything. Runs in channel mode too — the lobby is armed from `setup`
   // regardless of how `begin` is run, so an edit made there must not be silently dropped.
-  await foldInActivityEdits(session, channel, interaction, stage);
+  await foldInActivityEdits(
+    session,
+    channel,
+    (content) => interaction.followUp({ content, flags: MessageFlags.Ephemeral }),
+    stage,
+  );
 
   // Re-validate after the drain's awaits (stage read, card render, preview post) — same pattern as
   // the block above and as `setup`/`hype`/`minigame`. A replacing `setup` during those awaits has
@@ -585,13 +590,15 @@ export async function handleDraftOrderBeginSubcommand(
  *
  * Best-effort by design. An unreachable stage means nobody could be looking at the Activity
  * either, so the ceremony proceeds on the un-edited bag rather than blocking on presentation —
- * but the commissioner is told, because it's the one case where what they saw and what gets
- * committed can differ.
+ * but the commissioner is told via `warn`, because it's the one case where what they saw and what
+ * gets committed can differ. `warn` is a callback because `begin` has two front doors: the slash
+ * handler warns ephemerally, the Activity's seal button (#233) has no interaction to whisper
+ * through, so its warning goes to the channel.
  */
 async function foldInActivityEdits(
   session: CeremonySession,
   channel: SendableChannel,
-  interaction: ChatInputCommandInteraction,
+  warn: (content: string) => Promise<unknown>,
   stage: InspectableRevealStage,
 ): Promise<void> {
   // Undo point: everything below the stage read can fail *after* the bag is edited (the odds card
@@ -615,14 +622,10 @@ async function foldInActivityEdits(
   } catch (error) {
     restoreBag(session, before);
     console.error('[draftorder] failed to fold in the Activity ball edits:', error);
-    await interaction
-      .followUp({
-        content:
-          "Couldn't apply the Lottery Machine's pending edits — committing the bag as `setup` left it. " +
-          'If you adjusted balls in the Activity, abort and re-run `setup` with the `balls:` option.',
-        flags: MessageFlags.Ephemeral,
-      })
-      .catch(() => {});
+    await warn(
+      "Couldn't apply the Lottery Machine's pending edits — committing the bag as `setup` left it. " +
+        'If you adjusted balls in the Activity, abort and re-run `setup` with the `balls:` option.',
+    ).catch(() => {});
   }
 }
 
@@ -792,9 +795,121 @@ export function performActivityReimport(
 }
 
 /**
- * Start watching the stage for commissioner activity (#220 edits, #219 re-import requests).
- * Best-effort and non-blocking: an unreachable api just retries with backoff, and nothing about
- * the ceremony depends on it — `begin` still re-posts the full odds card before the commitment.
+ * Honour an in-Activity "seal the bag & start the draw" request (#233).
+ *
+ * The Activity's button is a doorbell: the api records the request and broadcasts it, and this is
+ * where the ceremony actually starts — the **identical** flow as `/canon draftorder begin` in
+ * activity mode (drain pending edits with their fresh public odds card, post the launch invite,
+ * commit in-channel, start the paced reveal), so ADR 0006's audit trail is byte-for-byte the same
+ * shape regardless of which front door was used. The bot stays the sole committer.
+ *
+ * Refusals return false and post nothing: every terminal cause also tears down or re-arms the
+ * lobby (which clears the request at the source, re-enabling the button), and every transient
+ * cause (mini-game or re-import in flight) ends in a re-arm too — so a refused press never
+ * strands the Activity in "sealing…".
+ */
+export function performActivityBegin(
+  client: Client,
+  stage: InspectableRevealStage = stageFromEnv(),
+  run: typeof runCeremony = runCeremony,
+): (guildId: string | undefined, request: StageBeginRequest) => Promise<boolean> {
+  return async (guildId, request) => {
+    if (!guildId) return false;
+    const session = getCeremony(guildId);
+    if (!session || session.state !== 'GAME_OPEN' || !session.lobbyChannelId) return false;
+    if (session.miniGameActive || session.reimportActive || session.abort.signal.aborted) {
+      return false;
+    }
+    // Belt over the watcher's frame guard: this function is exported, and the delay becomes real
+    // timer pacing — junk falls back to the slash command's default rather than being honoured.
+    const delaySeconds =
+      Number.isInteger(request.delaySeconds) &&
+      request.delaySeconds >= 5 &&
+      request.delaySeconds <= 60
+        ? request.delaySeconds
+        : DEFAULT_REVEAL_DELAY_SECONDS;
+    const direction = request.direction === 'first-to-last' ? 'first-to-last' : 'worst-to-first';
+
+    const channel = await client.channels.fetch(session.lobbyChannelId);
+    if (!channel?.isSendable()) return false;
+    // Re-validate after the fetch — same discipline as the slash handler after its reply await: a
+    // slash `begin`, an abort, or a replacing `setup` can land while Discord round-trips.
+    if (
+      getCeremony(guildId) !== session ||
+      session.abort.signal.aborted ||
+      session.miniGameActive ||
+      session.reimportActive ||
+      (session.state as DraftOrderState) !== 'GAME_OPEN'
+    ) {
+      return false;
+    }
+
+    // The commitment + reveal post where `setup` ran — an Activity press has no "this channel".
+    session.channelId = session.lobbyChannelId;
+
+    // Same single drain point as the slash path (#210). The presser has no ephemeral surface, so
+    // the drain-failure warning goes to the channel the ceremony is anchored in.
+    await foldInActivityEdits(
+      session,
+      channel,
+      (content) => channel.send({ content: `⚠️ ${content}`, allowedMentions: { parse: [] } }),
+      stage,
+    );
+    // Re-validate after the drain's awaits (stage read, card render, preview post) — a replacing
+    // `setup` in that window has already posted its own preview, and sealing the old bag after it
+    // is exactly what the slash handler's twin check prevents.
+    if (
+      getCeremony(guildId) !== session ||
+      session.abort.signal.aborted ||
+      session.miniGameActive ||
+      session.reimportActive ||
+      (session.state as DraftOrderState) !== 'GAME_OPEN'
+    ) {
+      return false;
+    }
+
+    // One post carries the audit line ("who sealed, from where") and the launch invite — the
+    // in-channel record ADR 0006 wants, in the slot the slash path's ephemeral reply + launch
+    // button occupy. Best-effort like the slash path's button post: a failed invite must never
+    // block the ceremony, whose commitment is the actual record.
+    try {
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${DRAFT_ORDER_LAUNCH_ID}:${session.createdAt}`)
+          .setLabel('🎰 Open the Lottery Machine')
+          .setStyle(ButtonStyle.Primary),
+      );
+      const who = request.requestedBy ? `<@${request.requestedBy}>` : 'The commissioner';
+      await channel.send({
+        content: `🔒 **${session.title}** — ${who} sealed the bag from inside the Lottery Machine. The commitment posts now; first reveal ~${delaySeconds}s after its drum roll, streaming live in the Activity.`,
+        components: [row],
+        allowedMentions: { parse: [] }, // uniform ceremony-surface policy (#222)
+      });
+    } catch (error) {
+      console.error('[draftorder] failed to post the Activity-begin seal line:', error);
+    }
+
+    // Fire and forget, exactly as the slash handler does: the ceremony runs on channel messages.
+    // `stage` always rides along — an Activity-initiated begin is activity mode by definition.
+    void run(session, channelIo(channel), {
+      delayMs: delaySeconds * 1000,
+      direction,
+      store: createFileCeremonyStore(),
+      stage,
+    }).catch((error) => {
+      if (!(error instanceof CeremonyAborted)) {
+        console.error('[draftorder] ceremony failed:', error);
+      }
+    });
+    return true;
+  };
+}
+
+/**
+ * Start watching the stage for commissioner activity (#220 edits, #219 re-import requests,
+ * #233 begin requests). Best-effort and non-blocking: an unreachable api just retries with
+ * backoff, and nothing about the ceremony depends on it — `begin` still re-posts the full odds
+ * card before the commitment.
  */
 export function watchActivityEdits(
   client: Client,
@@ -805,6 +920,7 @@ export function watchActivityEdits(
     baseUrl: env.FANTASY_STAGE_URL ?? DEFAULT_STAGE_URL,
     post: postActivityEditLine(client),
     reimport: performActivityReimport(client, context),
+    begin: performActivityBegin(client),
   });
   watcher.start();
 }

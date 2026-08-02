@@ -177,6 +177,12 @@ export interface LotterySnapshot {
    * edit, since they were made against the field the refetch replaces.
    */
   reimportRequested?: boolean;
+  /**
+   * The commissioner pressed "seal the bag" inside the Activity (#233). Present until the bot
+   * honours it (its `start` replaces the lobby) or the lobby is re-armed/torn down — the exact
+   * lifetime every client's begin button spends disabled.
+   */
+  beginRequested?: LotteryBeginRequest;
 }
 
 /**
@@ -217,6 +223,25 @@ export interface LotteryRenameDetail {
   guildId?: string;
 }
 
+/**
+ * The commissioner asked the Activity to seal the bag and start the draw (#233). Like the
+ * re-import flag it is a *request*: the api can never commit or draw anything (ADR 0006 — the bot
+ * is the sole committer), so the bot's stage watcher honours it by running the exact same flow as
+ * `/canon draftorder begin` — drain pending edits, post the fresh public odds card, post the
+ * commitment in-channel, start the paced reveal.
+ */
+export interface LotteryBeginRequest {
+  /** Seconds between reveals, from the Activity's picker — the slash command's `delay` option. */
+  delaySeconds: number;
+  /** Reveal order (#200): worst odds first (default) or pick #1 first. */
+  direction: 'worst-to-first' | 'first-to-last';
+  /**
+   * Discord user id of the commissioner who pressed the button, stamped server-side from the
+   * verified bearer — never client-supplied — so the in-channel audit line can name them.
+   */
+  requestedBy?: string;
+}
+
 /** The events fanned out over the WS, tagged for the client. */
 export type LotteryEvent =
   | { type: 'lottery-state'; snapshot: LotterySnapshot }
@@ -235,6 +260,8 @@ export type LotteryEvent =
       renames?: LotteryRename[];
       /** Mirrors {@link LotterySnapshot.reimportRequested}. */
       reimportRequested?: boolean;
+      /** Mirrors {@link LotterySnapshot.beginRequested}. */
+      beginRequested?: LotteryBeginRequest;
       /** Set only when this broadcast came from a commissioner edit rather than a bot re-arm. */
       adjusted?: LotteryAdjustmentDetail;
       /** Set only when this broadcast came from a commissioner rename. */

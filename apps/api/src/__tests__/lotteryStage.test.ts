@@ -4,6 +4,7 @@ import {
   parseLotteryAbort,
   parseLotteryAdjust,
   parseLotteryBeat,
+  parseLotteryBegin,
   parseLotteryClear,
   parseLotteryFinish,
   parseLotteryLobby,
@@ -557,7 +558,106 @@ describe('rename + re-import — the rest of the in-Activity field edits (#219)'
   });
 });
 
+describe('requestBegin — the in-Activity seal-and-start doorbell (#233)', () => {
+  const REQUEST = {
+    delaySeconds: 20,
+    direction: 'worst-to-first',
+    requestedBy: 'commish',
+  } as const;
+
+  it('records the request, broadcasts it on the lobby event, and carries it on the snapshot', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+
+    stage.requestBegin(REQUEST);
+    expect(stage.snapshot().beginRequested).toEqual(REQUEST);
+    expect((events[0] as { beginRequested?: unknown }).beginRequested).toEqual(REQUEST);
+    // A doorbell, not a state change: the lobby itself is untouched — the bot's `start` is what
+    // moves the phase.
+    expect(stage.snapshot().phase).toBe('lobby');
+  });
+
+  it('refuses when nothing is armed or the draw already started', () => {
+    const stage = createLotteryStage();
+    expect(() => stage.requestBegin(REQUEST)).toThrow(StageNotEditableError);
+    stage.lobby(EDITABLE);
+    stage.start(START);
+    expect(() => stage.requestBegin(REQUEST)).toThrow(StageNotEditableError);
+  });
+
+  it('dies with any re-arm — a changed bag voids the press (ADR 0006)', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    stage.requestBegin(REQUEST);
+
+    // Even a keepAdjustments re-arm clears it: the bot republished the bag, so what the
+    // commissioner pressed against is no longer what is on screen.
+    stage.lobby({ ...EDITABLE, keepAdjustments: true });
+    expect(stage.snapshot().beginRequested).toBeUndefined();
+  });
+
+  it('clears when the bot answers it with start, and on a disarm', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    stage.requestBegin(REQUEST);
+    stage.start(START);
+    expect(stage.snapshot().beginRequested).toBeUndefined();
+
+    const disarmed = createLotteryStage();
+    disarmed.lobby({ ...EDITABLE, guildId: 'g1' });
+    disarmed.requestBegin(REQUEST);
+    disarmed.clear({ guildId: 'g1' });
+    expect(disarmed.snapshot().beginRequested).toBeUndefined();
+  });
+
+  it('last press wins when two commissioners race', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    stage.requestBegin(REQUEST);
+    stage.requestBegin({ delaySeconds: 5, direction: 'first-to-last' });
+    expect(stage.snapshot().beginRequested).toEqual({
+      delaySeconds: 5,
+      direction: 'first-to-last',
+    });
+  });
+});
+
 describe('lottery payload guards', () => {
+  it('parseLotteryBegin accepts only the picker vocabulary and never a requestedBy (#233)', () => {
+    expect(
+      parseLotteryBegin(JSON.stringify({ delaySeconds: 20, direction: 'worst-to-first' })),
+    ).toEqual({ value: { delaySeconds: 20, direction: 'worst-to-first' } });
+    expect(
+      parseLotteryBegin(JSON.stringify({ delaySeconds: 5, direction: 'first-to-last' })),
+    ).toEqual({ value: { delaySeconds: 5, direction: 'first-to-last' } });
+    // Closed vocabulary: this body comes from the public Activity client, and the delay becomes
+    // real ceremony pacing — 0s, 7s, and 10 hours are all refused, not clamped.
+    expect(
+      parseLotteryBegin(JSON.stringify({ delaySeconds: 0, direction: 'worst-to-first' })),
+    ).toHaveProperty('error');
+    expect(
+      parseLotteryBegin(JSON.stringify({ delaySeconds: 7, direction: 'worst-to-first' })),
+    ).toHaveProperty('error');
+    expect(
+      parseLotteryBegin(JSON.stringify({ delaySeconds: 36000, direction: 'worst-to-first' })),
+    ).toHaveProperty('error');
+    expect(
+      parseLotteryBegin(JSON.stringify({ delaySeconds: 20, direction: 'sideways' })),
+    ).toHaveProperty('error');
+    // `requestedBy` is the route's to stamp from the verified bearer — a client-supplied one is
+    // dropped on the floor, never echoed into the audit trail.
+    const spoofed = parseLotteryBegin(
+      JSON.stringify({
+        delaySeconds: 20,
+        direction: 'worst-to-first',
+        requestedBy: 'someone-else',
+      }),
+    );
+    expect(spoofed).toEqual({ value: { delaySeconds: 20, direction: 'worst-to-first' } });
+  });
+
   it('parseLotteryRename trims, caps, and rejects unusable names', () => {
     expect(parseLotteryRename(JSON.stringify({ teamId: 't1', displayName: '  Ducks  ' }))).toEqual({
       value: { teamId: 't1', displayName: 'Ducks' },
