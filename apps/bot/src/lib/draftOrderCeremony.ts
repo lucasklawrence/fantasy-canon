@@ -139,6 +139,13 @@ export interface RunCeremonyOptions {
    * which pick is announced first. The Activity stage and channel cards are both order-agnostic.
    */
   direction?: 'worst-to-first' | 'first-to-last';
+  /**
+   * How the Activity renders the paced reveal (#235): the classic ball machine (default) or the
+   * 12-lane race. Rides the stage `start` so every viewer renders the same spectacle. Purely
+   * presentational — the channel reveal and the draw itself are untouched — and meaningless
+   * without {@link RunCeremonyOptions.stage}.
+   */
+  visual?: 'machine' | 'race';
 }
 
 /** One row of the stage's pre-reveal odds table (matches the api's `LotteryOddsRow`). */
@@ -196,6 +203,8 @@ export interface RevealStage {
     rows: StageOddsRow[];
     /** Lets the stage refuse a second guild's ceremony while another is armed/live. */
     guildId?: string;
+    /** Reveal visualization every viewer renders (#235). Absent ⇒ the machine. */
+    visual?: 'machine' | 'race';
   }): Promise<void>;
   beat(beat: { pick: number; remaining: string[] }): Promise<void>;
   reveal(reveal: {
@@ -905,6 +914,7 @@ export async function runCeremony(
           delayMs: options.delayMs,
           rows: oddsRows(session),
           guildId: session.guildId,
+          ...(options.visual ? { visual: options.visual } : {}),
         });
       } catch (stageError) {
         console.error(

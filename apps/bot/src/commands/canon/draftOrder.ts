@@ -456,6 +456,7 @@ export async function handleDraftOrderBeginSubcommand(
   const stageMode = interaction.options.getString('stage') ?? 'channel';
   const direction = (interaction.options.getString('direction') ?? 'worst-to-first') as
     'worst-to-first' | 'first-to-last';
+  const visual = (interaction.options.getString('visual') ?? 'machine') as 'machine' | 'race';
 
   const directionNote =
     direction === 'first-to-last' ? ' Revealing pick #1 first (first-to-last).' : '';
@@ -573,6 +574,7 @@ export async function handleDraftOrderBeginSubcommand(
   void runCeremony(session, channelIo(channel), {
     delayMs: delaySeconds * 1000,
     direction,
+    visual,
     store: createFileCeremonyStore(),
     stage: stageMode === 'activity' ? stage : undefined,
   }).catch((error) => {
@@ -864,6 +866,7 @@ export function performActivityBegin(
         ? request.delaySeconds
         : DEFAULT_REVEAL_DELAY_SECONDS;
     const direction = request.direction === 'first-to-last' ? 'first-to-last' : 'worst-to-first';
+    const visual = request.visual === 'race' ? 'race' : 'machine';
 
     const channel = await client.channels.fetch(session.lobbyChannelId).catch(() => null);
     if (!channel?.isSendable()) {
@@ -947,6 +950,7 @@ export function performActivityBegin(
     void run(session, channelIo(channel), {
       delayMs: delaySeconds * 1000,
       direction,
+      visual,
       store: createFileCeremonyStore(),
       stage,
     }).catch((error) => {

@@ -567,10 +567,17 @@ describe('activity reveal stage (#169)', () => {
       ...Array.from({ length: 12 }, () => ['beat', 'reveal']).flat(),
       'finish',
     ]);
-    const start = calls[0][1] as { commitment: string; teamCount: number; rows: unknown[] };
+    const start = calls[0][1] as {
+      commitment: string;
+      teamCount: number;
+      rows: unknown[];
+      visual?: string;
+    };
     expect(start.commitment).toBe(computeCommitment('stage-secret', CONFIG));
     expect(start.teamCount).toBe(12);
     expect(start.rows).toHaveLength(12);
+    // No visual option ⇒ none on the wire — the stage and client both default to the machine.
+    expect(start.visual).toBeUndefined();
 
     // Default direction (worst-to-first): beats count down 12…1; finish carries full order + verify info.
     const beatPicks = calls
@@ -632,6 +639,28 @@ describe('activity reveal stage (#169)', () => {
       remaining: string[];
     };
     expect(lastReveal.remaining).toHaveLength(0);
+  });
+
+  it('rides the race visual on the stage start so every viewer renders the same ceremony (#235)', async () => {
+    const session = makeSession();
+    const { io } = collectorIo();
+    const { stage, calls } = collectorStage();
+
+    await runCeremony(session, io, {
+      delayMs: 0,
+      sleep: instantSleep,
+      seedSource: () => 'race-secret',
+      stage,
+      visual: 'race',
+    });
+
+    expect((calls[0][1] as { visual?: string }).visual).toBe('race');
+    // Presentation only: the paced beat→reveal stream is byte-identical to the machine's.
+    expect(calls.map(([m]) => m)).toEqual([
+      'start',
+      ...Array.from({ length: 12 }, () => ['beat', 'reveal']).flat(),
+      'finish',
+    ]);
   });
 
   it('falls back to the in-channel reveal when the stage cannot even start', async () => {

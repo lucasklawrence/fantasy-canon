@@ -562,6 +562,7 @@ describe('requestBegin — the in-Activity seal-and-start doorbell (#233)', () =
   const REQUEST = {
     delaySeconds: 20,
     direction: 'worst-to-first',
+    visual: 'machine',
     requestedBy: 'commish',
   } as const;
 
@@ -633,12 +634,24 @@ describe('requestBegin — the in-Activity seal-and-start doorbell (#233)', () =
 
 describe('lottery payload guards', () => {
   it('parseLotteryBegin accepts only the picker vocabulary and never a requestedBy (#233)', () => {
+    // Absent `visual` defaults to the machine — an older bundle simply has no picker (#235).
     expect(
       parseLotteryBegin(JSON.stringify({ delaySeconds: 20, direction: 'worst-to-first' })),
-    ).toEqual({ value: { delaySeconds: 20, direction: 'worst-to-first' } });
+    ).toEqual({ value: { delaySeconds: 20, direction: 'worst-to-first', visual: 'machine' } });
     expect(
       parseLotteryBegin(JSON.stringify({ delaySeconds: 5, direction: 'first-to-last' })),
-    ).toEqual({ value: { delaySeconds: 5, direction: 'first-to-last' } });
+    ).toEqual({ value: { delaySeconds: 5, direction: 'first-to-last', visual: 'machine' } });
+    expect(
+      parseLotteryBegin(
+        JSON.stringify({ delaySeconds: 10, direction: 'worst-to-first', visual: 'race' }),
+      ),
+    ).toEqual({ value: { delaySeconds: 10, direction: 'worst-to-first', visual: 'race' } });
+    // Present-but-junk visual is refused like the rest of the vocabulary, not coerced.
+    expect(
+      parseLotteryBegin(
+        JSON.stringify({ delaySeconds: 10, direction: 'worst-to-first', visual: 'zoetrope' }),
+      ),
+    ).toHaveProperty('error');
     // Closed vocabulary: this body comes from the public Activity client, and the delay becomes
     // real ceremony pacing — 0s, 7s, and 10 hours are all refused, not clamped.
     expect(
@@ -662,7 +675,9 @@ describe('lottery payload guards', () => {
         requestedBy: 'someone-else',
       }),
     );
-    expect(spoofed).toEqual({ value: { delaySeconds: 20, direction: 'worst-to-first' } });
+    expect(spoofed).toEqual({
+      value: { delaySeconds: 20, direction: 'worst-to-first', visual: 'machine' },
+    });
   });
 
   it('parseLotteryRename trims, caps, and rejects unusable names', () => {
@@ -780,6 +795,18 @@ describe('lottery payload guards', () => {
     expect('error' in parseLotteryStart(JSON.stringify({ ...START, rows: [{ team: 'X' }] }))).toBe(
       true,
     );
+  });
+
+  it('parseLotteryStart carries a valid visual and drops an unknown one (#235)', () => {
+    const race = parseLotteryStart(JSON.stringify({ ...START, visual: 'race' }));
+    expect('value' in race && race.value.visual).toBe('race');
+    // Absent stays absent (an older bot) — the client treats both as the machine.
+    const plain = parseLotteryStart(JSON.stringify(START));
+    expect('value' in plain && plain.value.visual).toBeUndefined();
+    // Presentation-only field: a newer bot's unknown vocabulary degrades to the machine rather
+    // than stalling the ceremony on a 400.
+    const unknown = parseLotteryStart(JSON.stringify({ ...START, visual: 'zoetrope' }));
+    expect('value' in unknown && unknown.value.visual).toBeUndefined();
   });
 
   it('parseLotteryBeat / parseLotteryReveal enforce their shapes', () => {

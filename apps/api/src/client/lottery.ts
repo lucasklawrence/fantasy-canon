@@ -26,6 +26,7 @@ import type {
 import { assignBallRanges, drawnBallFor, rangeLabel } from './ballAssignments.js';
 import { createCeremonyAudio } from './ceremonyAudio.js';
 import { createHopperSim, type HopperSim } from './hopperSim.js';
+import { createRaceSim, type RaceSim } from './raceSim.js';
 import {
   createPlaybackCursor,
   onHiddenAction,
@@ -130,6 +131,30 @@ function hopper(): HopperSim {
   return hopperSim;
 }
 
+// The race (#235). Same lazy pattern; only the ceremony's active visual ever instantiates its sim,
+// so a machine ceremony never pays for lanes and a race never boils an invisible pile.
+let raceSim: RaceSim | null = null;
+function race(): RaceSim {
+  if (!raceSim) raceSim = createRaceSim(byId('race-canvas') as HTMLCanvasElement);
+  return raceSim;
+}
+
+/**
+ * The ceremony's reveal visualization (#235), fixed by `start` so every viewer renders the same
+ * spectacle. The lobby has no start yet — it always shows the machine's loaded hopper.
+ */
+function activeVisual(): 'machine' | 'race' {
+  return currentStart?.visual === 'race' ? 'race' : 'machine';
+}
+
+/** Swap the stage's left panel to match the active visual: hopper+chute, or the racetrack. */
+function applyStageLayout(): void {
+  const racing = activeVisual() === 'race';
+  show('hopper', !racing);
+  show('chute', !racing);
+  show('racetrack', racing);
+}
+
 // Ceremony sound (#216) — silent until the viewer arms it; the callback keeps the 🔊 pill honest
 // even when the stored preference re-arms audio from a page interaction rather than the button.
 const audio = createCeremonyAudio((enabled) => {
@@ -141,10 +166,14 @@ const audio = createCeremonyAudio((enabled) => {
 /** Beat pick the roll is playing for — poll repaints of the same beat must not restart it. */
 let rolledPick: number | null = null;
 
-/** The odds table + hopper pile, shared by the lobby (#198) and the committed waiting room. */
+/**
+ * The odds table + the visual's field, shared by the lobby (#198) and the committed waiting room.
+ * `drawn` carries pick+team pairs: the machine only needs the team names, but the race parks a
+ * racer at the position its pick earned (#235).
+ */
 function renderOddsTable(
   oddsRows: LotteryOddsRow[],
-  drawnTeams: string[] = [],
+  drawn: { pick: number; team: string }[] = [],
   editable = false,
 ): void {
   const rows = byId('odds-rows');
@@ -183,7 +212,17 @@ function renderOddsTable(
     tr.appendChild(el('td', 'num', `${row.top3Pct.toFixed(1)}%`));
     rows.appendChild(tr);
   }
-  hopper().sync(oddsRows, drawnTeams);
+  if (activeVisual() === 'race') {
+    race().sync(oddsRows, drawn);
+    // Don't leave the machine simulating behind a hidden panel — but never *create* it for this.
+    hopperSim?.sync([], []);
+  } else {
+    hopper().sync(
+      oddsRows,
+      drawn.map((entry) => entry.team),
+    );
+    raceSim?.sync([], []);
+  }
 }
 
 // --- commissioner editing (#210): only ever offered on a pre-commitment lobby ---
@@ -383,11 +422,12 @@ async function sendBegin(): Promise<void> {
   const button = byId('begin-btn') as HTMLButtonElement;
   const delaySeconds = Number((byId('begin-delay') as HTMLSelectElement).value);
   const direction = (byId('begin-direction') as HTMLSelectElement).value;
+  const visual = (byId('begin-visual') as HTMLSelectElement).value;
   button.disabled = true;
   setStatus('sealing the bag…', 'live');
   const accepted = await commissionerPost(
     '/api/lottery/begin',
-    { delaySeconds, direction },
+    { delaySeconds, direction, visual },
     (status) => (status === 409 ? 'the lobby changed — begin rejected' : 'begin rejected'),
   );
   if (!accepted) button.disabled = false;
@@ -505,6 +545,7 @@ function renderLobby(lobby: LotteryLobby): void {
   (byId('begin-btn') as HTMLButtonElement).disabled = beginPending || reimportPending;
   (byId('begin-delay') as HTMLSelectElement).disabled = beginPending;
   (byId('begin-direction') as HTMLSelectElement).disabled = beginPending;
+  (byId('begin-visual') as HTMLSelectElement).disabled = beginPending;
   // The answer is lobby-scoped server-side, and commissioner-ship is stamped fresh at every arm —
   // so re-ask whenever a *newly armed* lobby appears (`armedSeq` bumps per arm, not per edit
   // echo, #232), not just once per page. The once-per-page latch left an open Activity holding a
@@ -531,7 +572,7 @@ function renderLobby(lobby: LotteryLobby): void {
   }
 }
 
-function renderWaiting(start: LotteryStart, drawnTeams: string[] = []): void {
+function renderWaiting(start: LotteryStart, drawn: { pick: number; team: string }[] = []): void {
   currentStart = start; // remembered for pull scheduling (delayMs) across later phases
   // The commitment binds the bag: past this point nothing on screen is editable, so drop the
   // lobby we were holding and retract the offer (#210) — the seal controls with it (#233), or a
@@ -544,7 +585,7 @@ function renderWaiting(start: LotteryStart, drawnTeams: string[] = []): void {
   byId('waiting-sub').textContent =
     `${start.teamCount} teams · ${start.totalBalls} balls in the hopper`;
   byId('commit').textContent = `commitment ${start.commitment.slice(0, 16)}…`;
-  renderOddsTable(start.rows, drawnTeams);
+  renderOddsTable(start.rows, drawn);
 }
 
 // --- the exit (#215): the drawn ball leaves the drum through the chute when the reveal lands ---
@@ -646,11 +687,17 @@ function renderDrum(pick: number, remaining: string[], windowMs?: number): void 
   show('stage', true);
   show('drop', false);
   byId('drum').classList.remove('hidden');
-  byId('hopper').classList.add('spinning');
-  hopper().agitate(true); // the boil (#211); .spinning still shakes the container
+  applyStageLayout();
   byId('drum-now').textContent = `Drawing pick #${pick}…`;
   const win = windowMs ?? currentStart?.delayMs ?? 4000;
-  armChute(pick, win);
+  if (activeVisual() === 'race') {
+    // The race's drum roll: the field bunches and breaks harder (#235). No chute to glow.
+    race().agitate(true);
+  } else {
+    byId('hopper').classList.add('spinning');
+    hopper().agitate(true); // the boil (#211); .spinning still shakes the container
+    armChute(pick, win);
+  }
   // The roll spans the same window the chute glow is scheduled against; a poll repaint of the
   // same beat must not restart the crescendo (same dedupe rule as `armChute`).
   if (rolledPick !== pick) {
@@ -723,8 +770,7 @@ async function runExitChoreography(
 
 function renderDrop(reveal: LotteryReveal): void {
   show('stage', true);
-  byId('hopper').classList.remove('spinning');
-  hopper().agitate(false);
+  applyStageLayout();
   const rerun = lastDropPick !== reveal.pick;
   lastDropPick = reveal.pick;
   // Which ball came out (#211/#215): cosmetic but stable — every viewer, poll repaint, and replay
@@ -743,6 +789,34 @@ function renderDrop(reveal: LotteryReveal): void {
   clear(chips);
   for (const team of reveal.remaining) chips.appendChild(el('span', 'chip', team));
   byId('drum-now').textContent = `Pick #${reveal.pick}: ${reveal.team}!`;
+  if (activeVisual() === 'race') {
+    // The race reveal (#235): the racer parks itself — falls off the pace, or crosses the line
+    // (`lockKind`) — while the field keeps dueling. Parallel spectacle, so the reveal card shows
+    // immediately; nothing waits on the park, same "cosmetics never block" rule as the machine.
+    race().agitate(false);
+    if (rerun) {
+      audio.stopRoll();
+      audio.hit();
+      race().lock(reveal.pick, reveal.team);
+      show('drop', true);
+      const ball = replaceNode('drop-pick');
+      ball.classList.remove('flip');
+      ball.classList.add('fall');
+      ball.textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
+      ball.style.background = num !== null && range !== undefined ? ballFace(range.hue) : '';
+      replaceNode('drop-team').textContent = reveal.team;
+      replaceNode('drop-odds').textContent = oddsText;
+    } else {
+      // A polling repaint of an already-shown reveal refreshes text without re-animating.
+      show('drop', true);
+      byId('drop-pick').textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
+      byId('drop-team').textContent = reveal.team;
+      byId('drop-odds').textContent = oddsText;
+    }
+    return;
+  }
+  byId('hopper').classList.remove('spinning');
+  hopper().agitate(false);
   if (rerun) {
     // End the roll (early if the network beat the schedule) and land the hit. Poll repaints of an
     // already-shown reveal stay silent, same rule as the animations.
@@ -769,7 +843,14 @@ let celebrated = false;
 
 function renderFinish(snapshot: LotterySnapshot): void {
   resetChute();
-  hopper().agitate(false); // stage is leaving the screen; let the pile settle and the loop park
+  hopperSim?.agitate(false); // stage is leaving the screen; let the pile settle and the loop park
+  // The race parks itself as the final reveal locks, but a finish that outran a dropped reveal
+  // must not leave un-parked racers animating behind a hidden stage (#235) — impose the sealed
+  // order, which parks everyone.
+  if (activeVisual() === 'race') {
+    if (snapshot.finish && currentStart) raceSim?.sync(currentStart.rows, snapshot.finish.order);
+    else raceSim?.sync([], []);
+  }
   audio.stopRoll(); // a finish can land mid-roll (a skip, or a finish with no drop before it)
   show('waiting', false);
   show('stage', false);
@@ -946,9 +1027,14 @@ function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
     mode === 'catchup' ? catchUpPace : undefined,
   );
   replayWindowMs = replayStepMs(source);
-  // Playback re-runs the draw from pick one, so the pile must be full again; drops re-empty it.
+  // Playback re-runs the draw from pick one, so the field must be full again; drops re-empty the
+  // pile, reveals re-park the racers — the shrinking lock set forces the race rebuild (#235).
   const bagRows = source.start?.rows ?? currentStart?.rows;
-  if (bagRows) hopper().sync(bagRows, []);
+  if (bagRows) {
+    if (activeVisual() === 'race') race().sync(bagRows, []);
+    else hopper().sync(bagRows, []);
+  }
+  applyStageLayout();
   // Both modes re-arm the finale. A catch-up's `lottery-finish` is buffered and played by
   // `applyReplayStep`, so this *is* the viewer's finale — suppressing it here would mean the one
   // person the feature exists for is the only one who never sees the confetti.
@@ -1123,7 +1209,8 @@ function onVisibilityChange(): void {
   // The physics loop pauses whenever the tab hides, playback or not — rAF is throttled in hidden
   // tabs anyway; parking it outright makes the resume clean and costs nothing. The roll stops
   // outright too: nobody hears a drum roll for a hidden tab, and the next beat re-rolls.
-  hopper().setRunning(!document.hidden);
+  hopperSim?.setRunning(!document.hidden);
+  raceSim?.setRunning(!document.hidden);
   if (document.hidden) audio.stopRoll();
   if (!cursor || !playbackMode) return;
   if (document.hidden) {
@@ -1162,7 +1249,9 @@ function onVisibilityChange(): void {
   const next = cursor.peek();
   const leftMs = cursor.remainingMs();
   cursor.resume();
-  if (next?.event.type === 'lottery-reveal') armChute(next.event.reveal.pick, leftMs);
+  if (next?.event.type === 'lottery-reveal' && activeVisual() === 'machine') {
+    armChute(next.event.reveal.pick, leftMs);
+  }
 }
 
 function confetti(): void {
@@ -1205,7 +1294,13 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
     // Any exit from a drum-roll must kill the boil — and the roll (#216) follows the same rule:
     // only drop/finish end them otherwise, and idle() can never park the sim's loop while
     // agitating, even over an empty pile.
-    hopper().agitate(false);
+    hopperSim?.agitate(false);
+    // The previous ceremony's visual leaves with it (#235): the pre-draw field is always the
+    // machine's loaded hopper, and a lingering `start` would paint the next lobby as a race —
+    // clearing the field also parks the race loop, which never sleeps while racers are loose.
+    currentStart = undefined;
+    raceSim?.sync([], []);
+    applyStageLayout();
     audio.stopRoll();
   }
   switch (snapshot.phase) {
@@ -1226,7 +1321,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       show('edit-hint', false);
       show('edit-actions', false);
       show('begin-actions', false);
-      hopper().sync([], []); // empty the pile — the canvas clears on the next frame
+      hopperSim?.sync([], []); // empty the pile — the canvas clears on the next frame
       // An idle stage means an api restart or a cleared lobby — either way the armedSeq space
       // may reset (#232), so forget everything commissioner-related and let the next lobby's
       // check start from scratch rather than trust sequence numbers across a process boundary.
@@ -1265,7 +1360,9 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       if (snapshot.start)
         renderWaiting(
           snapshot.start,
-          snapshot.reveals.filter((r) => !(aboutToAnimate && r === last)).map((r) => r.team),
+          snapshot.reveals
+            .filter((r) => !(aboutToAnimate && r === last))
+            .map((r) => ({ pick: r.pick, team: r.team })),
         );
       setStatus('live reveal', 'live');
       // A draw is running, so any sealed result we were holding belongs to a *previous* ceremony.
@@ -1292,7 +1389,9 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       // An abort mid-drum-roll arrives with the boil on, and no drop/finish will ever follow to
       // turn it off — without this the sim agitates a hidden pile at 60fps for as long as the
       // iframe stays open on the abort screen. Same for the roll: an abort must not drum on.
-      hopper().agitate(false);
+      // The race is stricter still: loose racers never sleep, so the field is emptied outright.
+      hopperSim?.agitate(false);
+      raceSim?.sync([], []);
       audio.stopRoll();
       show('waiting', false);
       show('stage', false);
