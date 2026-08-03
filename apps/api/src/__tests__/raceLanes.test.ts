@@ -5,6 +5,7 @@ import {
   assignLanes,
   FALL_ZONE_START,
   fallPosition,
+  laneMetrics,
   lockKind,
   PACK_MIN,
 } from '../client/raceLanes.js';
@@ -61,6 +62,29 @@ describe('lockKind', () => {
     expect(lockKind(2, [4, 3], 4)).toBe('fall');
     // Pick 2 revealed after pick 1 went: nothing better is open, so it crosses.
     expect(lockKind(2, [1, 4], 4)).toBe('cross');
+  });
+});
+
+describe('laneMetrics', () => {
+  it('keeps the compact look on narrow tracks and scales up with width (#239)', () => {
+    const phone = laneMetrics(360);
+    expect(phone.laneH).toBe(26); // the floor — phones keep the original density
+    expect(phone.ballR).toBe(9);
+
+    const wide = laneMetrics(1100);
+    expect(wide.laneH).toBeGreaterThan(phone.laneH);
+    expect(wide.ballR).toBeGreaterThan(phone.ballR);
+    expect(wide.labelFont).toBeGreaterThanOrEqual(phone.labelFont);
+    expect(wide.labelFont).toBeLessThanOrEqual(13); // legible, never billboard
+
+    expect(laneMetrics(5000).laneH).toBe(40); // the ceiling — a cinema display isn't a stadium
+  });
+
+  it('caps the gutter to a minority share so the track always keeps the lion’s width', () => {
+    for (const w of [300, 700, 1200]) {
+      expect(laneMetrics(w).gutterCap).toBeLessThan(w / 2);
+      expect(laneMetrics(w).gutterCap).toBe(Math.round(w * 0.32));
+    }
   });
 });
 

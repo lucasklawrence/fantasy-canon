@@ -40,6 +40,34 @@ export function assignLanes(rows: { team: string; balls: number }[]): RaceLane[]
   return assignBallRanges(rows).map((range, i) => ({ team: range.team, hue: range.hue, lane: i }));
 }
 
+/** Everything about a lane's rendering that scales with the track's width (#239). */
+export interface LaneMetrics {
+  /** Lane height in CSS pixels. */
+  laneH: number;
+  /** Racer radius — grows with the lane so pick numbers stay readable on a big track. */
+  ballR: number;
+  /** Label font size in CSS pixels. */
+  labelFont: number;
+  /** Widest the label gutter may grow, in CSS pixels — the track always keeps the lion's share. */
+  gutterCap: number;
+}
+
+/**
+ * Scale the lanes to the width the layout actually gives us (#239): the desktop page used to cap
+ * the track at a 300px column with a fixed 64px label gutter, ellipsizing every real team name
+ * while the monitor sat empty. Wider track ⇒ taller lanes, bigger balls, a touch more font, and
+ * room for the gutter to fit whole names — all clamped so a phone keeps the compact look.
+ */
+export function laneMetrics(trackWidth: number): LaneMetrics {
+  const laneH = Math.round(Math.min(40, Math.max(26, trackWidth / 28)));
+  return {
+    laneH,
+    ballR: Math.max(9, Math.round(laneH * 0.36)),
+    labelFont: Math.round(Math.min(13, Math.max(10, laneH * 0.42))),
+    gutterCap: Math.round(trackWidth * 0.32),
+  };
+}
+
 /**
  * What a reveal does to its racer. `'cross'` when `pick` is the lowest pick not already locked —
  * the best slot still open, so this racer beat everyone left. `'fall'` otherwise — a better slot

@@ -12,6 +12,10 @@
  * Same performance discipline as the machine: ball faces are pre-rendered sprites (`ballSprite`),
  * the frame loop is drawImage + line strokes only, it parks itself once every racer is parked,
  * and reduced motion renders a single still frame per state change instead of a loop.
+ *
+ * The track is elastic (#239): the page hands race mode the monitor's spare width, and the lanes
+ * scale with it (`laneMetrics`) — taller lanes, bigger balls, and a label gutter that grows to
+ * fit whole team names instead of ellipsizing everything into a fixed 64px strip.
  */
 
 import { buildBallSprite } from './ballSprite.js';
@@ -20,6 +24,7 @@ import {
   CROSS_PARK_X,
   fallPosition,
   FINISH_X,
+  laneMetrics,
   lockKind,
   PACK_MAX,
   PACK_MIN,
@@ -46,16 +51,12 @@ export interface RaceSim {
   destroy(): void;
 }
 
-/** Lane height; the canvas grows with the field so 8 or 14 teams both read. */
-const LANE_H = 26;
 /** Top/bottom padding around the lanes. */
 const PAD = 6;
-/** Left gutter reserved for team labels; the track proper starts after it. */
-const GUTTER = 64;
 /** Right padding past the winners' parking spot. */
 const RIGHT_PAD = 6;
-/** Racer radius — big enough for a two-digit pick number (see NUMBER_MIN_RADIUS). */
-const BALL_R = 9;
+/** The gutter never shrinks below the original fixed strip, so tiny canvases stay sane. */
+const MIN_GUTTER = 64;
 /** How long a lock's park animation runs. */
 const LOCK_MS = 900;
 /** Drum-roll surge multiplier eased in/out, so the pack doesn't snap between intensities. */
@@ -93,6 +94,11 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
   let bagSig = '';
   let cssW = 300;
   let cssH = 0;
+  /** Width-scaled lane geometry (#239) — refreshed by {@link ensureSize}. */
+  let laneH = 26;
+  let ballR = 9;
+  let labelFont = 10;
+  let gutter = MIN_GUTTER;
   let agitating = false;
   let intensity = 1;
   let running = true;
@@ -101,35 +107,59 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
 
   /** Track x in CSS pixels for a fraction of the drawable width. */
   function fx(frac: number): number {
-    return GUTTER + frac * (cssW - GUTTER - RIGHT_PAD);
+    return gutter + frac * (cssW - gutter - RIGHT_PAD);
+  }
+
+  /** Ellipsize a team name into the current label gutter. */
+  function fitLabel(name: string): string {
+    if (!ctx) return name;
+    ctx.font = `600 ${labelFont}px system-ui, sans-serif`;
+    if (ctx.measureText(name).width <= gutter - 10) return name;
+    let text = name;
+    while (text.length > 1 && ctx.measureText(`${text}…`).width > gutter - 10) {
+      text = text.slice(0, -1);
+    }
+    return `${text}…`;
+  }
+
+  /** The racer's current face: pick number once locked, plain team color while running. */
+  function spriteFor(racer: Racer): HTMLCanvasElement {
+    return buildBallSprite(racer.locked ? String(racer.locked.pick) : null, racer.hue, ballR, dpr);
   }
 
   /**
    * Fit the canvas to its container and field size. The racetrack is `width:100%` (unlike the
    * fixed hopper circle), and `sync` can run while the stage is still hidden — measure lazily and
-   * again per frame so the first visible paint is at the real size.
+   * again per frame so the first visible paint is at the real size. Width drives the lane metrics
+   * (#239), and the gutter grows to the longest team name (within `gutterCap`) so a wide monitor
+   * shows whole names. `force` refreshes gutter/labels for a rebuilt field even at the same size.
    */
-  function ensureSize(): void {
+  function ensureSize(force = false): void {
     const w = canvas.clientWidth || cssW || 300;
-    const h = racers.length * LANE_H + PAD * 2;
-    if (w === cssW && h === cssH && canvas.width === Math.ceil(w * dpr)) return;
+    const m = laneMetrics(w);
+    const h = racers.length * m.laneH + PAD * 2;
+    if (!force && w === cssW && h === cssH && canvas.width === Math.ceil(w * dpr)) return;
+    const resprite = m.ballR !== ballR;
     cssW = w;
     cssH = h;
+    laneH = m.laneH;
+    ballR = m.ballR;
+    labelFont = m.labelFont;
     canvas.width = Math.ceil(w * dpr);
     canvas.height = Math.ceil(h * dpr);
     canvas.style.height = `${h}px`;
-  }
-
-  /** Ellipsize a team name into the label gutter. */
-  function fitLabel(name: string): string {
-    if (!ctx) return name;
-    ctx.font = '600 10px system-ui, sans-serif';
-    if (ctx.measureText(name).width <= GUTTER - 10) return name;
-    let text = name;
-    while (text.length > 1 && ctx.measureText(`${text}…`).width > GUTTER - 10) {
-      text = text.slice(0, -1);
+    if (ctx) {
+      ctx.font = `600 ${labelFont}px system-ui, sans-serif`;
+      let widest = 0;
+      for (const racer of racers) {
+        widest = Math.max(widest, ctx.measureText(racer.team).width);
+      }
+      gutter = Math.min(m.gutterCap, Math.max(MIN_GUTTER, Math.ceil(widest) + 14));
     }
-    return `${text}…`;
+    for (const racer of racers) {
+      racer.label = fitLabel(racer.team);
+      if (resprite) racer.sprite = spriteFor(racer);
+    }
   }
 
   function lockedPicks(): number[] {
@@ -141,11 +171,11 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
     // Lane separators + labels, under the racers.
-    ctx.font = '600 10px system-ui, sans-serif';
+    ctx.font = `600 ${labelFont}px system-ui, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     for (const racer of racers) {
-      const laneY = PAD + racer.lane * LANE_H;
+      const laneY = PAD + racer.lane * laneH;
       if (racer.lane > 0) {
         ctx.strokeStyle = 'rgba(43, 53, 80, 0.5)';
         ctx.lineWidth = 1;
@@ -155,7 +185,7 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
         ctx.stroke();
       }
       ctx.fillStyle = `hsl(${racer.hue} 45% 70% / ${racer.locked ? 0.9 : 0.6})`;
-      ctx.fillText(racer.label, 4, laneY + LANE_H / 2);
+      ctx.fillText(racer.label, 4, laneY + laneH / 2);
     }
     // The finish line.
     ctx.strokeStyle = 'rgba(245, 214, 123, 0.4)';
@@ -170,13 +200,13 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
     // per-frame gradient cost.
     for (const racer of racers) {
       const px = fx(racer.frac);
-      const py = PAD + racer.lane * LANE_H + LANE_H / 2;
+      const py = PAD + racer.lane * laneH + laneH / 2;
       if (!racer.locked || racer.anim) {
         ctx.strokeStyle = `hsl(${racer.hue} 55% 60% / 0.28)`;
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(px - BALL_R - 14, py);
-        ctx.lineTo(px - BALL_R + 2, py);
+        ctx.moveTo(px - ballR - 14, py);
+        ctx.lineTo(px - ballR + 2, py);
         ctx.stroke();
       }
       const r = racer.sprite.width / dpr / 2;
@@ -243,7 +273,7 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
     racer.locked = { pick, kind };
     racer.anim = undefined;
     racer.frac = kind === 'cross' ? CROSS_PARK_X : fallPosition(pick, racers.length);
-    racer.sprite = buildBallSprite(String(pick), racer.hue, BALL_R, dpr);
+    racer.sprite = spriteFor(racer);
   }
 
   function applyLock(pick: number, team: string, animate: boolean): void {
@@ -258,7 +288,7 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
     const to = kind === 'cross' ? CROSS_PARK_X : fallPosition(pick, racers.length);
     racer.locked = { pick, kind };
     racer.anim = { from: racer.frac, to, startedAt: performance.now() };
-    racer.sprite = buildBallSprite(String(pick), racer.hue, BALL_R, dpr);
+    racer.sprite = spriteFor(racer);
     wake();
   }
 
@@ -267,7 +297,7 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
       team: lane.team,
       hue: lane.hue,
       lane: lane.lane,
-      label: fitLabel(lane.team),
+      label: lane.team, // refit against the real gutter in ensureSize below
       frac: PACK_MIN + Math.random() * (PACK_MAX - PACK_MIN),
       mid: (PACK_MIN + PACK_MAX) / 2 + (Math.random() - 0.5) * 0.12,
       amp1: 0.1 + Math.random() * 0.06,
@@ -276,9 +306,10 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
       amp2: 0.03 + Math.random() * 0.03,
       w2: 1.2 + Math.random() * 1.1,
       p2: Math.random() * Math.PI * 2,
-      sprite: buildBallSprite(null, lane.hue, BALL_R, dpr),
+      sprite: buildBallSprite(null, lane.hue, ballR, dpr),
     }));
-    ensureSize();
+    // Force: a same-size rebuild still has NEW names — the gutter and labels must refresh.
+    ensureSize(true);
   }
 
   return {

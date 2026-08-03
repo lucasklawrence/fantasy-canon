@@ -153,6 +153,9 @@ function applyStageLayout(): void {
   show('hopper', !racing);
   show('chute', !racing);
   show('racetrack', racing);
+  // The wide-page mode rides the same switch (#239): race mode takes the monitor's spare width
+  // for the track; the machine (and every pre-ceremony phase) keeps the cozy centered frame.
+  document.body.classList.toggle('race', racing);
 }
 
 // Ceremony sound (#216) — silent until the viewer arms it; the callback keeps the 🔊 pill honest
@@ -843,6 +846,9 @@ let celebrated = false;
 
 function renderFinish(snapshot: LotterySnapshot): void {
   resetChute();
+  // A late joiner can land directly on 'finished' without ever rendering the stage — apply the
+  // layout here too so a race ceremony's finale board gets the wide frame every viewer saw (#239).
+  applyStageLayout();
   hopperSim?.agitate(false); // stage is leaving the screen; let the pile settle and the loop park
   // The race parks itself as the final reveal locks, but a finish that outran a dropped reveal
   // must not leave un-parked racers animating behind a hidden stage (#235) — impose the sealed
