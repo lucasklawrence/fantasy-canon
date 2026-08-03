@@ -329,7 +329,10 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
     agitate(on): void {
       if (agitating === on) return;
       agitating = on;
-      if (on) wake();
+      // repaint, not wake: the first drum-roll is the first render after the track becomes
+      // visible, and a reduced-motion viewer has no frame loop to re-measure it — the still
+      // frame's ensureSize is what picks up the real width (Codex review, #239).
+      if (on) repaint();
     },
     lock(pick, team): void {
       applyLock(pick, team, true);
