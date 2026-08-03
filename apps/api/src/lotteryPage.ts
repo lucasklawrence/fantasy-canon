@@ -111,6 +111,12 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     background: linear-gradient(180deg, #10141f 0%, #151a2a 100%);
     box-shadow: inset 0 -12px 30px rgba(0,0,0,.4), 0 0 40px rgba(245,214,123,.05); }
   #race-canvas { display: block; width: 100%; }
+  /* Race mode wants the monitor (#239): the page cap lifts and the spare width goes to the
+     TRACK (the reveal column keeps a readable fixed measure), so lanes fit whole team names.
+     The machine keeps the cozy 980px frame — its drum is a fixed circle and gains nothing.
+     Scoped min-width so the 760px single-column stack below still wins on phones. */
+  body.race main { max-width: 1500px; }
+  @media (min-width: 761px) { body.race .machine { grid-template-columns: 1fr 360px; } }
 
   /* the exit (#215): once the reveal lands, the drawn ball leaves the pile (canvas, hopperSim),
      then this tinted ball slides the clear tube and FLIPs into the big drop ball (client). */
