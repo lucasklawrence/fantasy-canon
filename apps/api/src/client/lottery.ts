@@ -35,6 +35,12 @@ import {
   type PlaybackMode,
 } from './playbackCursor.js';
 import {
+  ENVELOPE_LEAD_MS,
+  ENVELOPE_MS,
+  envelopeEligible,
+  type PlaybackKind,
+} from './envelopePlan.js';
+import {
   buildReplayTimeline,
   catchUpPace,
   catchUpTailFromSnapshot,
@@ -198,6 +204,79 @@ function teamLogo(team: string): HTMLImageElement | null {
   const id = logoIdByTeam.get(team);
   const img = id !== undefined ? logoImages.get(id)?.img : undefined;
   return img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0 ? img : null;
+}
+
+// --- the pick-#1 envelope (#243): a self-dismissing finale overlay ----------------------------
+
+/** Supersession token — any close (or newer open) invalidates every timer a prior open armed. */
+let envelopeToken = 0;
+let envelopeTimer: number | null = null;
+
+/** Tear the overlay down and invalidate any pending open/dismiss timers. Idempotent. */
+function closeEnvelope(): void {
+  envelopeToken += 1;
+  if (envelopeTimer !== null) {
+    clearTimeout(envelopeTimer);
+    envelopeTimer = null;
+  }
+  const overlay = byId('envelope');
+  overlay.classList.remove('playing');
+  show('envelope', false);
+}
+
+/**
+ * Open the overlay for pick #1's reveal (#243). Eligibility was checked at queue time, but the
+ * hidden check repeats here: the lead timer can fire after a backgrounding, and an overlay opened
+ * in a frozen tab would still be mid-animation when the viewer returns.
+ */
+function openEnvelope(reveal: LotteryReveal, hue: number | undefined, token: number): void {
+  if (token !== envelopeToken || document.visibilityState === 'hidden') return;
+  byId('env-team').textContent = reveal.team;
+  // Logo when we have one; otherwise the team's hue disc with its initial — the card is never
+  // faceless (the issue's "logo if it exists, else name + hue").
+  const logo = teamLogo(reveal.team);
+  const img = byId('env-logo') as HTMLImageElement;
+  if (logo) img.src = logo.src;
+  show('env-logo', logo !== null);
+  const disc = byId('env-disc');
+  disc.textContent = [...reveal.team][0]?.toUpperCase() ?? '?';
+  disc.style.background = `hsl(${hue ?? 45} 60% 55%)`;
+  show('env-disc', logo === null);
+  const overlay = byId('envelope');
+  show('envelope', true);
+  // Restart the CSS choreography from zero even if a previous run left the class set.
+  overlay.classList.remove('playing');
+  void (overlay as HTMLElement).offsetWidth;
+  overlay.classList.add('playing');
+  envelopeTimer = window.setTimeout(() => {
+    if (token === envelopeToken) closeEnvelope();
+  }, ENVELOPE_MS);
+}
+
+/**
+ * Queue the envelope behind the visual's own reveal moment — the machine's extraction FLIP and
+ * the race's winning park must land on screen before the dim swallows them. Token-guarded: any
+ * later reveal, phase change, or playback start silently retires a queued open.
+ *
+ * `mode` is the playback mode AS OF THE REVEAL, passed in rather than read here: the machine's
+ * call sits behind the exit choreography's awaits, and a catch-up that drains inside that window
+ * hands off to live (`playbackMode = null`) — which must not retroactively make the sprint's
+ * final compressed reveal envelope-eligible.
+ */
+function queueEnvelope(
+  reveal: LotteryReveal,
+  hue: number | undefined,
+  leadMs: number,
+  mode: PlaybackKind,
+): void {
+  const reducedMotion =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!envelopeEligible(reveal.pick, mode, document.visibilityState === 'hidden', reducedMotion)) {
+    return;
+  }
+  const token = ++envelopeToken;
+  envelopeTimer = window.setTimeout(() => openEnvelope(reveal, hue, token), leadMs);
 }
 
 /** The face the drop ball currently wears, so a late-decoding logo can re-dress it (#242). */
@@ -888,6 +967,9 @@ function renderDrop(reveal: LotteryReveal): void {
   clear(chips);
   for (const team of reveal.remaining) chips.appendChild(el('span', 'chip', team));
   byId('drum-now').textContent = `Pick #${reveal.pick}: ${reveal.team}!`;
+  // A later reveal retires the envelope (#243) — reachable in first-to-last, where pick #1 opens
+  // the ceremony and pick #2 follows. Pick #1's own repaints leave it alone.
+  if (rerun && reveal.pick !== 1) closeEnvelope();
   if (activeVisual() === 'race') {
     // The race reveal (#235): the racer parks itself — falls off the pace, or crosses the line
     // (`lockKind`) — while the field keeps dueling. Parallel spectacle, so the reveal card shows
@@ -905,6 +987,8 @@ function renderDrop(reveal: LotteryReveal): void {
       applyDropFace(ball, reveal.team, num !== null && range !== undefined ? range.hue : undefined);
       replaceNode('drop-team').textContent = reveal.team;
       replaceNode('drop-odds').textContent = oddsText;
+      // Pick #1 gets the envelope (#243) — after the winning cross/fall has parked on screen.
+      queueEnvelope(reveal, range?.hue, ENVELOPE_LEAD_MS.race, playbackMode);
     } else {
       // A polling repaint of an already-shown reveal refreshes text without re-animating.
       show('drop', true);
@@ -922,7 +1006,18 @@ function renderDrop(reveal: LotteryReveal): void {
     audio.stopRoll();
     audio.hit();
     show('drop', false); // the drop ball appears when the ball actually comes out
-    void runExitChoreography(reveal, num, range?.hue, oddsText);
+    // Pick #1's envelope (#243) waits for the exit choreography to land its FLIP, so the dim
+    // never swallows the ball-#N extraction — the auditable moment. The choreography is itself
+    // time-capped (#215), so this settles promptly even in a hidden tab. The lastDropPick guard
+    // keeps a superseded flight from opening a stale envelope over a newer reveal, and the mode
+    // is captured NOW: a catch-up draining during the choreography must not launder its final
+    // compressed reveal into an eligible one.
+    const modeAtReveal = playbackMode;
+    void runExitChoreography(reveal, num, range?.hue, oddsText).then(() => {
+      if (lastDropPick === reveal.pick) {
+        queueEnvelope(reveal, range?.hue, ENVELOPE_LEAD_MS.machine, modeAtReveal);
+      }
+    });
   } else {
     // A polling repaint of an already-shown reveal refreshes text without re-animating — and
     // must not unveil the drop ball while its exit is still in flight.
@@ -1118,6 +1213,9 @@ function handOffToLive(): void {
 function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
   const timeline = buildReplayTimeline(source);
   if (timeline.length === 0) return;
+  // A lingering finale envelope belongs to the run being replayed over (#243); the replay's own
+  // pick-#1 step re-opens it at the right moment (a catch-up never does).
+  closeEnvelope();
   playbackMode = mode;
   cursor = createPlaybackCursor(
     toPendingSteps(timeline),
@@ -1405,6 +1503,10 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
     applyStageLayout();
     audio.stopRoll();
   }
+  // The envelope survives only the phases its reveal lives in (#243): 'revealing' repaints must
+  // not kill a playing finale, and 'finished' arrives moments after pick #1 in worst-to-first.
+  // Everything else — idle, a fresh lobby, a new start, an abort — retires it.
+  if (snapshot.phase !== 'revealing' && snapshot.phase !== 'finished') closeEnvelope();
   switch (snapshot.phase) {
     case 'idle':
       setStatus('no ceremony yet');
