@@ -137,6 +137,37 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     background: #1b2233; color: #cdd4e4; border: 1px solid #2a3145; }
   .chip.dim { opacity: .35; text-decoration: line-through; }
 
+  /* The pick-#1 envelope (#243). Fixed overlay, pure CSS choreography: dim in, flap opens, the
+     card rises out of the pocket. Every animation is forwards-filled and finite; the overlay
+     is dismissed by the client's timer/token, never by animation events, so a frozen (hidden)
+     tab can't strand it. */
+  #envelope { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center;
+    justify-content: center; background: rgba(6, 8, 14, 0); pointer-events: none; }
+  #envelope.playing { background: rgba(6, 8, 14, .78); transition: background .45s ease-out; }
+  #envelope .env { position: relative; width: min(340px, 86vw); height: 300px; }
+  .env-pocket { position: absolute; left: 0; right: 0; bottom: 24px; height: 150px;
+    background: linear-gradient(180deg, #232c42, #161c2c); border: 1px solid rgba(245,214,123,.5);
+    border-radius: 10px; box-shadow: 0 18px 50px rgba(0,0,0,.6); z-index: 3; }
+  .env-flap { position: absolute; left: 0; right: 0; bottom: 172px; height: 96px; z-index: 4;
+    background: linear-gradient(180deg, #2a3450, #1b2233);
+    clip-path: polygon(0 100%, 50% 0, 100% 100%); transform-origin: 50% 100%;
+    transform: rotate(180deg); border-radius: 8px 8px 0 0; }
+  #envelope.playing .env-flap { animation: envFlap .5s .45s cubic-bezier(.4,0,.4,1) forwards; }
+  @keyframes envFlap { to { transform: rotate(0deg); opacity: 0; } }
+  .env-seal { position: absolute; left: 50%; top: 46px; transform: translateX(-50%);
+    font-size: 26px; z-index: 5; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+  .env-card { position: absolute; left: 16px; right: 16px; bottom: 40px; z-index: 2;
+    background: linear-gradient(180deg, #f7f2e2, #e8dfc2); color: #201a08; border-radius: 8px;
+    padding: 18px 14px 20px; text-align: center; transform: translateY(46px);
+    box-shadow: 0 8px 26px rgba(0,0,0,.45); }
+  #envelope.playing .env-card { animation: envCard .8s .95s cubic-bezier(.22,1.2,.36,1) forwards; }
+  @keyframes envCard { to { transform: translateY(-96px); z-index: 6; } }
+  .env-eyebrow { font-size: 11px; font-weight: 800; letter-spacing: .18em;
+    text-transform: uppercase; color: #8a7433; margin-bottom: 8px; }
+  #env-logo { width: 64px; height: 64px; border-radius: 50%; object-fit: cover;
+    box-shadow: 0 2px 8px rgba(0,0,0,.35); margin-bottom: 6px; }
+  #env-team { font-size: 24px; font-weight: 900; line-height: 1.15; }
+
   /* the drop */
   #drop { text-align: center; }
   #drop .dropball { width: 120px; height: 120px; margin: 6px auto 10px; border-radius: 50%;
@@ -294,6 +325,21 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     <p id="abort-reason" style="margin:0"></p>
   </section>
 </main>
+<!-- The pick-#1 envelope (#243): a self-dismissing overlay ABOVE the normal reveal state, which
+     renders regardless — hidden tabs, catch-ups, and reduced motion simply never open this. -->
+<div id="envelope" class="hidden" aria-hidden="true">
+  <div class="env">
+    <div class="env-pocket">
+      <div class="env-flap"></div>
+      <div class="env-seal">&#127944;</div>
+    </div>
+    <div class="env-card">
+      <div class="env-eyebrow">The first overall pick</div>
+      <img id="env-logo" class="hidden" alt="">
+      <div id="env-team"></div>
+    </div>
+  </div>
+</div>
 <script>window.__DRAFT_CONFIG__ = { clientId: ${jsonForScript(clientId)}, maxTeamBalls: ${jsonForScript(maxTeamBalls)} };</script>
 <script type="module" src="./client/lottery.js"></script>
 </body>
