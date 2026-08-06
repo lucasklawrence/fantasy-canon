@@ -116,20 +116,41 @@ export function startApiServer(
 
   // Team-logo fetcher for the same-origin proxy (#242). The route only ever hands us URLs the
   // bot stamped on the current lobby/start rows, but this still fetches third-party bytes on
-  // demand, so everything is bounded: 5s timeout, image/* only, 512KB cap, and a small
-  // insertion-order cache (a ceremony has ~12 logos; the odds table repaints per broadcast).
-  // Failures return null — the client falls back to hue balls, never an error state.
+  // demand, so everything is bounded: 5s timeout, raster image/* only, 512KB cap, no private
+  // hosts (checked again after redirects), and a small insertion-order cache (a ceremony has
+  // ~12 logos; the odds table repaints per broadcast). Failures return null — the client falls
+  // back to hue balls, never an error state.
   const logoCache = new Map<string, { contentType: string; body: Buffer }>();
   const LOGO_CACHE_MAX = 32;
   const LOGO_MAX_BYTES = 512 * 1024;
+  // Loopback/link-local/RFC1918: a logo URL legitimately lives on a public CDN, so a private
+  // target is only ever a mistake or a probe — refuse rather than let the proxy reach inward.
+  // (Belt only: the write path is bot-authenticated; full multi-tenant hardening is #191.)
+  const privateHost = (hostname: string): boolean => {
+    const h = hostname.toLowerCase();
+    return (
+      h === 'localhost' ||
+      h.endsWith('.local') ||
+      h === '::1' ||
+      h.startsWith('127.') ||
+      h.startsWith('10.') ||
+      h.startsWith('192.168.') ||
+      h.startsWith('169.254.') ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(h)
+    );
+  };
   const fetchLogo = async (url: string): Promise<{ contentType: string; body: Buffer } | null> => {
     const cached = logoCache.get(url);
     if (cached) return cached;
     try {
+      if (privateHost(new URL(url).hostname)) return null;
       const res = await fetch(url, { signal: AbortSignal.timeout(5000), redirect: 'follow' });
       if (!res.ok) return null;
+      // A redirect chain must not end somewhere the original URL couldn't have started.
+      if (res.url && privateHost(new URL(res.url).hostname)) return null;
       const contentType = res.headers.get('content-type') ?? '';
-      if (!contentType.startsWith('image/')) return null;
+      // Raster only: SVG is a script container, and these bytes are served from OUR origin.
+      if (!contentType.startsWith('image/') || contentType.includes('svg')) return null;
       const declared = Number(res.headers.get('content-length') ?? '0');
       if (declared > LOGO_MAX_BYTES) return null;
       const body = Buffer.from(await res.arrayBuffer());
