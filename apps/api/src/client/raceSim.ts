@@ -38,6 +38,11 @@ export interface RaceSim {
    * (the animated version happens in {@link RaceSim.lock}, which the reveal path calls first).
    */
   sync(rows: { team: string; balls: number }[], locks: { pick: number; team: string }[]): void;
+  /**
+   * Rebuild every racer's face in place (#242) — for a logo that finished decoding after the
+   * field was built. `sync` deliberately no-ops on an unchanged bag, so it can't pick these up.
+   */
+  reface(): void;
   /** Drum-roll surge on/off — the race's equivalent of the machine's boil. */
   agitate(on: boolean): void;
   /**
@@ -338,6 +343,10 @@ export function createRaceSim(
         buildField(rows);
       }
       for (const entry of locks) applyLock(entry.pick, entry.team, false);
+      repaint();
+    },
+    reface(): void {
+      for (const racer of racers) racer.sprite = spriteFor(racer);
       repaint();
     },
     agitate(on): void {

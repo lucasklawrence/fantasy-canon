@@ -139,6 +139,27 @@ export function startApiServer(
       /^172\.(1[6-9]|2\d|3[01])\./.test(h)
     );
   };
+  // Read at most `cap` bytes, aborting the moment the stream exceeds it — `arrayBuffer()` would
+  // buffer an endless/mis-declared response entirely before any size check could run, and this
+  // endpoint is public.
+  const readCapped = async (res: Response, cap: number): Promise<Buffer | null> => {
+    if (!res.body) return null;
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    for (;;) {
+      // Node's fetch types the chunk loosely under our DOM-less tsconfig; it is always bytes.
+      const { done, value } = (await reader.read()) as { done: boolean; value?: Uint8Array };
+      if (done || value === undefined) break;
+      received += value.byteLength;
+      if (received > cap) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks);
+  };
   const fetchLogo = async (url: string): Promise<{ contentType: string; body: Buffer } | null> => {
     const cached = logoCache.get(url);
     if (cached) return cached;
@@ -153,8 +174,8 @@ export function startApiServer(
       if (!contentType.startsWith('image/') || contentType.includes('svg')) return null;
       const declared = Number(res.headers.get('content-length') ?? '0');
       if (declared > LOGO_MAX_BYTES) return null;
-      const body = Buffer.from(await res.arrayBuffer());
-      if (body.byteLength > LOGO_MAX_BYTES) return null;
+      const body = await readCapped(res, LOGO_MAX_BYTES);
+      if (!body) return null;
       const entry = { contentType, body };
       if (logoCache.size >= LOGO_CACHE_MAX) {
         const oldest = logoCache.keys().next();
