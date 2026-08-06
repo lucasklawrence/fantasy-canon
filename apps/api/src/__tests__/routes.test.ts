@@ -36,6 +36,7 @@ function deps(h: DraftHub, over: Partial<RouteDeps> = {}): RouteDeps {
         token.startsWith('user-')
           ? Promise.resolve({ id: token.slice('user-'.length) })
           : Promise.reject(new Error('bad token'))),
+    fetchLogo: over.fetchLogo,
     lottery: over.lottery ?? createLotteryStage(),
     lotteryScript: over.lotteryScript ?? ((): string | undefined => 'export const machine = 1;'),
     stageKey: over.stageKey ?? '',
@@ -714,6 +715,116 @@ describe('commissioner lobby edits (#210)', () => {
       { 'x-stage-key': 'sekrit' },
     );
     expect(withKey.status).toBe(401);
+  });
+});
+
+describe('team-logo proxy (#242)', () => {
+  const LOGO_LOBBY_BODY = JSON.stringify({
+    title: 'Lottery',
+    teamCount: 2,
+    totalBalls: 3,
+    guildId: 'g-a',
+    rows: [
+      {
+        teamId: 't-b',
+        team: 'B',
+        balls: 2,
+        firstPct: 66.7,
+        top3Pct: 100,
+        logo: 'https://cdn.example/b.png',
+      },
+      { teamId: 't-a', team: 'A', balls: 1, firstPct: 33.3, top3Pct: 100 },
+    ],
+  });
+
+  it('serves exactly the bot-stamped URL, cacheable, and 404s everything else', async () => {
+    const fetched: string[] = [];
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const fetchLogo = (url: string) => {
+      fetched.push(url);
+      return Promise.resolve({ contentType: 'image/png', body: png });
+    };
+    const d = deps(hub(), { fetchLogo });
+
+    // Nothing armed yet ⇒ nothing to serve.
+    expect((await routeRequest('GET', '/api/lottery/logo?team=t-b', '', d)).status).toBe(404);
+
+    await routeRequest('POST', '/api/lottery/lobby', LOGO_LOBBY_BODY, d);
+    const reply = await routeRequest('GET', '/api/lottery/logo?team=t-b', '', d);
+    expect(reply.status).toBe(200);
+    expect(reply.contentType).toBe('image/png');
+    expect(reply.bodyBytes).toBe(png);
+    // Avatars repaint on every broadcast — without caching each repaint refetches every logo.
+    expect(reply.cacheControl).toBe('public, max-age=3600');
+    // The caller chose a teamId; the URL came strictly from the stamped row (never the caller).
+    expect(fetched).toEqual(['https://cdn.example/b.png']);
+
+    // A row without a logo, an unknown team, and a missing param are all the same quiet 404.
+    expect((await routeRequest('GET', '/api/lottery/logo?team=t-a', '', d)).status).toBe(404);
+    expect((await routeRequest('GET', '/api/lottery/logo?team=nope', '', d)).status).toBe(404);
+    expect((await routeRequest('GET', '/api/lottery/logo', '', d)).status).toBe(404);
+  });
+
+  it('never fetches a non-http(s) URL, even if one rode the wire', async () => {
+    const fetched: string[] = [];
+    const d = deps(hub(), {
+      fetchLogo: (url: string) => {
+        fetched.push(url);
+        return Promise.resolve(null);
+      },
+    });
+    const body = JSON.stringify({
+      title: 'Lottery',
+      teamCount: 1,
+      totalBalls: 1,
+      rows: [
+        {
+          teamId: 't-x',
+          team: 'X',
+          balls: 1,
+          firstPct: 100,
+          top3Pct: 100,
+          // The bot filters these out, but the proxy must not trust the wire either.
+          logo: 'javascript:alert(1)',
+        },
+      ],
+    });
+    await routeRequest('POST', '/api/lottery/lobby', body, d);
+    expect((await routeRequest('GET', '/api/lottery/logo?team=t-x', '', d)).status).toBe(404);
+    expect(fetched).toEqual([]);
+  });
+
+  it('404s when the upstream fetch fails, and works off start rows mid-ceremony', async () => {
+    const d = deps(hub(), { fetchLogo: () => Promise.resolve(null) });
+    await routeRequest('POST', '/api/lottery/lobby', LOGO_LOBBY_BODY, d);
+    expect((await routeRequest('GET', '/api/lottery/logo?team=t-b', '', d)).status).toBe(404);
+
+    const ok = deps(hub(), {
+      lottery: (() => {
+        const stage = createLotteryStage();
+        stage.start({
+          title: 'Lottery',
+          commitment: 'hash',
+          teamCount: 1,
+          totalBalls: 1,
+          delayMs: 1000,
+          rows: [
+            {
+              teamId: 't-b',
+              team: 'B',
+              balls: 1,
+              firstPct: 100,
+              top3Pct: 100,
+              logo: 'https://cdn.example/b.png',
+            },
+          ],
+        });
+        return stage;
+      })(),
+      fetchLogo: () => Promise.resolve({ contentType: 'image/png', body: Buffer.from([1, 2, 3]) }),
+    });
+    const reply = await routeRequest('GET', '/api/lottery/logo?team=t-b', '', ok);
+    expect(reply.status).toBe(200);
   });
 });
 

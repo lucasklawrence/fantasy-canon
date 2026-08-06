@@ -33,3 +33,29 @@ export function buildTeamNameMap(payload: unknown): Map<number, string> {
   }
   return map;
 }
+
+/**
+ * Per-team logo URLs from an `mTeam` payload (#242). ESPN carries a `logo` URL on each team —
+ * user-uploaded or one of ESPN's stock images. http(s) only: the URL ends up fetched by the
+ * Activity backend's image proxy, so a `javascript:`/`data:` value must never get that far, and
+ * anything else (blank, malformed, not a string) simply means "no logo" — the ceremony renders
+ * the plain hue ball exactly as before.
+ */
+export function buildTeamLogoMap(payload: unknown): Map<number, string> {
+  const map = new Map<number, string>();
+  if (!payload || typeof payload !== 'object') return map;
+  const maybeTeams = (payload as { teams?: unknown }).teams;
+  if (!Array.isArray(maybeTeams)) return map;
+
+  for (const team of maybeTeams) {
+    if (!team || typeof team !== 'object') continue;
+    const t = team as { id?: unknown; logo?: unknown };
+    const teamId = Number(t.id);
+    if (!Number.isFinite(teamId)) continue;
+    if (typeof t.logo !== 'string') continue;
+    const logo = t.logo.trim();
+    if (!/^https?:\/\//i.test(logo)) continue;
+    map.set(teamId, logo);
+  }
+  return map;
+}

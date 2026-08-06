@@ -135,8 +135,94 @@ function hopper(): HopperSim {
 // so a machine ceremony never pays for lanes and a race never boils an invisible pile.
 let raceSim: RaceSim | null = null;
 function race(): RaceSim {
-  if (!raceSim) raceSim = createRaceSim(byId('race-canvas') as HTMLCanvasElement);
+  if (!raceSim) raceSim = createRaceSim(byId('race-canvas') as HTMLCanvasElement, teamLogo);
   return raceSim;
+}
+
+// --- team logos (#242): same-origin proxied images, keyed by ceremony teamId -------------------
+
+/**
+ * Loading/loaded logo per teamId, remembering WHICH URL it came from — a re-import (#219) can
+ * keep a teamId while swapping its logo, and a stale entry would pin the old art for the rest of
+ * the page. 'failed' pins a bad fetch so a dead URL is never retried (a new URL retries fresh).
+ */
+const logoImages = new Map<string, { url: string; img: HTMLImageElement | 'failed' }>();
+/** team display name → teamId, for the canvas sims which only know display names. */
+const logoIdByTeam = new Map<string, string>();
+
+/** FNV-1a of the stamped URL — busts both browser and Discord-proxy caches when the art changes. */
+function logoVersion(url: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < url.length; i += 1) {
+    hash ^= url.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/**
+ * Kick off (idempotent) loads for every row that advertises a logo. The image never comes from
+ * ESPN directly — the Activity CSP forbids third-party hosts — but from the api's proxy, which
+ * only serves what the bot stamped on the rows.
+ */
+function ensureLogos(rows: LotteryOddsRow[]): void {
+  for (const row of rows) {
+    const teamId = row.teamId;
+    if (!teamId || !row.logo) continue;
+    const url = row.logo;
+    logoIdByTeam.set(row.team, teamId);
+    if (logoImages.get(teamId)?.url === url) continue;
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => {
+      // Everything already painted with the fallback face catches up now rather than at the next
+      // broadcast: the odds table repaints, the race refaces in place (its `sync` no-ops on an
+      // unchanged bag), and a drop ball on screen re-dresses.
+      if (currentLobby) repaintLobbyEdits();
+      raceSim?.reface();
+      redressDropBall();
+    };
+    img.onerror = () => logoImages.set(teamId, { url, img: 'failed' });
+    // `v` rides the proxy URL so a *changed* logo escapes the hour-long browser/proxy cache the
+    // unchanged case deliberately enjoys.
+    img.src = apiPath(
+      activityBase,
+      `/api/lottery/logo?team=${encodeURIComponent(teamId)}&v=${logoVersion(url)}`,
+    );
+    logoImages.set(teamId, { url, img });
+  }
+}
+
+/** A team's decoded logo, name-keyed for the sims; null until loaded or when there is none. */
+function teamLogo(team: string): HTMLImageElement | null {
+  const id = logoIdByTeam.get(team);
+  const img = id !== undefined ? logoImages.get(id)?.img : undefined;
+  return img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0 ? img : null;
+}
+
+/** The face the drop ball currently wears, so a late-decoding logo can re-dress it (#242). */
+let lastDropFace: { team: string; hue: number | undefined } | null = null;
+
+/**
+ * Dress the big drop ball (#242): the team's logo cover-fit over the hue face when we have it
+ * (the gradient shows as a rim and behind transparent artwork), today's plain face otherwise.
+ * The `#N` text stays either way — the ball number is the auditable link to the commitment.
+ */
+function applyDropFace(ball: HTMLElement, team: string, hue: number | undefined): void {
+  lastDropFace = { team, hue };
+  const logo = teamLogo(team);
+  const face = hue !== undefined ? ballFace(hue) : '';
+  ball.style.background = logo
+    ? `center / cover no-repeat url("${logo.src}")${face ? `, ${face}` : ''}`
+    : face;
+  ball.classList.toggle('logo-face', logo !== null);
+}
+
+/** Re-apply the current drop face — called when a logo decodes after the ball was painted. */
+function redressDropBall(): void {
+  if (!lastDropFace) return;
+  const ball = document.getElementById('drop-pick');
+  if (ball) applyDropFace(ball, lastDropFace.team, lastDropFace.hue);
 }
 
 /**
@@ -184,6 +270,7 @@ function renderOddsTable(
   // editor's state before the rebuild destroys it, and hand it to the matching new row.
   const draft = captureRenameDraft();
   clear(rows);
+  ensureLogos(oddsRows);
   const ranges = assignBallRanges(oddsRows);
   const maxBalls = Math.max(...oddsRows.map((r) => r.balls), 1);
   for (let i = 0; i < oddsRows.length; i += 1) {
@@ -194,6 +281,15 @@ function renderOddsTable(
     const dot = el('span', 'swatch');
     dot.style.background = `hsl(${ranges[i].hue} 60% 62%)`;
     teamCell.appendChild(dot);
+    // Team avatar (#242) beside the swatch once its image has actually decoded — a broken img
+    // icon would be worse than no avatar, so unloaded/failed logos simply render today's look.
+    const logo = row.teamId !== undefined ? logoImages.get(row.teamId)?.img : undefined;
+    if (logo instanceof HTMLImageElement && logo.complete && logo.naturalWidth > 0) {
+      const avatar = el('img', 'avatar') as HTMLImageElement;
+      avatar.src = logo.src;
+      avatar.alt = '';
+      teamCell.appendChild(avatar);
+    }
     teamCell.appendChild(
       editable && row.teamId !== undefined
         ? renameTarget(row, draft ?? undefined)
@@ -765,7 +861,7 @@ async function runExitChoreography(
   const ball = replaceNode('drop-pick');
   ball.textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
   // The clone carries the previous reveal's inline tint — set or clear it explicitly.
-  ball.style.background = num !== null && hue !== undefined ? ballFace(hue) : '';
+  applyDropFace(ball, reveal.team, num !== null ? hue : undefined);
   replaceNode('drop-team').textContent = reveal.team;
   replaceNode('drop-odds').textContent = oddsText;
   flipFromChute(ball, chuteRect);
@@ -806,7 +902,7 @@ function renderDrop(reveal: LotteryReveal): void {
       ball.classList.remove('flip');
       ball.classList.add('fall');
       ball.textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
-      ball.style.background = num !== null && range !== undefined ? ballFace(range.hue) : '';
+      applyDropFace(ball, reveal.team, num !== null && range !== undefined ? range.hue : undefined);
       replaceNode('drop-team').textContent = reveal.team;
       replaceNode('drop-odds').textContent = oddsText;
     } else {

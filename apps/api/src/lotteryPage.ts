@@ -61,6 +61,11 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
     margin-right: 7px; vertical-align: baseline; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
   .brange { color: #7c869e; font-size: 11px; margin-left: 6px; }
+  /* Team avatar (#242): the ESPN logo, proxied same-origin; sits beside the swatch, never
+     replacing it — the swatch is the color link to the balls/racer. */
+  .avatar { width: 18px; height: 18px; border-radius: 50%; object-fit: cover;
+    vertical-align: -4px; margin-right: 6px; background: #10141d;
+    box-shadow: 0 1px 2px rgba(0,0,0,.4); }
   /* Commissioner ball steppers (#210) — only rendered on a pre-commitment lobby, only for the
      member who ran setup. 30px targets keep them tappable on the mobile Activity. */
   td.edit { white-space: nowrap; }
@@ -142,6 +147,9 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
      it under this transition (FLIP). .fall is the fallback when the chute can't be measured. */
   #drop .dropball.flip { transition: transform .62s cubic-bezier(.22,1.35,.36,1); }
   #drop .dropball.fall { animation: drop .8s cubic-bezier(.22,1.4,.36,1); }
+  /* Logo face (#242): the ball number now sits on artwork, so it needs its own contrast. */
+  #drop .dropball.logo-face { color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.9),
+    0 0 3px rgba(0,0,0,.9); }
   #drop .team { font-size: 30px; font-weight: 900; margin-top: 4px;
     animation: rise .45s .18s cubic-bezier(.2,.9,.3,1.4) backwards; }
   #drop .odds { color: #f5d67b; font-weight: 700; margin-top: 2px;

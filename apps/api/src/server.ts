@@ -114,6 +114,80 @@ export function startApiServer(
     console.log('[lottery-client]', message.replace(/[\u0000-\u001f\u007f]/g, ' '));
   };
 
+  // Team-logo fetcher for the same-origin proxy (#242). The route only ever hands us URLs the
+  // bot stamped on the current lobby/start rows, but this still fetches third-party bytes on
+  // demand, so everything is bounded: 5s timeout, raster image/* only, 512KB cap, no private
+  // hosts (checked again after redirects), and a small insertion-order cache (a ceremony has
+  // ~12 logos; the odds table repaints per broadcast). Failures return null — the client falls
+  // back to hue balls, never an error state.
+  const logoCache = new Map<string, { contentType: string; body: Buffer }>();
+  const LOGO_CACHE_MAX = 32;
+  const LOGO_MAX_BYTES = 512 * 1024;
+  // Loopback/link-local/RFC1918: a logo URL legitimately lives on a public CDN, so a private
+  // target is only ever a mistake or a probe — refuse rather than let the proxy reach inward.
+  // (Belt only: the write path is bot-authenticated; full multi-tenant hardening is #191.)
+  const privateHost = (hostname: string): boolean => {
+    const h = hostname.toLowerCase();
+    return (
+      h === 'localhost' ||
+      h.endsWith('.local') ||
+      h === '::1' ||
+      h.startsWith('127.') ||
+      h.startsWith('10.') ||
+      h.startsWith('192.168.') ||
+      h.startsWith('169.254.') ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(h)
+    );
+  };
+  // Read at most `cap` bytes, aborting the moment the stream exceeds it — `arrayBuffer()` would
+  // buffer an endless/mis-declared response entirely before any size check could run, and this
+  // endpoint is public.
+  const readCapped = async (res: Response, cap: number): Promise<Buffer | null> => {
+    if (!res.body) return null;
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    for (;;) {
+      // Node's fetch types the chunk loosely under our DOM-less tsconfig; it is always bytes.
+      const { done, value } = (await reader.read()) as { done: boolean; value?: Uint8Array };
+      if (done || value === undefined) break;
+      received += value.byteLength;
+      if (received > cap) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks);
+  };
+  const fetchLogo = async (url: string): Promise<{ contentType: string; body: Buffer } | null> => {
+    const cached = logoCache.get(url);
+    if (cached) return cached;
+    try {
+      if (privateHost(new URL(url).hostname)) return null;
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000), redirect: 'follow' });
+      if (!res.ok) return null;
+      // A redirect chain must not end somewhere the original URL couldn't have started.
+      if (res.url && privateHost(new URL(res.url).hostname)) return null;
+      const contentType = res.headers.get('content-type') ?? '';
+      // Raster only: SVG is a script container, and these bytes are served from OUR origin.
+      if (!contentType.startsWith('image/') || contentType.includes('svg')) return null;
+      const declared = Number(res.headers.get('content-length') ?? '0');
+      if (declared > LOGO_MAX_BYTES) return null;
+      const body = await readCapped(res, LOGO_MAX_BYTES);
+      if (!body) return null;
+      const entry = { contentType, body };
+      if (logoCache.size >= LOGO_CACHE_MAX) {
+        const oldest = logoCache.keys().next();
+        if (!oldest.done) logoCache.delete(oldest.value);
+      }
+      logoCache.set(url, entry);
+      return entry;
+    } catch {
+      return null;
+    }
+  };
+
   // Short-TTL identity cache (#210): the commissioner's steppers fire one authorized write per
   // tap, and re-asking Discord who they are on every tap would burn rate limit for no new
   // information. Only successful lookups are cached — a failure must be re-attempted, never
@@ -178,6 +252,7 @@ export function startApiServer(
             clientLog,
             clientScript: () => cachedScript,
             exchangeToken,
+            fetchLogo,
             identify,
             lottery,
             lotteryScript: () => cachedLotteryScript,
@@ -188,8 +263,10 @@ export function startApiServer(
           .then((reply) => {
             res.statusCode = reply.status;
             res.setHeader('Content-Type', reply.contentType);
-            res.setHeader('Cache-Control', 'no-store');
-            res.end(reply.body);
+            // State must never go stale, so `no-store` is the default; the logo proxy (#242)
+            // opts into caching because avatars repaint on every broadcast.
+            res.setHeader('Cache-Control', reply.cacheControl ?? 'no-store');
+            res.end(reply.bodyBytes ?? reply.body);
           })
           .catch((error: unknown) => {
             const message = error instanceof Error ? error.message : String(error);

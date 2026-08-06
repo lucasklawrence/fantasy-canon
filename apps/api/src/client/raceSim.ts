@@ -38,6 +38,11 @@ export interface RaceSim {
    * (the animated version happens in {@link RaceSim.lock}, which the reveal path calls first).
    */
   sync(rows: { team: string; balls: number }[], locks: { pick: number; team: string }[]): void;
+  /**
+   * Rebuild every racer's face in place (#242) — for a logo that finished decoding after the
+   * field was built. `sync` deliberately no-ops on an unchanged bag, so it can't pick these up.
+   */
+  reface(): void;
   /** Drum-roll surge on/off — the race's equivalent of the machine's boil. */
   agitate(on: boolean): void;
   /**
@@ -82,7 +87,15 @@ interface Racer {
   anim?: { from: number; to: number; startedAt: number };
 }
 
-export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
+/**
+ * `getLogo` (#242): resolve a team's already-decoded logo image, or null for the plain hue ball.
+ * A lookup instead of data on the rows because images load asynchronously — the sim rebuilds
+ * sprites on sync/lock and simply picks up whatever has finished decoding by then.
+ */
+export function createRaceSim(
+  canvas: HTMLCanvasElement,
+  getLogo: (team: string) => CanvasImageSource | null = () => null,
+): RaceSim {
   const reducedMotion =
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -122,9 +135,15 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
     return `${text}…`;
   }
 
-  /** The racer's current face: pick number once locked, plain team color while running. */
+  /** The racer's current face: pick number once locked, team logo or plain color while running. */
   function spriteFor(racer: Racer): HTMLCanvasElement {
-    return buildBallSprite(racer.locked ? String(racer.locked.pick) : null, racer.hue, ballR, dpr);
+    return buildBallSprite(
+      racer.locked ? String(racer.locked.pick) : null,
+      racer.hue,
+      ballR,
+      dpr,
+      getLogo(racer.team),
+    );
   }
 
   /**
@@ -306,7 +325,7 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
       amp2: 0.03 + Math.random() * 0.03,
       w2: 1.2 + Math.random() * 1.1,
       p2: Math.random() * Math.PI * 2,
-      sprite: buildBallSprite(null, lane.hue, ballR, dpr),
+      sprite: buildBallSprite(null, lane.hue, ballR, dpr, getLogo(lane.team)),
     }));
     // Force: a same-size rebuild still has NEW names — the gutter and labels must refresh.
     ensureSize(true);
@@ -324,6 +343,10 @@ export function createRaceSim(canvas: HTMLCanvasElement): RaceSim {
         buildField(rows);
       }
       for (const entry of locks) applyLock(entry.pick, entry.team, false);
+      repaint();
+    },
+    reface(): void {
+      for (const racer of racers) racer.sprite = spriteFor(racer);
       repaint();
     },
     agitate(on): void {

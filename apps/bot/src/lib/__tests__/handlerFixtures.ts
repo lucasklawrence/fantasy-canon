@@ -8,8 +8,22 @@
 /** A standard 4-team league. Records are read by extractTeams (luck); name-only commands ignore them. */
 export const FOUR_TEAMS = {
   teams: [
-    { id: 1, location: 'Alpha', nickname: 'Aces', record: { overall: { wins: 10, losses: 3 } } },
-    { id: 2, location: 'Beta', nickname: 'Bears', record: { overall: { wins: 7, losses: 6 } } },
+    {
+      id: 1,
+      location: 'Alpha',
+      nickname: 'Aces',
+      // A real ESPN-style logo URL (#242) — should flow into `session.logos` and the odds rows.
+      logo: 'https://cdn.espn.example/alpha.png',
+      record: { overall: { wins: 10, losses: 3 } },
+    },
+    {
+      id: 2,
+      location: 'Beta',
+      nickname: 'Bears',
+      // Junk scheme (#242) — must be dropped at parse, never reaching the wire or the proxy.
+      logo: 'javascript:alert(1)',
+      record: { overall: { wins: 7, losses: 6 } },
+    },
     { id: 3, location: 'Gamma', nickname: 'Goats', record: { overall: { wins: 5, losses: 8 } } },
     { id: 4, location: 'Delta', nickname: 'Ducks', record: { overall: { wins: 3, losses: 10 } } },
   ],
