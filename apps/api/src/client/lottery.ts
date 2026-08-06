@@ -135,8 +135,60 @@ function hopper(): HopperSim {
 // so a machine ceremony never pays for lanes and a race never boils an invisible pile.
 let raceSim: RaceSim | null = null;
 function race(): RaceSim {
-  if (!raceSim) raceSim = createRaceSim(byId('race-canvas') as HTMLCanvasElement);
+  if (!raceSim) raceSim = createRaceSim(byId('race-canvas') as HTMLCanvasElement, teamLogo);
   return raceSim;
+}
+
+// --- team logos (#242): same-origin proxied images, keyed by ceremony teamId -------------------
+
+/** Loading/loaded logo per teamId; 'failed' pins a bad fetch so a dead URL is never retried. */
+const logoImages = new Map<string, HTMLImageElement | 'failed'>();
+/** team display name → teamId, for the canvas sims which only know display names. */
+const logoIdByTeam = new Map<string, string>();
+
+/**
+ * Kick off (idempotent) loads for every row that advertises a logo. The image never comes from
+ * ESPN directly — the Activity CSP forbids third-party hosts — but from the api's proxy, which
+ * only serves what the bot stamped on the rows.
+ */
+function ensureLogos(rows: LotteryOddsRow[]): void {
+  for (const row of rows) {
+    const teamId = row.teamId;
+    if (!teamId || !row.logo) continue;
+    logoIdByTeam.set(row.team, teamId);
+    if (logoImages.has(teamId)) continue;
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => {
+      // The odds table may already be on screen — repaint so avatars appear without waiting for
+      // the next broadcast. The sims pick the image up at their next sprite rebuild.
+      if (currentLobby) repaintLobbyEdits();
+    };
+    img.onerror = () => logoImages.set(teamId, 'failed');
+    img.src = apiPath(activityBase, `/api/lottery/logo?team=${encodeURIComponent(teamId)}`);
+    logoImages.set(teamId, img);
+  }
+}
+
+/** A team's decoded logo, name-keyed for the sims; null until loaded or when there is none. */
+function teamLogo(team: string): HTMLImageElement | null {
+  const id = logoIdByTeam.get(team);
+  const img = id !== undefined ? logoImages.get(id) : undefined;
+  return img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0 ? img : null;
+}
+
+/**
+ * Dress the big drop ball (#242): the team's logo cover-fit over the hue face when we have it
+ * (the gradient shows as a rim and behind transparent artwork), today's plain face otherwise.
+ * The `#N` text stays either way — the ball number is the auditable link to the commitment.
+ */
+function applyDropFace(ball: HTMLElement, team: string, hue: number | undefined): void {
+  const logo = teamLogo(team);
+  const face = hue !== undefined ? ballFace(hue) : '';
+  ball.style.background = logo
+    ? `center / cover no-repeat url("${logo.src}")${face ? `, ${face}` : ''}`
+    : face;
+  ball.classList.toggle('logo-face', logo !== null);
 }
 
 /**
@@ -184,6 +236,7 @@ function renderOddsTable(
   // editor's state before the rebuild destroys it, and hand it to the matching new row.
   const draft = captureRenameDraft();
   clear(rows);
+  ensureLogos(oddsRows);
   const ranges = assignBallRanges(oddsRows);
   const maxBalls = Math.max(...oddsRows.map((r) => r.balls), 1);
   for (let i = 0; i < oddsRows.length; i += 1) {
@@ -194,6 +247,15 @@ function renderOddsTable(
     const dot = el('span', 'swatch');
     dot.style.background = `hsl(${ranges[i].hue} 60% 62%)`;
     teamCell.appendChild(dot);
+    // Team avatar (#242) beside the swatch once its image has actually decoded — a broken img
+    // icon would be worse than no avatar, so unloaded/failed logos simply render today's look.
+    const logo = row.teamId !== undefined ? logoImages.get(row.teamId) : undefined;
+    if (logo instanceof HTMLImageElement && logo.complete && logo.naturalWidth > 0) {
+      const avatar = el('img', 'avatar') as HTMLImageElement;
+      avatar.src = logo.src;
+      avatar.alt = '';
+      teamCell.appendChild(avatar);
+    }
     teamCell.appendChild(
       editable && row.teamId !== undefined
         ? renameTarget(row, draft ?? undefined)
@@ -765,7 +827,7 @@ async function runExitChoreography(
   const ball = replaceNode('drop-pick');
   ball.textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
   // The clone carries the previous reveal's inline tint — set or clear it explicitly.
-  ball.style.background = num !== null && hue !== undefined ? ballFace(hue) : '';
+  applyDropFace(ball, reveal.team, num !== null ? hue : undefined);
   replaceNode('drop-team').textContent = reveal.team;
   replaceNode('drop-odds').textContent = oddsText;
   flipFromChute(ball, chuteRect);
@@ -806,7 +868,7 @@ function renderDrop(reveal: LotteryReveal): void {
       ball.classList.remove('flip');
       ball.classList.add('fall');
       ball.textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
-      ball.style.background = num !== null && range !== undefined ? ballFace(range.hue) : '';
+      applyDropFace(ball, reveal.team, num !== null && range !== undefined ? range.hue : undefined);
       replaceNode('drop-team').textContent = reveal.team;
       replaceNode('drop-odds').textContent = oddsText;
     } else {

@@ -22,6 +22,12 @@ export interface LotteryOddsRow {
   balls: number;
   firstPct: number;
   top3Pct: number;
+  /**
+   * ESPN team logo URL (#242). Cosmetic — the commitment preimage never sees it. Clients never
+   * load this URL directly (the Activity CSP forbids third-party image hosts); they ask
+   * `GET /api/lottery/logo?team=<teamId>`, and the proxy fetches exactly what this field says.
+   */
+  logo?: string;
 }
 
 /**

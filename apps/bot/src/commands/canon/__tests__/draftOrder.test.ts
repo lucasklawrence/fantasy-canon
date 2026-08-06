@@ -1129,6 +1129,14 @@ describe('performActivityReimport (#219)', () => {
     expect(session.config.teams).toHaveLength(4);
     expect(session.names.get('4')).toBe('Delta Ducks');
     expect(session.names.has('a')).toBe(false);
+    // Logos travel with the roster (#242): the https one lands, the junk scheme never does, and
+    // the odds rows the stage will be re-armed with carry it for the Activity's visuals.
+    expect(session.logos?.get('1')).toBe('https://cdn.espn.example/alpha.png');
+    expect(session.logos?.has('2')).toBe(false);
+    expect(oddsRows(session).find((r) => r.teamId === '1')?.logo).toBe(
+      'https://cdn.espn.example/alpha.png',
+    );
+    expect(oddsRows(session).find((r) => r.teamId === '3')?.logo).toBeUndefined();
     // A refetched roster invalidates mini-game awards made against the old one.
     expect(session.miniGameBonuses).toBeUndefined();
     // The channel gets a plain announcement plus the re-rendered odds card.

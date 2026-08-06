@@ -90,6 +90,12 @@ export interface CeremonySession {
   config: LotteryConfig;
   /** teamId → display name for every team in the config. */
   names: Map<string, string>;
+  /**
+   * teamId → ESPN logo URL (#242), stamped at `setup` and refreshed by a re-import (#219).
+   * Cosmetic only: rides the lobby/start rows so the Activity's visuals can wear team art; the
+   * commitment preimage never sees it. Absent (or missing an id) ⇒ the plain hue ball.
+   */
+  logos?: Map<string, string>;
   secretSeed?: string;
   commitment?: string;
   commitMessageId?: string;
@@ -156,6 +162,8 @@ export interface StageOddsRow {
   balls: number;
   firstPct: number;
   top3Pct: number;
+  /** ESPN team logo URL (#242) — cosmetic; served to clients via the api's same-origin proxy. */
+  logo?: string;
 }
 
 /**
@@ -321,12 +329,14 @@ export function oddsRows(session: CeremonySession): StageOddsRow[] {
     .map((team) => {
       const teamOdds = byTeam.get(team.teamId) as TeamPickOdds;
       const top3 = teamOdds.probabilities.slice(0, 3).reduce((sum, p) => sum + p, 0);
+      const logo = session.logos?.get(team.teamId);
       return {
         teamId: team.teamId,
         team: displayName(session, team.teamId),
         balls: ballCountForTeam(team, session.config.baseBallCount ?? 1),
         firstPct: pct(teamOdds.probabilities[0]),
         top3Pct: pct(top3),
+        ...(logo ? { logo } : {}),
       };
     })
     .sort((a, b) => b.balls - a.balls || a.team.localeCompare(b.team));

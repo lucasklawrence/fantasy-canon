@@ -32,7 +32,7 @@ import {
 import { BotContext } from '../../config.js';
 import { resolveLeagueId } from '../../lib/leagueId.js';
 import { ensureSnapshot } from '../../lib/snapshots.js';
-import { buildTeamNameMap } from '../../lib/teamNames.js';
+import { buildTeamLogoMap, buildTeamNameMap } from '../../lib/teamNames.js';
 import { deriveStandingsBaseBalls, extractFinalRanks } from '../../lib/finalStandings.js';
 import {
   applyLobbyAdjustments,
@@ -88,6 +88,8 @@ interface SetupTeam {
   bonusBalls: number;
   /** Set by standings weighting or the `balls` override; absent = the flat `base` option. */
   baseBalls?: number;
+  /** ESPN team logo URL (#242) — cosmetic; rides the lobby/start rows for the Activity visuals. */
+  logo?: string;
 }
 
 /**
@@ -221,6 +223,11 @@ function channelIo(channel: SendableChannel): CeremonyIo {
   };
 }
 
+/** The `teamId → logo URL` map a roster carries (#242); empty entries are simply omitted. */
+function teamLogoMap(teams: SetupTeam[]): Map<string, string> {
+  return new Map(teams.flatMap((team) => (team.logo ? [[team.teamId, team.logo] as const] : [])));
+}
+
 async function resolveEspnTeams(
   context: BotContext,
   leagueId: string,
@@ -232,9 +239,15 @@ async function resolveEspnTeams(
   if (nameMap.size === 0) {
     throw new Error(`No teams found for league ${leagueId}, season ${season}.`);
   }
+  const logoMap = buildTeamLogoMap(payload);
   return [...nameMap.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([teamId, name]) => ({ teamId: String(teamId), name, bonusBalls: 0 }));
+    .map(([teamId, name]) => ({
+      teamId: String(teamId),
+      name,
+      bonusBalls: 0,
+      ...(logoMap.has(teamId) ? { logo: logoMap.get(teamId) } : {}),
+    }));
 }
 
 /**
@@ -374,6 +387,9 @@ export async function handleDraftOrderSetupSubcommand(
     session.leagueId = resolvedLeagueId;
     session.season = season;
     session.commissionerIds = [interaction.user.id];
+    // Cosmetic only (#242): the Activity's odds table, drop ball, and race cars wear these; the
+    // commitment preimage never sees a logo. Manual `teams:` setups simply have none.
+    session.logos = teamLogoMap(teams);
     setCeremony(session);
 
     // Best-effort: arm the Activity lobby (#198) so members can join before `begin`.
@@ -743,11 +759,14 @@ export function performActivityReimport(
     const previous = {
       teams: session.config.teams,
       names: session.names,
+      logos: session.logos,
       miniGameBonuses: session.miniGameBonuses,
     };
     try {
       session.config.teams = refetched;
       session.names = new Map(teams.map((team) => [team.teamId, team.name]));
+      // Logos travel with the roster they belong to (#242).
+      session.logos = teamLogoMap(teams);
       // A refetched roster invalidates whatever the mini-game awarded against the old one.
       session.miniGameBonuses = undefined;
 
@@ -767,6 +786,7 @@ export function performActivityReimport(
         // it would let a later `begin` commit a bag the league never saw — put the old one back.
         session.config.teams = previous.teams;
         session.names = previous.names;
+        session.logos = previous.logos;
         session.miniGameBonuses = previous.miniGameBonuses;
         throw error;
       }

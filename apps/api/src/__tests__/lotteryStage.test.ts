@@ -558,6 +558,30 @@ describe('rename + re-import — the rest of the in-Activity field edits (#219)'
   });
 });
 
+describe('row logos ride the wire untouched (#242)', () => {
+  it('survives arming, a ball edit, and a rename — and stays absent when never sent', () => {
+    const stage = createLotteryStage();
+    stage.lobby({
+      ...EDITABLE,
+      rows: EDITABLE.rows.map((row, i) =>
+        i === 0 ? { ...row, logo: 'https://cdn.example/c.png' } : row,
+      ),
+    });
+    expect(stage.snapshot().lobby?.rows[0].logo).toBe('https://cdn.example/c.png');
+    expect(stage.snapshot().lobby?.rows[1].logo).toBeUndefined();
+
+    // Edits rebuild rows with recomputed odds — the cosmetic field must not be shed in transit.
+    stage.adjust({ teamId: 't-c', balls: 4 });
+    expect(stage.snapshot().lobby?.rows.find((r) => r.teamId === 't-c')?.logo).toBe(
+      'https://cdn.example/c.png',
+    );
+    stage.rename({ teamId: 't-c', displayName: 'Chargers' });
+    expect(stage.snapshot().lobby?.rows.find((r) => r.teamId === 't-c')?.logo).toBe(
+      'https://cdn.example/c.png',
+    );
+  });
+});
+
 describe('requestBegin — the in-Activity seal-and-start doorbell (#233)', () => {
   const REQUEST = {
     delaySeconds: 20,

@@ -48,6 +48,17 @@ export interface HttpReply {
   status: number;
   contentType: string;
   body: string;
+  /**
+   * Raw bytes for binary replies — the logo proxy (#242). Wins over `body` when set; kept as a
+   * separate field so every existing `JSON.parse(reply.body)` consumer keeps its string.
+   */
+  bodyBytes?: Buffer;
+  /**
+   * Override for the `Cache-Control` header. Default is `no-store` (state must never go stale);
+   * the logo proxy opts into caching — a team's logo is stable for a ceremony's lifetime, and the
+   * odds table repaints on every broadcast.
+   */
+  cacheControl?: string;
 }
 
 export interface RouteDeps {
@@ -71,6 +82,12 @@ export interface RouteDeps {
    * from the operator's machine, so handshake failures beacon here. Log-only, never stored.
    */
   clientLog?: (message: string) => void;
+  /**
+   * Fetch a team-logo image for the same-origin proxy (#242). Injected so tests never hit the
+   * network; `null` for anything that isn't a usable image (bad status, wrong content type, too
+   * big, timeout). Omitted ⇒ the logo route 404s and clients fall back to hue balls.
+   */
+  fetchLogo?: (url: string) => Promise<{ contentType: string; body: Buffer } | null>;
   /** The lottery-machine reveal stage the bot paces via `POST /api/lottery/*` (#169). */
   lottery: LotteryStage;
   /** The lottery client bundle (`dist/client/lottery.js`), or `undefined` if `build:client` hasn't run. */
@@ -215,6 +232,31 @@ async function lotteryRoute(
     const message = new URLSearchParams(query ?? '').get('msg') ?? '';
     deps.clientLog?.(message.slice(0, 300));
     return { status: 204, contentType: 'text/plain', body: '' };
+  }
+  if (method === 'GET' && path === '/api/lottery/logo') {
+    // Same-origin image proxy (#242): the Activity CSP forbids loading ESPN's CDN directly, so
+    // the client asks us by teamId and we fetch EXACTLY the URL the bot stamped on the current
+    // lobby/start row — never a caller-supplied URL, so this can't be turned into an open proxy.
+    // Unauthenticated like `/api/lottery/state`: the URL itself is already public on the wire.
+    const teamId = new URLSearchParams(query ?? '').get('team') ?? '';
+    const snapshot = deps.lottery.snapshot();
+    const rows = snapshot.lobby?.rows ?? snapshot.start?.rows ?? [];
+    const url = teamId ? rows.find((row) => row.teamId === teamId)?.logo : undefined;
+    // Belt over the bot-side filter: only http(s) ever reaches a fetch, whatever rode the wire.
+    if (!deps.fetchLogo || !url || !/^https?:\/\//i.test(url)) {
+      return json(404, { error: 'no logo for that team' });
+    }
+    const image = await deps.fetchLogo(url);
+    if (!image) return json(404, { error: 'logo unavailable' });
+    return {
+      status: 200,
+      contentType: image.contentType,
+      body: '',
+      bodyBytes: image.body,
+      // Stable for the ceremony's lifetime, and the odds table repaints per broadcast — without
+      // this every repaint would refetch every avatar through the Discord proxy.
+      cacheControl: 'public, max-age=3600',
+    };
   }
   if (method === 'GET' && path === '/api/lottery/me') {
     const caller = await identifyCaller(deps, headers);
