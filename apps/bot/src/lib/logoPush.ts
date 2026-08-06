@@ -43,6 +43,48 @@ export function isEspnHost(hostname: string): boolean {
 }
 
 /**
+ * Loopback/link-local/RFC1918 — a league member types the logo URL, and the bot runs on the
+ * operator's home machine, so a private target is only ever a mistake or a probe. Mirrors the
+ * api proxy's guard (#247); checked again after redirects.
+ */
+function privateHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h === 'localhost' ||
+    h.endsWith('.local') ||
+    h === '::1' ||
+    h.startsWith('127.') ||
+    h.startsWith('10.') ||
+    h.startsWith('192.168.') ||
+    h.startsWith('169.254.') ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(h)
+  );
+}
+
+/**
+ * Read at most `cap` bytes, cancelling the moment the stream exceeds it — `arrayBuffer()` would
+ * buffer an endless or mis-declared response entirely before any size check could run.
+ */
+async function readCapped(res: Response, cap: number): Promise<Buffer | null> {
+  if (!res.body) return null;
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    // Node's fetch types the chunk loosely under our DOM-less tsconfig; it is always bytes.
+    const { done, value } = (await reader.read()) as { done: boolean; value?: Uint8Array };
+    if (done || value === undefined) break;
+    received += value.byteLength;
+    if (received > cap) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
  * Fetch one logo the way only the bot can (#249): cookies for ESPN hosts, SVG flattened to PNG,
  * raster passed through — bounded, and null for anything unusable.
  */
@@ -59,8 +101,11 @@ export async function fetchLogoForPush(
     return null;
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+  if (privateHost(parsed.hostname)) return null;
   const cookieParts: string[] = [];
-  if (isEspnHost(parsed.hostname)) {
+  // Cookies require BOTH the right owner and an encrypted channel: a plaintext http://*.espn.com
+  // URL would broadcast the league's session to every hop on the path.
+  if (parsed.protocol === 'https:' && isEspnHost(parsed.hostname)) {
     if (cookies.espnS2) cookieParts.push(`espn_s2=${cookies.espnS2}`);
     if (cookies.espnSwid) cookieParts.push(`SWID=${cookies.espnSwid}`);
   }
@@ -71,12 +116,20 @@ export async function fetchLogoForPush(
       headers: cookieParts.length > 0 ? { Cookie: cookieParts.join('; ') } : {},
     });
     if (!res.ok) return null;
+    // A redirect chain must not end somewhere the original URL couldn't have started.
+    if (res.url) {
+      try {
+        if (privateHost(new URL(res.url).hostname)) return null;
+      } catch {
+        return null;
+      }
+    }
     const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
     if (!contentType.startsWith('image/')) return null;
     const declared = Number(res.headers.get('content-length') ?? '0');
     if (declared > LOGO_MAX_BYTES) return null;
-    const raw = Buffer.from(await res.arrayBuffer());
-    if (raw.byteLength === 0 || raw.byteLength > LOGO_MAX_BYTES) return null;
+    const raw = await readCapped(res, LOGO_MAX_BYTES);
+    if (!raw || raw.byteLength === 0) return null;
     if (contentType.includes('svg')) {
       // Stock logos: flatten to PNG here, where resvg already lives. resvg executes nothing and
       // fetches nothing, so a hostile SVG can at worst fail to parse.

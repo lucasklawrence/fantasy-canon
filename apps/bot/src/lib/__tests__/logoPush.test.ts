@@ -2,11 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { fetchLogoForPush, isEspnHost, pushTeamLogos, LOGO_MAX_BYTES } from '../logoPush.js';
 import type { InspectableRevealStage } from '../lotteryStageClient.js';
 
-/** A fetch double that records what was asked and answers with a canned response. */
+/** A fetch double that records what was asked and answers with a canned streaming response. */
 function fakeFetch(
   responses: Record<
     string,
-    { status?: number; contentType?: string; body?: Buffer; contentLength?: string }
+    {
+      status?: number;
+      contentType?: string;
+      body?: Buffer;
+      contentLength?: string;
+      /** Simulates a redirect chain: what `res.url` reports the response actually came from. */
+      finalUrl?: string;
+    }
   >,
 ) {
   const calls: { url: string; cookie: string | undefined }[] = [];
@@ -16,9 +23,11 @@ function fakeFetch(
     calls.push({ url, cookie: headers.Cookie });
     const spec = responses[url] ?? { status: 404 };
     const body = spec.body ?? Buffer.alloc(0);
+    let sent = false;
     return Promise.resolve({
       ok: (spec.status ?? 200) < 300,
       status: spec.status ?? 200,
+      url: spec.finalUrl ?? url,
       headers: {
         get: (name: string) =>
           name.toLowerCase() === 'content-type'
@@ -27,8 +36,18 @@ function fakeFetch(
               ? (spec.contentLength ?? null)
               : null,
       },
-      arrayBuffer: () =>
-        Promise.resolve(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)),
+      body: {
+        getReader: () => ({
+          read: () => {
+            if (!sent && body.byteLength > 0) {
+              sent = true;
+              return Promise.resolve({ done: false, value: new Uint8Array(body) });
+            }
+            return Promise.resolve({ done: true, value: undefined });
+          },
+          cancel: () => Promise.resolve(),
+        }),
+      },
     } as unknown as Response);
   }) as typeof fetch;
   return { impl, calls };
@@ -105,6 +124,42 @@ describe('fetchLogoForPush (#249)', () => {
     expect(await fetchLogoForPush('https://a.example/badsvg', {}, deps)).toBeNull();
     expect(await fetchLogoForPush('javascript:alert(1)', {}, deps)).toBeNull();
     expect(await fetchLogoForPush('not a url', {}, deps)).toBeNull();
+  });
+
+  it('never fetches private targets — directly or via a redirect chain', async () => {
+    const { impl, calls } = fakeFetch({
+      'https://ok.example/a.png': {
+        contentType: 'image/png',
+        body: PNG,
+        // A public URL whose redirect chain lands on the operator's LAN.
+        finalUrl: 'http://192.168.1.10/steal',
+      },
+    });
+    const deps = { fetchImpl: impl };
+    for (const target of [
+      'http://127.0.0.1:4610/api/lottery/state',
+      'http://169.254.169.254/latest/meta-data',
+      'http://localhost/x.png',
+      'http://10.0.0.5/x.png',
+    ]) {
+      expect(await fetchLogoForPush(target, {}, deps)).toBeNull();
+    }
+    // Nothing above ever reached fetch; the redirect case fetches once, then refuses the body.
+    expect(calls).toHaveLength(0);
+    expect(await fetchLogoForPush('https://ok.example/a.png', {}, deps)).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('withholds cookies on plaintext http, even for a real ESPN host', async () => {
+    const { impl, calls } = fakeFetch({
+      'http://fan.espn.com/logo.jpg': { contentType: 'image/jpeg', body: PNG },
+    });
+    const result = await fetchLogoForPush('http://fan.espn.com/logo.jpg', COOKIES, {
+      fetchImpl: impl,
+    });
+    // The fetch itself proceeds (public bytes are fine) — but the session never rides plaintext.
+    expect(result?.contentType).toBe('image/jpeg');
+    expect(calls[0].cookie).toBeUndefined();
   });
 });
 

@@ -423,7 +423,8 @@ export async function handleDraftOrderSetupSubcommand(
     // member who ran this command, which `denyUnlessCommissioner` already gated on Manage Server.
     // No `keepAdjustments` — this is a brand-new bag, so edits to the previous one are meaningless.
     const lobbyRows = oddsRows(session);
-    void stageFromEnv()
+    const armStage = stageFromEnv();
+    void armStage
       .lobby({
         title: session.title,
         teamCount: session.config.teams.length,
@@ -432,12 +433,16 @@ export async function handleDraftOrderSetupSubcommand(
         guildId,
         commissionerIds: [interaction.user.id],
       })
+      .then(() => {
+        // Deliver the logos the api can't fetch itself (#249): ESPN-hosted art needs the league's
+        // cookies, stock logos need rasterizing. Strictly AFTER the lobby claimed the stage — a
+        // rejected arm (another guild's ceremony owns it) must not seed the shared cache with
+        // this guild's art under colliding ESPN team ids.
+        pushSessionLogos(session, context, armStage);
+      })
       .catch((error: unknown) => {
         console.error('[draftorder] failed to arm the Activity lobby:', error);
       });
-    // Deliver the logos the api can't fetch itself (#249): ESPN-hosted art needs the league's
-    // cookies, stock logos need rasterizing. Fire-and-forget beside the arm — pure cosmetics.
-    pushSessionLogos(session, context);
 
     await interaction.editReply({
       content: [
@@ -830,15 +835,18 @@ export function performActivityReimport(
           guildId,
           commissionerIds: session.commissionerIds ?? [],
         })
+        .then(() => {
+          // The refetched roster's logos travel the same push channel as setup's (#249), and
+          // with the same ordering rule: only after the re-arm proved this guild still owns the
+          // stage. Entries record their source URL, so a changed logo replaces cleanly.
+          pushSessionLogos(session, context, stage);
+        })
         .catch((error: unknown) => {
           console.error(
             '[draftorder] re-imported, but could not re-arm the Activity lobby:',
             error,
           );
         });
-      // The refetched roster's logos travel the same push channel as setup's (#249). The store
-      // is keyed by teamId with the source URL recorded, so a changed logo replaces cleanly.
-      pushSessionLogos(session, context, stage);
     } finally {
       session.reimportActive = false;
     }
