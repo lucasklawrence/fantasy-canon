@@ -166,6 +166,10 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     text-transform: uppercase; color: #8a7433; margin-bottom: 8px; }
   #env-logo { width: 64px; height: 64px; border-radius: 50%; object-fit: cover;
     box-shadow: 0 2px 8px rgba(0,0,0,.35); margin-bottom: 6px; }
+  /* No-logo fallback (#243): the team's hue disc with its initial — the card is never faceless. */
+  #env-disc { width: 64px; height: 64px; border-radius: 50%; margin: 0 auto 6px;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    font-size: 30px; font-weight: 900; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
   #env-team { font-size: 24px; font-weight: 900; line-height: 1.15; }
 
   /* the drop */
@@ -336,6 +340,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     <div class="env-card">
       <div class="env-eyebrow">The first overall pick</div>
       <img id="env-logo" class="hidden" alt="">
+      <div id="env-disc" class="hidden"></div>
       <div id="env-team"></div>
     </div>
   </div>
