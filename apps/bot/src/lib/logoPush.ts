@@ -48,11 +48,15 @@ export function isEspnHost(hostname: string): boolean {
  * api proxy's guard (#247); checked again after redirects.
  */
 function privateHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
+  // URL keeps the brackets on IPv6 hostnames ('[::1]') — strip them or nothing below matches.
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   return (
     h === 'localhost' ||
     h.endsWith('.local') ||
     h === '::1' ||
+    h.startsWith('fc') || // fc00::/7 unique-local
+    h.startsWith('fd') ||
+    h.startsWith('fe80:') || // link-local
     h.startsWith('127.') ||
     h.startsWith('10.') ||
     h.startsWith('192.168.') ||

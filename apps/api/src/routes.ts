@@ -141,7 +141,8 @@ function parseLogoCache(body: string): ParsedLogoCache {
   if (typeof r.url !== 'string' || !/^https?:\/\//i.test(r.url)) {
     return { error: 'logo-cache needs the http(s) source url' };
   }
-  const contentType = typeof r.contentType === 'string' ? r.contentType : '';
+  // Lowercased before the gate: `image/SVG+xml` must not sneak past a case-sensitive check.
+  const contentType = (typeof r.contentType === 'string' ? r.contentType : '').toLowerCase();
   if (!contentType.startsWith('image/') || contentType.includes('svg')) {
     return { error: 'logo-cache accepts raster image/* only' };
   }

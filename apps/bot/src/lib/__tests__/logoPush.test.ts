@@ -141,6 +141,8 @@ describe('fetchLogoForPush (#249)', () => {
       'http://169.254.169.254/latest/meta-data',
       'http://localhost/x.png',
       'http://10.0.0.5/x.png',
+      'http://[::1]/x.png', // URL keeps the brackets — the guard must strip them
+      'http://[fe80::1]/x.png',
     ]) {
       expect(await fetchLogoForPush(target, {}, deps)).toBeNull();
     }

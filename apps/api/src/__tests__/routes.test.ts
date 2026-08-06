@@ -938,6 +938,7 @@ describe('bot-pushed logo cache (#249)', () => {
     const d = deps(hub(), { logoStore: store });
     for (const bad of [
       pushBody({ contentType: 'image/svg+xml' }),
+      pushBody({ contentType: 'image/SVG+xml' }), // the gate must not be case-sensitive
       pushBody({ contentType: 'text/html' }),
       pushBody({ url: 'javascript:alert(1)' }),
       pushBody({ data: '' }),

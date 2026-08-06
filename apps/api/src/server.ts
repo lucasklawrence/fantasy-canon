@@ -127,11 +127,15 @@ export function startApiServer(
   // target is only ever a mistake or a probe — refuse rather than let the proxy reach inward.
   // (Belt only: the write path is bot-authenticated; full multi-tenant hardening is #191.)
   const privateHost = (hostname: string): boolean => {
-    const h = hostname.toLowerCase();
+    // URL keeps the brackets on IPv6 hostnames ('[::1]') — strip them or nothing below matches.
+    const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
     return (
       h === 'localhost' ||
       h.endsWith('.local') ||
       h === '::1' ||
+      h.startsWith('fc') || // fc00::/7 unique-local
+      h.startsWith('fd') ||
+      h.startsWith('fe80:') || // link-local
       h.startsWith('127.') ||
       h.startsWith('10.') ||
       h.startsWith('192.168.') ||
@@ -169,8 +173,9 @@ export function startApiServer(
       if (!res.ok) return null;
       // A redirect chain must not end somewhere the original URL couldn't have started.
       if (res.url && privateHost(new URL(res.url).hostname)) return null;
-      const contentType = res.headers.get('content-type') ?? '';
-      // Raster only: SVG is a script container, and these bytes are served from OUR origin.
+      // Lowercased: `image/SVG+xml` must not sneak past. Raster only — SVG is a script
+      // container, and these bytes are served from OUR origin.
+      const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
       if (!contentType.startsWith('image/') || contentType.includes('svg')) return null;
       const declared = Number(res.headers.get('content-length') ?? '0');
       if (declared > LOGO_MAX_BYTES) return null;
