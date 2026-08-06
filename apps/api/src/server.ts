@@ -188,6 +188,29 @@ export function startApiServer(
     }
   };
 
+  // Bot-pushed logo bytes (#249): one slot per teamId, newest push wins (a re-import re-pushes
+  // with the new source URL, which is also what un-stales the GET's url match). Bounded like the
+  // anonymous cache — a ceremony has ~12 teams; 32 slots is headroom, not a growth vector.
+  const LOGO_STORE_MAX = 32;
+  const logoStoreMap = new Map<string, { url: string; contentType: string; body: Buffer }>();
+  const logoStore = {
+    put(entry: { teamId: string; url: string; contentType: string; body: Buffer }): void {
+      logoStoreMap.delete(entry.teamId);
+      if (logoStoreMap.size >= LOGO_STORE_MAX) {
+        const oldest = logoStoreMap.keys().next();
+        if (!oldest.done) logoStoreMap.delete(oldest.value);
+      }
+      logoStoreMap.set(entry.teamId, {
+        url: entry.url,
+        contentType: entry.contentType,
+        body: entry.body,
+      });
+    },
+    get(teamId: string): { url: string; contentType: string; body: Buffer } | undefined {
+      return logoStoreMap.get(teamId);
+    },
+  };
+
   // Short-TTL identity cache (#210): the commissioner's steppers fire one authorized write per
   // tap, and re-asking Discord who they are on every tap would burn rate limit for no new
   // information. Only successful lookups are cached — a failure must be re-attempted, never
@@ -254,6 +277,7 @@ export function startApiServer(
             exchangeToken,
             fetchLogo,
             identify,
+            logoStore,
             lottery,
             lotteryScript: () => cachedLotteryScript,
             stageKey,

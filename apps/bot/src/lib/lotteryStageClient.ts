@@ -135,6 +135,7 @@ export function createHttpRevealStage(options: HttpRevealStageOptions): Inspecta
   return {
     state,
     lobby: (lobby) => post('/api/lottery/lobby', lobby),
+    logo: (entry) => post('/api/lottery/logo-cache', entry),
     clear: (clear) => post('/api/lottery/clear', clear),
     start: (start) => post('/api/lottery/start', start),
     beat: (beat) => post('/api/lottery/beat', beat),

@@ -64,6 +64,7 @@ import {
   type InspectableRevealStage,
 } from '../../lib/lotteryStageClient.js';
 import { createStageWatcher, type StageBeginRequest } from '../../lib/lotteryStageWatcher.js';
+import { pushTeamLogos } from '../../lib/logoPush.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
@@ -226,6 +227,30 @@ function channelIo(channel: SendableChannel): CeremonyIo {
 /** The `teamId → logo URL` map a roster carries (#242); empty entries are simply omitted. */
 function teamLogoMap(teams: SetupTeam[]): Map<string, string> {
   return new Map(teams.flatMap((team) => (team.logo ? [[team.teamId, team.logo] as const] : [])));
+}
+
+/**
+ * Fire-and-forget logo delivery (#249): fetch what only the bot can (league cookies for ESPN
+ * hosts, resvg for stock SVGs) and push raster bytes to the stage's same-origin cache. Never
+ * awaited on a hot path — the ceremony must never depend on cosmetics.
+ */
+function pushSessionLogos(
+  session: CeremonySession,
+  context: BotContext,
+  stage: InspectableRevealStage = stageFromEnv(),
+): void {
+  const logos = session.logos;
+  if (!logos || logos.size === 0) return;
+  void pushTeamLogos(stage, logos, {
+    espnS2: context.env.espnS2,
+    espnSwid: context.env.espnSwid,
+  })
+    .then((pushed) => {
+      if (pushed > 0) console.log(`[draftorder] pushed ${pushed} team logo(s) to the stage`);
+    })
+    .catch((error: unknown) => {
+      console.error('[draftorder] logo push failed:', error);
+    });
 }
 
 async function resolveEspnTeams(
@@ -410,6 +435,9 @@ export async function handleDraftOrderSetupSubcommand(
       .catch((error: unknown) => {
         console.error('[draftorder] failed to arm the Activity lobby:', error);
       });
+    // Deliver the logos the api can't fetch itself (#249): ESPN-hosted art needs the league's
+    // cookies, stock logos need rasterizing. Fire-and-forget beside the arm — pure cosmetics.
+    pushSessionLogos(session, context);
 
     await interaction.editReply({
       content: [
@@ -808,6 +836,9 @@ export function performActivityReimport(
             error,
           );
         });
+      // The refetched roster's logos travel the same push channel as setup's (#249). The store
+      // is keyed by teamId with the source URL recorded, so a changed logo replaces cleanly.
+      pushSessionLogos(session, context, stage);
     } finally {
       session.reimportActive = false;
     }

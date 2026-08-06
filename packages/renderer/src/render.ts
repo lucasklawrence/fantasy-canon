@@ -51,6 +51,22 @@ export function renderImage(spec: RenderSpec, options: RenderOptions = {}): Prom
   return Promise.resolve(Buffer.from(lines.join('\n'), 'utf8'));
 }
 
+/**
+ * Rasterize an arbitrary SVG document to PNG bytes (#249) — used by the bot to convert ESPN's
+ * stock SVG team logos before pushing them to the Activity's logo cache, which serves raster
+ * only (SVG is a script container and those bytes are served from the api's origin). Returns
+ * null on anything resvg cannot parse; the caller treats that as "no logo", never an error.
+ * resvg neither executes scripts nor fetches external references, so untrusted SVG is inert here.
+ */
+export function rasterizeSvgLogo(svg: string, width = 128): Buffer | null {
+  try {
+    const resvg = new Resvg(svg, { fitTo: { mode: 'width', value: width } });
+    return Buffer.from(resvg.render().asPng());
+  } catch {
+    return null;
+  }
+}
+
 function renderSvg(
   spec: RenderSpec,
   theme: typeof DEFAULT_THEME,
