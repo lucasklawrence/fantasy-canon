@@ -52,6 +52,10 @@ describe('lottery odds card logos (#254)', () => {
       'https://cdn.espn.example/alpha.png',
       'data:image/svg+xml;base64,PHN2Zy8+',
       'DATA:IMAGE/SVG+XML;base64,PHN2Zy8+',
+      // Attribute-breakout attempt: a hostile media type must fail the whole-URI validation.
+      'data:image/png"/><rect width="1080" height="1080"/><a href=";base64,AAAA',
+      // A valid-looking head with a non-base64 payload is just as dead.
+      'data:image/png;base64,AAAA"/><rect/>',
     ]) {
       const rendered = await renderLotteryOddsCard({
         title: 'Odds',

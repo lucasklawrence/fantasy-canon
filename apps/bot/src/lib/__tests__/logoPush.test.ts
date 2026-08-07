@@ -61,6 +61,7 @@ function fakeFetch(
 
 const COOKIES = { espnS2: 's2-secret', espnSwid: '{swid}' };
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
 
 describe('isEspnHost (#249)', () => {
   it('matches espn.com and subdomains only — cookie-luring lookalikes stay cold', () => {
@@ -92,7 +93,7 @@ describe('fetchLogoForPush (#249)', () => {
     const svgBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>', 'utf8');
     const { impl } = fakeFetch({
       'https://g.espncdn.com/logo.svg': { contentType: 'image/svg+xml', body: svgBytes },
-      'https://i.imgur.com/x.jpg': { contentType: 'image/jpeg', body: PNG },
+      'https://i.imgur.com/y.jpg': { contentType: 'image/jpeg', body: JPEG },
     });
     const rasterized = Buffer.from([1, 1, 1]);
     const svg = await fetchLogoForPush(
@@ -105,9 +106,41 @@ describe('fetchLogoForPush (#249)', () => {
     );
     expect(svg).toEqual({ contentType: 'image/png', body: rasterized });
 
-    const jpg = await fetchLogoForPush('https://i.imgur.com/x.jpg', {}, { fetchImpl: impl });
+    const jpg = await fetchLogoForPush('https://i.imgur.com/y.jpg', {}, { fetchImpl: impl });
     expect(jpg?.contentType).toBe('image/jpeg');
-    expect(jpg?.body.equals(PNG)).toBe(true);
+    expect(jpg?.body.equals(JPEG)).toBe(true);
+  });
+
+  it('derives the content type from magic bytes, never the remote header (#254)', async () => {
+    const { impl } = fakeFetch({
+      // A hostile header on real PNG bytes: the header must never reach a data: URI.
+      'https://evil.example/inject.png': {
+        contentType: 'image/png"/><rect width="1080" height="1080"/><a href="',
+        body: PNG,
+      },
+      // A truthful-looking header on bytes that are not an image at all.
+      'https://evil.example/fake.png': {
+        contentType: 'image/png',
+        body: Buffer.from('<html>hotlink denied</html>', 'utf8'),
+      },
+      // A raster format resvg cannot decode inside <image>: dropped, not an empty ring.
+      'https://a.example/favicon.ico': {
+        contentType: 'image/x-icon',
+        body: Buffer.from([0x00, 0x00, 0x01, 0x00, 1, 2]),
+      },
+    });
+    const inject = await fetchLogoForPush(
+      'https://evil.example/inject.png',
+      {},
+      { fetchImpl: impl },
+    );
+    expect(inject?.contentType).toBe('image/png');
+    expect(
+      await fetchLogoForPush('https://evil.example/fake.png', {}, { fetchImpl: impl }),
+    ).toBeNull();
+    expect(
+      await fetchLogoForPush('https://a.example/favicon.ico', {}, { fetchImpl: impl }),
+    ).toBeNull();
   });
 
   it('returns null for errors, non-images, oversize bodies, junk URLs, and unparseable SVG', async () => {
@@ -166,7 +199,7 @@ describe('fetchLogoForPush (#249)', () => {
       fetchImpl: impl,
     });
     // The fetch itself proceeds (public bytes are fine) — but the session never rides plaintext.
-    expect(result?.contentType).toBe('image/jpeg');
+    expect(result?.contentType).toBe('image/png');
     expect(calls[0].cookie).toBeUndefined();
   });
 });
@@ -186,7 +219,7 @@ describe('prefetchLogoBytes (#254)', () => {
       { fetchImpl: impl },
     );
     expect(bytes.size).toBe(1);
-    expect(bytes.get('1')?.contentType).toBe('image/jpeg');
+    expect(bytes.get('1')?.contentType).toBe('image/png');
     expect(Buffer.from(bytes.get('1')?.data ?? '', 'base64').equals(PNG)).toBe(true);
   });
 
@@ -283,7 +316,33 @@ describe('pushTeamLogos (#249)', () => {
     expect(calls.map((c) => c.url)).toEqual(['https://i.imgur.com/b.jpg']);
     expect(pushes.find((p) => p.teamId === '1')?.contentType).toBe('image/png');
     expect(pushes.find((p) => p.teamId === '1')?.data).toBe(cachedData);
-    expect(pushes.find((p) => p.teamId === '2')?.contentType).toBe('image/jpeg');
+    expect(pushes.find((p) => p.teamId === '2')?.contentType).toBe('image/png');
+  });
+
+  it('waits out an in-flight prefetch straggler instead of double-fetching it (#254)', async () => {
+    let releaseSlow: () => void = () => {};
+    const slow = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    const { impl, calls } = fakeFetch({
+      'https://slow.example/b.jpg': { contentType: 'image/jpeg', body: JPEG },
+    });
+    const gated: typeof fetch = async (input, init) => {
+      await slow;
+      return impl(input, init);
+    };
+    const logos = new Map([['slow', 'https://slow.example/b.jpg']]);
+    const bytes = await prefetchLogoBytes(logos, {}, { fetchImpl: gated }, 10);
+    expect(bytes.size).toBe(0); // the cap fired; the straggler is still in flight
+
+    const pushes: { teamId?: string; data?: string }[] = [];
+    const pushing = pushTeamLogos(stageWith(pushes), logos, {}, { fetchImpl: gated }, bytes);
+    releaseSlow();
+    const count = await pushing;
+    // One fetch total: the prefetch's own. The push waited for it and served from the map.
+    expect(count).toBe(1);
+    expect(calls).toHaveLength(1);
+    expect(Buffer.from(pushes[0]?.data ?? '', 'base64').equals(JPEG)).toBe(true);
   });
 
   it('is a quiet no-op against a stage without the logo method', async () => {

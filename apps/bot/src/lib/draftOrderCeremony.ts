@@ -38,6 +38,8 @@ import {
   renderLotteryRevealCard,
 } from '@fantasy-canon/renderer';
 import type { CeremonyStore, PersistedCeremony } from './ceremonyStore.js';
+// Type-only, so no runtime edge exists even though logoPush reaches back here via the stage client.
+import type { LogoBytes } from './logoPush.js';
 
 /** One ceremony message. `kind` is semantic metadata for tests/logging; adapters post `content` + `image`. */
 export interface CeremonyPost {
@@ -99,10 +101,8 @@ export interface CeremonySession {
   /**
    * Fetched-and-flattened logo bytes (#254), base64 by teamId — filled by the prefetch at setup
    * and re-import, consumed by the odds/board cards (as data URIs) and the stage push (#249).
-   * Shaped structurally rather than importing from `logoPush` to avoid a module cycle through
-   * the stage client.
    */
-  logoBytes?: Map<string, { contentType: string; data: string }>;
+  logoBytes?: Map<string, LogoBytes>;
   secretSeed?: string;
   commitment?: string;
   commitMessageId?: string;
@@ -687,7 +687,7 @@ export async function buildHypePost(
   const image = await renderLotteryOddsCard({
     title: session.title,
     subtitle: `${session.config.teams.length} teams • ${totalBalls(session.config)} balls in the hopper`,
-    rows: rows.map((row) => ({ ...row, logo: cardLogo(session, row.teamId) })),
+    rows: cardOddsRows(session),
   });
   return {
     kind: 'hype',

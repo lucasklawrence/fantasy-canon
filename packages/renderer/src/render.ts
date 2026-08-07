@@ -837,15 +837,18 @@ function renderGrade(
 }
 
 /**
- * Raster `data:` URIs only (#254): anything else is dropped so the card SVG can never reference
- * the network (resvg would not fetch it, but the contract should say so, not rely on it) and
- * never nests an SVG document — the same boundary the logo pipeline enforces everywhere else.
- * Case-insensitive, like every other image gate in the pipeline.
+ * Raster base64 `data:` URIs only (#254), validated END TO END, not by prefix: the URI is about
+ * to be interpolated into an SVG attribute, so every character must come from an alphabet that
+ * cannot close the attribute or open a tag — a prefix check would wave through a hostile media
+ * type or payload embedded after a valid-looking head. The whitelist also keeps the card SVG
+ * from ever referencing the network or nesting an SVG document (resvg would not fetch or
+ * execute either, but the contract should say so, not rely on it). Case-insensitive, like
+ * every other image gate in the pipeline.
  */
+const CARD_LOGO_URI = /^data:image\/(?:png|jpe?g|gif);base64,[a-z0-9+/]*={0,2}$/i;
+
 function isCardLogo(logo: string | undefined): logo is string {
-  if (!logo) return false;
-  const head = logo.slice(0, 20).toLowerCase();
-  return head.startsWith('data:image/') && !head.startsWith('data:image/svg');
+  return logo !== undefined && CARD_LOGO_URI.test(logo);
 }
 
 /**
@@ -886,10 +889,13 @@ function renderLotteryOdds(
   const bottom = height - 60;
   const headerH = 34;
   const rowH = Math.min(66, (bottom - top - headerH) / rows.length);
-  // Mixed leagues stay aligned: the avatar column is reserved when ANY row has a logo.
+  // Mixed leagues stay aligned: the avatar column is reserved when ANY row has a logo. The
+  // shift costs the name column real width, so the truncation cap shrinks with it — the name
+  // must never run into the ball bar at barX.
   const anyLogo = rows.some((r) => isCardLogo(r.logo));
   const logoR = Math.min(20, rowH * 0.36);
   const nameX = anyLogo ? x + logoR * 2 + 14 : x;
+  const nameCap = anyLogo ? 18 : 22;
 
   // Right-anchored numeric columns; the ball bar fills the gap between name and numbers.
   const ballsEnd = x + w - 320;
@@ -902,7 +908,7 @@ function renderLotteryOdds(
   const headerStyle = `fill="${theme.colors.muted}" font-family="${theme.fonts.heading}" font-size="15" font-weight="bold"`;
   const hy = top + headerH - 12;
   let body = '';
-  body += `<text x="${x}" y="${hy}" ${headerStyle}>TEAM</text>`;
+  body += `<text x="${nameX}" y="${hy}" ${headerStyle}>TEAM</text>`;
   body += `<text x="${ballsEnd}" y="${hy}" ${headerStyle} text-anchor="end">BALLS</text>`;
   body += `<text x="${firstEnd}" y="${hy}" ${headerStyle} text-anchor="end">#1 PICK</text>`;
   body += `<text x="${top3End}" y="${hy}" ${headerStyle} text-anchor="end">TOP 3</text>`;
@@ -915,7 +921,7 @@ function renderLotteryOdds(
     }
     body += logoAvatar(r.logo, `odds-logo-${idx}`, x + logoR, cy, logoR, theme.colors.surface);
     body += `<text x="${nameX}" y="${cy + 6}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="20">${escape(
-      truncate(r.team, 22),
+      truncate(r.team, nameCap),
     )}</text>`;
     const barH = Math.min(16, rowH * 0.35);
     const barW = Math.max(3, (r.balls / maxBalls) * barMaxW);
@@ -1048,7 +1054,9 @@ function renderLotteryBoard(
   const r = Math.min(24, rowH * 0.38);
   // Mixed leagues stay aligned: the avatar column is reserved when ANY entry has a logo (#254).
   const anyLogo = entries.some((e) => isCardLogo(e.logo));
-  const nameX = anyLogo ? x + r * 2 + 18 + r * 2 + 12 : x + r * 2 + 18;
+  // Where the pick badge ends — the avatar (when present) and the name both hang off this.
+  const badgeEnd = x + r * 2 + 18;
+  const nameX = anyLogo ? badgeEnd + r * 2 + 12 : badgeEnd;
 
   let body = '';
   entries.forEach((e, idx) => {
@@ -1060,14 +1068,7 @@ function renderLotteryBoard(
     body += `<text x="${x + r}" y="${cy + 7}" fill="${numColor}" font-family="${theme.fonts.heading}" font-size="${Math.round(
       r * 0.95,
     )}" font-weight="bold" text-anchor="middle">${e.pick}</text>`;
-    body += logoAvatar(
-      e.logo,
-      `board-logo-${idx}`,
-      x + r * 2 + 18 + r,
-      cy,
-      r,
-      theme.colors.surface,
-    );
+    body += logoAvatar(e.logo, `board-logo-${idx}`, badgeEnd + r, cy, r, theme.colors.surface);
     body += `<text x="${nameX}" y="${cy + 8}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="26"${
       idx === 0 ? ' font-weight="bold"' : ''
     }>${escape(truncate(e.team, 24))}</text>`;

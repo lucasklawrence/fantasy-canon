@@ -89,8 +89,26 @@ async function readCapped(res: Response, cap: number): Promise<Buffer | null> {
 }
 
 /**
+ * The content type a raster body actually is, from its magic bytes — never the remote header.
+ * The header is attacker-influenced (a logo URL is member-controlled), and downstream it is
+ * embedded verbatim in a `data:` URI that the renderer interpolates into card SVG — so it must
+ * be one of these fixed strings, nothing a server said. The allowlist is exactly what resvg
+ * decodes inside `<image>`; anything else would render as a conspicuous empty avatar ring.
+ */
+function sniffRasterType(bytes: Buffer): string | null {
+  if (bytes.length >= 4 && bytes.readUInt32BE(0) === 0x89504e47) return 'image/png';
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+    return 'image/jpeg';
+  if (bytes.length >= 6 && /^GIF8[79]a$/.test(bytes.subarray(0, 6).toString('latin1')))
+    return 'image/gif';
+  return null;
+}
+
+/**
  * Fetch one logo the way only the bot can (#249): cookies for ESPN hosts, SVG flattened to PNG,
- * raster passed through — bounded, and null for anything unusable.
+ * raster passed through — bounded, and null for anything unusable. The returned contentType is
+ * always derived from the bytes (sniffed, or our own rasterizer's PNG), never echoed from the
+ * remote header.
  */
 export async function fetchLogoForPush(
   url: string,
@@ -141,7 +159,9 @@ export async function fetchLogoForPush(
       if (!png || png.byteLength > LOGO_MAX_BYTES) return null;
       return { contentType: 'image/png', body: png };
     }
-    return { contentType, body: raw };
+    const sniffed = sniffRasterType(raw);
+    if (!sniffed) return null;
+    return { contentType: sniffed, body: raw };
   } catch {
     return null;
   }
@@ -152,6 +172,13 @@ export interface LogoBytes {
   contentType: string;
   data: string;
 }
+
+/**
+ * Completion of each prefetch's background fills, keyed by the map it returned — this is how
+ * {@link pushTeamLogos} waits out a straggler instead of racing it with a duplicate fetch.
+ * WeakMap so a discarded session's cache never pins its promise.
+ */
+const prefetchSettled = new WeakMap<ReadonlyMap<string, LogoBytes>, Promise<unknown>>();
 
 /**
  * Fetch every roster logo into a base64 byte cache (#254), bounded by a soft deadline: the map
@@ -173,10 +200,17 @@ export async function prefetchLogoBytes(
     if (image)
       out.set(teamId, { contentType: image.contentType, data: image.body.toString('base64') });
   });
+  const settled = Promise.allSettled(all);
+  prefetchSettled.set(out, settled);
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
-    Promise.allSettled(all),
-    new Promise((resolve) => setTimeout(resolve, capMs)),
+    settled,
+    new Promise((resolve) => {
+      deadline = setTimeout(resolve, capMs);
+    }),
   ]);
+  // A won race must not leave the loser's timer holding the event loop open for capMs.
+  clearTimeout(deadline);
   return out;
 }
 
@@ -194,6 +228,9 @@ export async function pushTeamLogos(
   bytes?: ReadonlyMap<string, LogoBytes>,
 ): Promise<number> {
   if (!stage.logo || logos.size === 0) return 0;
+  // If the cache came from a prefetch whose stragglers are still in flight, wait them out —
+  // fetching a team the prefetch is mid-download would race it with a duplicate request.
+  if (bytes) await prefetchSettled.get(bytes);
   let pushed = 0;
   for (const [teamId, url] of logos) {
     const cached = bytes?.get(teamId);

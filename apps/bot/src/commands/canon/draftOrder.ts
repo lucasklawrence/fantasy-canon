@@ -73,7 +73,7 @@ import {
   type StageBeginRequest,
   type StageSetupRequest,
 } from '../../lib/lotteryStageWatcher.js';
-import { prefetchLogoBytes, pushTeamLogos } from '../../lib/logoPush.js';
+import { prefetchLogoBytes, pushTeamLogos, type LogoBytes } from '../../lib/logoPush.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
@@ -254,19 +254,38 @@ function espnCookies(context: BotContext): { espnS2?: string; espnSwid?: string 
   return { espnS2: context.env.espnS2, espnSwid: context.env.espnSwid };
 }
 
+/** A roster's full logo dress (#254): the URL map plus the prefetched bytes behind it. */
+interface SessionLogoDress {
+  logos: Map<string, string>;
+  logoBytes: Map<string, LogoBytes> | undefined;
+}
+
 /**
- * Stamp the roster's logos onto the session and prefetch their bytes (#254) under the prefetch's
- * soft deadline, so the odds card about to render can wear them. Slow hosts keep filling the map
- * in the background — the stage push and the finish board read it later and see more.
+ * Fetch the roster's logo bytes (#254) under the prefetch's soft deadline, so the odds card
+ * about to render can wear them; slow hosts keep filling the map in the background, and the
+ * stage push and the finish board see more later. Pure fetch, no session writes: callers run
+ * this BEFORE their registry re-validation and stamp the result with {@link dressSession}
+ * afterwards — a network wait must never sit inside a check-then-act window, and the stamp
+ * must never suspend halfway through a roster install.
  */
-async function primeSessionLogos(
-  session: CeremonySession,
+async function fetchSessionLogoDress(
   teams: SetupTeam[],
   context: BotContext,
-): Promise<void> {
-  session.logos = teamLogoMap(teams);
-  if (session.logos.size === 0) return;
-  session.logoBytes = await prefetchLogoBytes(session.logos, espnCookies(context));
+): Promise<SessionLogoDress> {
+  const logos = teamLogoMap(teams);
+  const logoBytes =
+    logos.size > 0 ? await prefetchLogoBytes(logos, espnCookies(context)) : undefined;
+  return { logos, logoBytes };
+}
+
+/**
+ * Stamp a fetched dress onto the session, synchronously and in full — `logoBytes` is REPLACED
+ * even when the new roster has none, so a re-import that shed its logos also sheds the stale
+ * byte cache instead of dressing ghost art onto later cards.
+ */
+function dressSession(session: CeremonySession, dress: SessionLogoDress): void {
+  session.logos = dress.logos;
+  session.logoBytes = dress.logoBytes;
 }
 
 /**
@@ -431,7 +450,14 @@ export async function handleDraftOrderSetupSubcommand(
       names,
     );
 
-    // Re-validate after the awaits above (ESPN fetch, card render): if a ceremony started
+    // Cosmetic only (#242): the Activity's odds table, drop ball, race cars — and, since #254,
+    // the odds/board cards — wear these; the commitment preimage never sees a logo. Manual
+    // `teams:` setups simply have none. Fetched (bounded) BEFORE the re-validation below so
+    // the check-then-act window never spans this network wait, and before the preview renders
+    // so the first public card already carries them.
+    const dress = await fetchSessionLogoDress(teams, context);
+
+    // Re-validate after the awaits above (ESPN fetch, logo prefetch): if a ceremony started
     // running meanwhile, replacing it now would orphan a live draw.
     if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
       await interaction.editReply({
@@ -439,11 +465,7 @@ export async function handleDraftOrderSetupSubcommand(
       });
       return;
     }
-    // Cosmetic only (#242): the Activity's odds table, drop ball, race cars — and, since #254,
-    // the odds/board cards — wear these; the commitment preimage never sees a logo. Manual
-    // `teams:` setups simply have none. Primed (bounded) BEFORE the preview renders so the
-    // first public card already carries them.
-    await primeSessionLogos(session, teams, context);
+    dressSession(session, dress);
     const preview = await buildPreviewPost(session);
     await channelIo(channel).post(preview);
     markPreviewPosted(session);
@@ -806,9 +828,12 @@ export function performActivityReimport(
     // is asking us to replace and the re-import would silently do nothing.
     const teams = await resolveEspnTeams(context, leagueId, season, true);
     const notes = await applyStandingsWeights(context, leagueId, season, teams, true);
-    // Re-validate after the ESPN round-trip — a `begin`/`abort`/replacing `setup` can land while
-    // we were fetching, and rebuilding a session that is no longer current would be a silent
-    // clobber of whatever replaced it.
+    // The refetched roster's logo bytes (#254), fetched HERE with the other slow round-trips —
+    // never between the re-validation below and the roster install, which must stay adjacent.
+    const dress = await fetchSessionLogoDress(teams, context);
+    // Re-validate after the round-trips above (ESPN, logo prefetch) — a `begin`/`abort`/replacing
+    // `setup` can land while we were fetching, and rebuilding a session that is no longer current
+    // would be a silent clobber of whatever replaced it.
     const current = getCeremony(guildId);
     if (current !== session || current.state !== 'GAME_OPEN') return false;
 
@@ -847,11 +872,13 @@ export function performActivityReimport(
       miniGameBonuses: session.miniGameBonuses,
     };
     try {
+      // The whole install is synchronous — nothing may suspend between the first field and the
+      // last, or a reaction round scoring in the gap would bake bonuses into a half-built roster.
       session.config.teams = refetched;
       session.names = new Map(teams.map((team) => [team.teamId, team.name]));
-      // Logos travel with the roster they belong to (#242), bytes prefetched (#254) so the
-      // fresh preview below can wear them.
-      await primeSessionLogos(session, teams, context);
+      // Logos travel with the roster they belong to (#242), bytes prefetched above (#254) so
+      // the fresh preview below can wear them.
+      dressSession(session, dress);
       // A refetched roster invalidates whatever the mini-game awarded against the old one.
       session.miniGameBonuses = undefined;
 
@@ -1159,14 +1186,16 @@ export function performActivitySetup(
         { teams: configTeams, baseBallCount: 1 },
         names,
       );
-      // Re-validate after the ESPN round-trips, same as the slash handler: replacing a session
-      // that started running meanwhile would orphan a live draw.
+      // Fetched (bounded) before the re-validation below — the check-then-act window must not
+      // span this network wait — and before the preview renders so the card wears them (#254).
+      const dress = await fetchSessionLogoDress(teams, context);
+
+      // Re-validate after the round-trips above (ESPN, logo prefetch), same as the slash
+      // handler: replacing a session that started running meanwhile would orphan a live draw.
       if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
         return release('a ceremony started while the import was running');
       }
-
-      // Primed (bounded) before the preview renders so the card can wear the logos (#254).
-      await primeSessionLogos(session, teams, context);
+      dressSession(session, dress);
 
       // The preview is the public record the whole feature hangs off (ADR 0006). The intro line
       // names who pressed the button — the same audit slot the slash runner's command invocation
