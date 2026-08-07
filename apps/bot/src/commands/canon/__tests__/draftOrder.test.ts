@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatInputCommandInteraction } from 'discord.js';
 import {
   createMockInteraction,
@@ -99,6 +99,23 @@ function stageHolding(
     abort: () => Promise.resolve(),
   };
 }
+
+/**
+ * The logo prefetch (#254) and the fire-and-forget stage push (#249) use the ambient fetch —
+ * the mock context only fakes the ESPN client's. Stub it file-wide so a fixture logo URL can
+ * never turn into a live DNS lookup; tests that want bytes back re-point this stub.
+ */
+const logoFetchStub = vi.fn(() => Promise.resolve(new Response(null, { status: 404 })));
+beforeAll(() => {
+  vi.stubGlobal('fetch', logoFetchStub);
+});
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
+beforeEach(() => {
+  logoFetchStub.mockReset();
+  logoFetchStub.mockImplementation(() => Promise.resolve(new Response(null, { status: 404 })));
+});
 
 afterEach(() => resetCeremoniesForTests());
 
@@ -1126,6 +1143,15 @@ describe('performActivityReimport (#219)', () => {
       defaultLeagueId: 'league-1',
       fetchPayloads: { mTeam: FOUR_TEAMS },
     });
+    // The ambient-fetch stub serves the roster's one real logo URL (#254).
+    logoFetchStub.mockImplementation(() =>
+      Promise.resolve(
+        new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        }),
+      ),
+    );
     const session = espnSession();
     const sent: { content?: string; files?: unknown[] }[] = [];
 
@@ -1145,6 +1171,10 @@ describe('performActivityReimport (#219)', () => {
       'https://cdn.espn.example/alpha.png',
     );
     expect(oddsRows(session).find((r) => r.teamId === '3')?.logo).toBeUndefined();
+    // The prefetch flattened bytes onto the session before the preview rendered (#254),
+    // fetching through the stubbed ambient fetch — never the ESPN client's.
+    expect(session.logoBytes?.get('1')?.contentType).toBe('image/png');
+    expect(session.logoBytes?.has('2')).toBe(false);
     // A refetched roster invalidates mini-game awards made against the old one.
     expect(session.miniGameBonuses).toBeUndefined();
     // The channel gets a plain announcement plus the re-rendered odds card.

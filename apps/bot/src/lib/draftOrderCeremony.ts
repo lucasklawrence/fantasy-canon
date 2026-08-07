@@ -96,6 +96,13 @@ export interface CeremonySession {
    * commitment preimage never sees it. Absent (or missing an id) ⇒ the plain hue ball.
    */
   logos?: Map<string, string>;
+  /**
+   * Fetched-and-flattened logo bytes (#254), base64 by teamId — filled by the prefetch at setup
+   * and re-import, consumed by the odds/board cards (as data URIs) and the stage push (#249).
+   * Shaped structurally rather than importing from `logoPush` to avoid a module cycle through
+   * the stage client.
+   */
+  logoBytes?: Map<string, { contentType: string; data: string }>;
   secretSeed?: string;
   commitment?: string;
   commitMessageId?: string;
@@ -550,7 +557,7 @@ export async function buildAdjustedPreviewPost(
   const image = await renderLotteryOddsCard({
     title: session.title,
     subtitle: `${session.config.teams.length} teams • ${totalBalls(session.config)} balls in the hopper`,
-    rows: oddsRows(session),
+    rows: cardOddsRows(session),
   });
   const changes = [
     ...applied.map((change) => `• **${change.team}**: ${change.from} → ${change.to} ball(s)`),
@@ -569,12 +576,26 @@ export async function buildAdjustedPreviewPost(
   };
 }
 
+/**
+ * A team's logo as a card-ready data URI (#254), or undefined — which also SCRUBS the http(s)
+ * URL `oddsRows` carries for the stage: the renderer must only ever see local bytes.
+ */
+function cardLogo(session: CeremonySession, teamId: string | undefined): string | undefined {
+  const bytes = teamId !== undefined ? session.logoBytes?.get(teamId) : undefined;
+  return bytes ? `data:${bytes.contentType};base64,${bytes.data}` : undefined;
+}
+
+/** Odds rows dressed for the renderer (#254): stage URLs out, data URIs in where we have bytes. */
+function cardOddsRows(session: CeremonySession): ReturnType<typeof oddsRows> {
+  return oddsRows(session).map((row) => ({ ...row, logo: cardLogo(session, row.teamId) }));
+}
+
 /** The public odds-preview post for the setup phase. */
 export async function buildPreviewPost(session: CeremonySession): Promise<CeremonyPost> {
   const image = await renderLotteryOddsCard({
     title: session.title,
     subtitle: `${session.config.teams.length} teams • ${totalBalls(session.config)} balls in the hopper`,
-    rows: oddsRows(session),
+    rows: cardOddsRows(session),
   });
   return {
     kind: 'preview',
@@ -666,7 +687,7 @@ export async function buildHypePost(
   const image = await renderLotteryOddsCard({
     title: session.title,
     subtitle: `${session.config.teams.length} teams • ${totalBalls(session.config)} balls in the hopper`,
-    rows,
+    rows: rows.map((row) => ({ ...row, logo: cardLogo(session, row.teamId) })),
   });
   return {
     kind: 'hype',
@@ -1019,6 +1040,7 @@ export async function runCeremony(
             team: displayName(session, draw.teamId),
             balls: team ? ballCountForTeam(team, session.config.baseBallCount ?? 1) : undefined,
             oddsPct: teamOdds ? pct(teamOdds.probabilities[draw.pick - 1]) : undefined,
+            logo: cardLogo(session, draw.teamId),
           };
         }),
     });

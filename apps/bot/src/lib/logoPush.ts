@@ -147,29 +147,61 @@ export async function fetchLogoForPush(
   }
 }
 
+/** Fetched-and-flattened logo bytes, base64 — the shape both the stage push and cards consume. */
+export interface LogoBytes {
+  contentType: string;
+  data: string;
+}
+
+/**
+ * Fetch every roster logo into a base64 byte cache (#254), bounded by a soft deadline: the map
+ * is returned once everything settled OR `capMs` elapsed — whichever first — and slow fetches
+ * keep filling it in the background, so a later reader (the stage push, the finish card) sees
+ * more than the caller that raced the cap. This is what lets the setup preview usually carry
+ * logos without coupling the setup hot path to twelve third-party image hosts.
+ */
+export async function prefetchLogoBytes(
+  logos: ReadonlyMap<string, string>,
+  cookies: LogoPushCookies,
+  deps: LogoPushDeps = {},
+  capMs = 4000,
+): Promise<Map<string, LogoBytes>> {
+  const out = new Map<string, LogoBytes>();
+  if (logos.size === 0) return out;
+  const all = [...logos].map(async ([teamId, url]) => {
+    const image = await fetchLogoForPush(url, cookies, deps);
+    if (image)
+      out.set(teamId, { contentType: image.contentType, data: image.body.toString('base64') });
+  });
+  await Promise.race([
+    Promise.allSettled(all),
+    new Promise((resolve) => setTimeout(resolve, capMs)),
+  ]);
+  return out;
+}
+
 /**
  * Push every fetchable logo for this roster to the stage's cache, one team at a time,
- * best-effort. Returns the count that landed (for the log line); a stage without the `logo`
- * method — a test double, an older api — means zero pushes and zero noise.
+ * best-effort. `bytes` (the #254 prefetch) is consulted first so nothing is fetched twice;
+ * teams it lacks fall back to a live fetch. Returns the count that landed (for the log line);
+ * a stage without the `logo` method — a test double, an older api — means zero pushes.
  */
 export async function pushTeamLogos(
   stage: InspectableRevealStage,
   logos: ReadonlyMap<string, string>,
   cookies: LogoPushCookies,
   deps: LogoPushDeps = {},
+  bytes?: ReadonlyMap<string, LogoBytes>,
 ): Promise<number> {
   if (!stage.logo || logos.size === 0) return 0;
   let pushed = 0;
   for (const [teamId, url] of logos) {
-    const image = await fetchLogoForPush(url, cookies, deps);
+    const cached = bytes?.get(teamId);
+    const image = cached ?? (await fetchLogoForPush(url, cookies, deps));
     if (!image) continue;
+    const data = 'data' in image ? image.data : image.body.toString('base64');
     try {
-      await stage.logo({
-        teamId,
-        url,
-        contentType: image.contentType,
-        data: image.body.toString('base64'),
-      });
+      await stage.logo({ teamId, url, contentType: image.contentType, data });
       pushed += 1;
     } catch (error) {
       // Per-team and non-fatal: the ceremony must never depend on cosmetics (#242's rule).

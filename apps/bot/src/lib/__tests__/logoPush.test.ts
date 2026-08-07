@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { fetchLogoForPush, isEspnHost, pushTeamLogos, LOGO_MAX_BYTES } from '../logoPush.js';
+import {
+  fetchLogoForPush,
+  isEspnHost,
+  prefetchLogoBytes,
+  pushTeamLogos,
+  LOGO_MAX_BYTES,
+} from '../logoPush.js';
 import type { InspectableRevealStage } from '../lotteryStageClient.js';
 
 /** A fetch double that records what was asked and answers with a canned streaming response. */
@@ -165,6 +171,60 @@ describe('fetchLogoForPush (#249)', () => {
   });
 });
 
+describe('prefetchLogoBytes (#254)', () => {
+  it('fills the map with base64 bytes for what it can fetch, skips the rest', async () => {
+    const { impl } = fakeFetch({
+      'https://i.imgur.com/a.jpg': { contentType: 'image/jpeg', body: PNG },
+      'https://dead.example/x.jpg': { status: 404 },
+    });
+    const bytes = await prefetchLogoBytes(
+      new Map([
+        ['1', 'https://i.imgur.com/a.jpg'],
+        ['2', 'https://dead.example/x.jpg'],
+      ]),
+      {},
+      { fetchImpl: impl },
+    );
+    expect(bytes.size).toBe(1);
+    expect(bytes.get('1')?.contentType).toBe('image/jpeg');
+    expect(Buffer.from(bytes.get('1')?.data ?? '', 'base64').equals(PNG)).toBe(true);
+  });
+
+  it('returns at the soft deadline with what has landed — and keeps filling afterwards', async () => {
+    let releaseSlow: () => void = () => {};
+    const slow = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    const { impl } = fakeFetch({
+      'https://fast.example/a.jpg': { contentType: 'image/jpeg', body: PNG },
+      'https://slow.example/b.jpg': { contentType: 'image/jpeg', body: PNG },
+    });
+    const gated: typeof fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('slow.example')) await slow;
+      return impl(input, init);
+    };
+
+    const bytes = await prefetchLogoBytes(
+      new Map([
+        ['fast', 'https://fast.example/a.jpg'],
+        ['slow', 'https://slow.example/b.jpg'],
+      ]),
+      {},
+      { fetchImpl: gated },
+      10,
+    );
+    // The cap fired: the fast one is in, the slow one is not — the caller renders with what it has.
+    expect(bytes.has('fast')).toBe(true);
+    expect(bytes.has('slow')).toBe(false);
+
+    // The straggler lands in the SAME map once its fetch settles — later readers see more.
+    releaseSlow();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(bytes.has('slow')).toBe(true);
+  });
+});
+
 describe('pushTeamLogos (#249)', () => {
   const stageWith = (pushes: unknown[]): InspectableRevealStage => ({
     state: () => Promise.resolve({ phase: 'idle' }),
@@ -201,6 +261,29 @@ describe('pushTeamLogos (#249)', () => {
     expect(pushes[0].teamId).toBe('1');
     expect(pushes[0].url).toBe('https://i.imgur.com/a.jpg');
     expect(Buffer.from(pushes[0].data ?? '', 'base64').equals(PNG)).toBe(true);
+  });
+
+  it('serves from the prefetch cache first and never refetches what it holds (#254)', async () => {
+    const { impl, calls } = fakeFetch({
+      'https://i.imgur.com/b.jpg': { contentType: 'image/jpeg', body: PNG },
+    });
+    const pushes: { teamId?: string; contentType?: string; data?: string }[] = [];
+    const cachedData = PNG.toString('base64');
+    const count = await pushTeamLogos(
+      stageWith(pushes),
+      new Map([
+        ['1', 'https://i.imgur.com/a.jpg'], // in the cache — must not be fetched
+        ['2', 'https://i.imgur.com/b.jpg'], // not in the cache — falls back to a live fetch
+      ]),
+      {},
+      { fetchImpl: impl },
+      new Map([['1', { contentType: 'image/png', data: cachedData }]]),
+    );
+    expect(count).toBe(2);
+    expect(calls.map((c) => c.url)).toEqual(['https://i.imgur.com/b.jpg']);
+    expect(pushes.find((p) => p.teamId === '1')?.contentType).toBe('image/png');
+    expect(pushes.find((p) => p.teamId === '1')?.data).toBe(cachedData);
+    expect(pushes.find((p) => p.teamId === '2')?.contentType).toBe('image/jpeg');
   });
 
   it('is a quiet no-op against a stage without the logo method', async () => {
