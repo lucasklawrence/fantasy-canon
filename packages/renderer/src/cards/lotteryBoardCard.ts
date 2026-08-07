@@ -8,6 +8,12 @@ export interface LotteryBoardEntry {
   balls?: number;
   /** Pre-draw odds of landing this exact pick, percent 0–100 — optional annotation. */
   oddsPct?: number;
+  /**
+   * Team logo as a `data:` URI (#254) — raster only, supplied by the caller (the bot fetches
+   * and rasterizes; the renderer stays I/O-free). Rendered as a circular avatar beside the
+   * name; absent ⇒ today's row.
+   */
+  logo?: string;
 }
 
 export interface LotteryBoardCardOptions extends RenderOptions {

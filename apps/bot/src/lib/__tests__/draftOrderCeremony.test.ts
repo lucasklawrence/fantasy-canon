@@ -255,6 +255,29 @@ describe('setup surfaces', () => {
     expect(preview.content).toContain('frozen');
   });
 
+  it('the odds card wears prefetched logo bytes — and never the stage URLs (#254)', async () => {
+    const session = createCeremony('guild-1', 'Lottery', CONFIG, NAMES);
+    const bare = await buildPreviewPost(session);
+
+    // A stage URL alone must not change the card: the renderer only accepts local bytes.
+    session.logos = new Map([['t1', 'https://cdn.espn.example/t1.png']]);
+    const urlOnly = await buildPreviewPost(session);
+    expect(urlOnly.image?.data.equals(bare.image?.data as Buffer)).toBe(true);
+
+    // 1×1 PNG — a real decodable image, as the bot's prefetch always delivers.
+    session.logoBytes = new Map([
+      [
+        't1',
+        {
+          contentType: 'image/png',
+          data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        },
+      ],
+    ]);
+    const dressed = await buildPreviewPost(session);
+    expect(dressed.image?.data.equals(bare.image?.data as Buffer)).toBe(false);
+  });
+
   it('the registry stores and isolates sessions per guild', () => {
     const a = makeSession();
     setCeremony(a);

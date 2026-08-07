@@ -38,6 +38,8 @@ import {
   renderLotteryRevealCard,
 } from '@fantasy-canon/renderer';
 import type { CeremonyStore, PersistedCeremony } from './ceremonyStore.js';
+// Type-only, so no runtime edge exists even though logoPush reaches back here via the stage client.
+import type { LogoBytes } from './logoPush.js';
 
 /** One ceremony message. `kind` is semantic metadata for tests/logging; adapters post `content` + `image`. */
 export interface CeremonyPost {
@@ -96,6 +98,11 @@ export interface CeremonySession {
    * commitment preimage never sees it. Absent (or missing an id) ⇒ the plain hue ball.
    */
   logos?: Map<string, string>;
+  /**
+   * Fetched-and-flattened logo bytes (#254), base64 by teamId — filled by the prefetch at setup
+   * and re-import, consumed by the odds/board cards (as data URIs) and the stage push (#249).
+   */
+  logoBytes?: Map<string, LogoBytes>;
   secretSeed?: string;
   commitment?: string;
   commitMessageId?: string;
@@ -550,7 +557,7 @@ export async function buildAdjustedPreviewPost(
   const image = await renderLotteryOddsCard({
     title: session.title,
     subtitle: `${session.config.teams.length} teams • ${totalBalls(session.config)} balls in the hopper`,
-    rows: oddsRows(session),
+    rows: cardOddsRows(session),
   });
   const changes = [
     ...applied.map((change) => `• **${change.team}**: ${change.from} → ${change.to} ball(s)`),
@@ -569,12 +576,32 @@ export async function buildAdjustedPreviewPost(
   };
 }
 
+/** What the card renderer can actually draw (resvg's `<image>` decoders). The byte cache can
+ * hold more — WebP rides it to the stage (#249) — but building a data URI the renderer's gate
+ * would only scan and reject wastes ~700KB of string work per team per card. */
+const CARD_RASTER_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
+
+/**
+ * A team's logo as a card-ready data URI (#254), or undefined — which also SCRUBS the http(s)
+ * URL `oddsRows` carries for the stage: the renderer must only ever see local bytes.
+ */
+function cardLogo(session: CeremonySession, teamId: string | undefined): string | undefined {
+  const bytes = teamId !== undefined ? session.logoBytes?.get(teamId) : undefined;
+  if (!bytes || !CARD_RASTER_TYPES.has(bytes.contentType)) return undefined;
+  return `data:${bytes.contentType};base64,${bytes.data}`;
+}
+
+/** Odds rows dressed for the renderer (#254): stage URLs out, data URIs in where we have bytes. */
+function cardOddsRows(session: CeremonySession): ReturnType<typeof oddsRows> {
+  return oddsRows(session).map((row) => ({ ...row, logo: cardLogo(session, row.teamId) }));
+}
+
 /** The public odds-preview post for the setup phase. */
 export async function buildPreviewPost(session: CeremonySession): Promise<CeremonyPost> {
   const image = await renderLotteryOddsCard({
     title: session.title,
     subtitle: `${session.config.teams.length} teams • ${totalBalls(session.config)} balls in the hopper`,
-    rows: oddsRows(session),
+    rows: cardOddsRows(session),
   });
   return {
     kind: 'preview',
@@ -648,7 +675,9 @@ export async function buildHypePost(
   session: CeremonySession,
   note?: string,
 ): Promise<CeremonyPost> {
-  const rows = oddsRows(session);
+  // Already card-dressed: the favorite/long-shot template reads only team/pct fields, and one
+  // call means one pick-odds DP instead of two.
+  const rows = cardOddsRows(session);
   const favorite = rows[0];
   const longShot = rows[rows.length - 1];
   const index = session.hypeCount ?? 0;
@@ -1019,6 +1048,7 @@ export async function runCeremony(
             team: displayName(session, draw.teamId),
             balls: team ? ballCountForTeam(team, session.config.baseBallCount ?? 1) : undefined,
             oddsPct: teamOdds ? pct(teamOdds.probabilities[draw.pick - 1]) : undefined,
+            logo: cardLogo(session, draw.teamId),
           };
         }),
     });

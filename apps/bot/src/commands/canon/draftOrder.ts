@@ -73,7 +73,12 @@ import {
   type StageBeginRequest,
   type StageSetupRequest,
 } from '../../lib/lotteryStageWatcher.js';
-import { pushTeamLogos } from '../../lib/logoPush.js';
+import {
+  prefetchLogoBytes,
+  pushTeamLogos,
+  type LogoBytes,
+  type LogoPushCookies,
+} from '../../lib/logoPush.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
@@ -249,10 +254,49 @@ const fileChannelMemo: LotteryChannelMemo = {
   recall: (guildId) => recallLotteryChannel(guildId),
 };
 
+/** The cookie pair every logo fetch shares — attached only to https ESPN hosts downstream. */
+function espnCookies(context: BotContext): LogoPushCookies {
+  return { espnS2: context.env.espnS2, espnSwid: context.env.espnSwid };
+}
+
+/** A roster's full logo dress (#254): the URL map plus the prefetched bytes behind it. */
+interface SessionLogoDress {
+  logos: Map<string, string>;
+  logoBytes: Map<string, LogoBytes>;
+}
+
+/**
+ * Fetch the roster's logo bytes (#254) under the prefetch's soft deadline, so the odds card
+ * about to render can wear them; slow hosts keep filling the map in the background, and the
+ * stage push and the finish board see more later. Pure fetch, no session writes: callers run
+ * this BEFORE their registry re-validation and stamp the result with {@link dressSession}
+ * afterwards — a network wait must never sit inside a check-then-act window, and the stamp
+ * must never suspend halfway through a roster install. A logo-less roster yields an empty map
+ * (prefetch's own fast path), so "no logos" has exactly one spelling downstream.
+ */
+async function fetchSessionLogoDress(
+  teams: SetupTeam[],
+  context: BotContext,
+): Promise<SessionLogoDress> {
+  const logos = teamLogoMap(teams);
+  return { logos, logoBytes: await prefetchLogoBytes(logos, espnCookies(context)) };
+}
+
+/**
+ * Stamp a fetched dress onto the session, synchronously and in full — `logoBytes` is REPLACED
+ * even when the new roster has none, so a re-import that shed its logos also sheds the stale
+ * byte cache instead of dressing ghost art onto later cards.
+ */
+function dressSession(session: CeremonySession, dress: SessionLogoDress): void {
+  session.logos = dress.logos;
+  session.logoBytes = dress.logoBytes;
+}
+
 /**
  * Fire-and-forget logo delivery (#249): fetch what only the bot can (league cookies for ESPN
  * hosts, resvg for stock SVGs) and push raster bytes to the stage's same-origin cache. Never
- * awaited on a hot path — the ceremony must never depend on cosmetics.
+ * awaited on a hot path — the ceremony must never depend on cosmetics. The #254 prefetch cache
+ * rides along so nothing already fetched for the cards is fetched twice.
  */
 function pushSessionLogos(
   session: CeremonySession,
@@ -261,10 +305,7 @@ function pushSessionLogos(
 ): void {
   const logos = session.logos;
   if (!logos || logos.size === 0) return;
-  void pushTeamLogos(stage, logos, {
-    espnS2: context.env.espnS2,
-    espnSwid: context.env.espnSwid,
-  })
+  void pushTeamLogos(stage, logos, espnCookies(context), {}, session.logoBytes)
     .then((pushed) => {
       if (pushed > 0) console.log(`[draftorder] pushed ${pushed} team logo(s) to the stage`);
     })
@@ -377,12 +418,15 @@ export async function handleDraftOrderSetupSubcommand(
     const notes: string[] = [];
     let resolvedLeagueId: string | undefined;
     let teams: SetupTeam[];
+    let dressing: Promise<SessionLogoDress>;
     if (manualTeams) {
       teams = parseManualTeams(manualTeams).map((team, index) => ({
         teamId: `team-${index + 1}`,
         name: team.name,
         bonusBalls: team.bonusBalls,
       }));
+      // Manual rosters carry no logos — this resolves immediately.
+      dressing = fetchSessionLogoDress(teams, context);
     } else {
       resolvedLeagueId = await resolveLeagueId(interaction, context);
       const leagueId = resolvedLeagueId;
@@ -392,6 +436,11 @@ export async function handleDraftOrderSetupSubcommand(
         );
       }
       teams = await resolveEspnTeams(context, leagueId, season);
+      // Cosmetic only (#242): the Activity's odds table, drop ball, race cars — and, since
+      // #254, the odds/board cards — wear these; the commitment preimage never sees a logo.
+      // Started here so the prefetch overlaps the standings round-trip below, and awaited
+      // BEFORE the re-validation so the check-then-act window never spans it.
+      dressing = fetchSessionLogoDress(teams, context);
       if (weightsMode === 'standings') {
         notes.push(...(await applyStandingsWeights(context, leagueId, season, teams)));
       }
@@ -413,7 +462,9 @@ export async function handleDraftOrderSetupSubcommand(
       names,
     );
 
-    // Re-validate after the awaits above (ESPN fetch, card render): if a ceremony started
+    const dress = await dressing;
+
+    // Re-validate after the awaits above (ESPN fetch, logo prefetch): if a ceremony started
     // running meanwhile, replacing it now would orphan a live draw.
     if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
       await interaction.editReply({
@@ -421,6 +472,7 @@ export async function handleDraftOrderSetupSubcommand(
       });
       return;
     }
+    dressSession(session, dress);
     const preview = await buildPreviewPost(session);
     await channelIo(channel).post(preview);
     markPreviewPosted(session);
@@ -433,9 +485,6 @@ export async function handleDraftOrderSetupSubcommand(
     session.leagueId = resolvedLeagueId;
     session.season = season;
     session.commissionerIds = [interaction.user.id];
-    // Cosmetic only (#242): the Activity's odds table, drop ball, and race cars wear these; the
-    // commitment preimage never sees a logo. Manual `teams:` setups simply have none.
-    session.logos = teamLogoMap(teams);
     setCeremony(session);
     // The Activity's "start a lottery" press (#253) anchors here next time — a doorbell from a
     // dead-idle stage has no channel of its own.
@@ -785,10 +834,16 @@ export function performActivityReimport(
     // this league/season/view, so a cache read would hand back exactly the roster the commissioner
     // is asking us to replace and the re-import would silently do nothing.
     const teams = await resolveEspnTeams(context, leagueId, season, true);
+    // The refetched roster's logo bytes (#254) start fetching now — they need only the roster,
+    // so they overlap the standings round-trip instead of adding to it. Never awaited between
+    // the re-validation below and the roster install, which must stay adjacent. Safe to leave
+    // in flight: the dress never rejects (per-logo failures are swallowed inside the prefetch).
+    const dressing = fetchSessionLogoDress(teams, context);
     const notes = await applyStandingsWeights(context, leagueId, season, teams, true);
-    // Re-validate after the ESPN round-trip — a `begin`/`abort`/replacing `setup` can land while
-    // we were fetching, and rebuilding a session that is no longer current would be a silent
-    // clobber of whatever replaced it.
+    const dress = await dressing;
+    // Re-validate after the round-trips above (ESPN, logo prefetch) — a `begin`/`abort`/replacing
+    // `setup` can land while we were fetching, and rebuilding a session that is no longer current
+    // would be a silent clobber of whatever replaced it.
     const current = getCeremony(guildId);
     if (current !== session || current.state !== 'GAME_OPEN') return false;
 
@@ -823,13 +878,17 @@ export function performActivityReimport(
       teams: session.config.teams,
       names: session.names,
       logos: session.logos,
+      logoBytes: session.logoBytes,
       miniGameBonuses: session.miniGameBonuses,
     };
     try {
+      // The whole install is synchronous — nothing may suspend between the first field and the
+      // last, or a reaction round scoring in the gap would bake bonuses into a half-built roster.
       session.config.teams = refetched;
       session.names = new Map(teams.map((team) => [team.teamId, team.name]));
-      // Logos travel with the roster they belong to (#242).
-      session.logos = teamLogoMap(teams);
+      // Logos travel with the roster they belong to (#242), bytes prefetched above (#254) so
+      // the fresh preview below can wear them.
+      dressSession(session, dress);
       // A refetched roster invalidates whatever the mini-game awarded against the old one.
       session.miniGameBonuses = undefined;
 
@@ -850,6 +909,7 @@ export function performActivityReimport(
         session.config.teams = previous.teams;
         session.names = previous.names;
         session.logos = previous.logos;
+        session.logoBytes = previous.logoBytes;
         session.miniGameBonuses = previous.miniGameBonuses;
         throw error;
       }
@@ -1120,6 +1180,9 @@ export function performActivitySetup(
 
     try {
       const teams = await resolveEspnTeams(context, leagueId, season);
+      // The logo prefetch (#254) starts now and overlaps the standings round-trip — it needs
+      // only the roster, and it never rejects (per-logo failures are swallowed inside it).
+      const dressing = fetchSessionLogoDress(teams, context);
       const notes = await applyStandingsWeights(context, leagueId, season, teams);
       const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
         teamId: team.teamId,
@@ -1136,11 +1199,16 @@ export function performActivitySetup(
         { teams: configTeams, baseBallCount: 1 },
         names,
       );
-      // Re-validate after the ESPN round-trips, same as the slash handler: replacing a session
-      // that started running meanwhile would orphan a live draw.
+      // Awaited (bounded) before the re-validation below — the check-then-act window must not
+      // span this network wait — and before the preview renders so the card wears them (#254).
+      const dress = await dressing;
+
+      // Re-validate after the round-trips above (ESPN, logo prefetch), same as the slash
+      // handler: replacing a session that started running meanwhile would orphan a live draw.
       if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
         return release('a ceremony started while the import was running');
       }
+      dressSession(session, dress);
 
       // The preview is the public record the whole feature hangs off (ADR 0006). The intro line
       // names who pressed the button — the same audit slot the slash runner's command invocation
@@ -1159,7 +1227,6 @@ export function performActivitySetup(
       session.leagueId = leagueId;
       session.season = season;
       session.commissionerIds = [requestedBy];
-      session.logos = teamLogoMap(teams);
       setCeremony(session);
       memo.remember(guildId, channelId);
 

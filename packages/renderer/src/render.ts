@@ -836,9 +836,47 @@ function renderGrade(
   return body;
 }
 
+/**
+ * Raster base64 `data:` URIs only (#254), validated END TO END, not by prefix: the URI is about
+ * to be interpolated into an SVG attribute, so every character must come from an alphabet that
+ * cannot close the attribute or open a tag — a prefix check would wave through a hostile media
+ * type or payload embedded after a valid-looking head. The whitelist also keeps the card SVG
+ * from ever referencing the network or nesting an SVG document (resvg would not fetch or
+ * execute either, but the contract should say so, not rely on it). Case-insensitive, like
+ * every other image gate in the pipeline.
+ */
+// The 40-char payload floor rejects empty/torso payloads (the smallest real GIF is ~48 chars of
+// base64) so a junk URI never reserves the avatar column or draws a ring around nothing.
+const CARD_LOGO_URI = /^data:image\/(?:png|jpe?g|gif);base64,[a-z0-9+/]{40,}={0,2}$/i;
+
+function isCardLogo(logo: string | undefined): logo is string {
+  return logo !== undefined && CARD_LOGO_URI.test(logo);
+}
+
+/**
+ * A circular team avatar from a caller-supplied data URI (#254). The clip id must be unique per
+ * placement.
+ */
+function logoAvatar(
+  logo: string | undefined,
+  clipId: string,
+  cx: number,
+  cy: number,
+  radius: number,
+  stroke: string,
+): string {
+  if (!isCardLogo(logo)) return '';
+  const d = radius * 2;
+  return (
+    `<clipPath id="${clipId}"><circle cx="${cx}" cy="${cy}" r="${radius}" /></clipPath>` +
+    `<image href="${logo}" x="${cx - radius}" y="${cy - radius}" width="${d}" height="${d}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})" />` +
+    `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${stroke}" stroke-width="1.5" />`
+  );
+}
+
 function renderLotteryOdds(
   payload: {
-    rows: Array<{ team: string; balls: number; firstPct: number; top3Pct: number }>;
+    rows: Array<{ team: string; balls: number; firstPct: number; top3Pct: number; logo?: string }>;
   },
   theme: typeof DEFAULT_THEME,
   width: number,
@@ -853,19 +891,35 @@ function renderLotteryOdds(
   const bottom = height - 60;
   const headerH = 34;
   const rowH = Math.min(66, (bottom - top - headerH) / rows.length);
+  // Mixed leagues stay aligned: the avatar column is reserved when ANY row has a logo. The
+  // shift costs the name column real width, so the truncation cap shrinks with it — the name
+  // must never run into the ball bar at barX.
+  const anyLogo = rows.some((r) => isCardLogo(r.logo));
+  const logoR = Math.min(20, rowH * 0.36);
+  // The avatar column shifts the name AND the ball bar together, so the name field keeps its
+  // width (the bar gets slightly shorter instead). The tightened cap then clears the bar even
+  // for a name of nothing but full-width caps and a generous fallback font: 118 + 15×20 (a
+  // worst-case W advance at size 20 — 'Inter' is not guaranteed installed, so the resolved
+  // font varies by host) = 418 < barX ≈ 422 at the default 1080 width. Verified against a
+  // rendered all-W roster, the pathological worst case.
+  const logoShift = anyLogo ? logoR * 2 + 14 : 0;
+  const nameX = x + logoShift;
+  const nameCap = anyLogo ? 15 : 22;
 
   // Right-anchored numeric columns; the ball bar fills the gap between name and numbers.
   const ballsEnd = x + w - 320;
   const firstEnd = x + w - 160;
   const top3End = x + w;
-  const barX = x + Math.min(320, w * 0.32);
-  const barMaxW = ballsEnd - barX - 90;
+  const barX = x + Math.min(320, w * 0.32) + logoShift;
+  // Floored: a caller-overridden narrow canvas can push barX past ballsEnd, and a negative
+  // budget must degrade to stub bars, not negative-width rects.
+  const barMaxW = Math.max(0, ballsEnd - barX - 90);
   const maxBalls = Math.max(1, ...rows.map((r) => r.balls));
 
   const headerStyle = `fill="${theme.colors.muted}" font-family="${theme.fonts.heading}" font-size="15" font-weight="bold"`;
   const hy = top + headerH - 12;
   let body = '';
-  body += `<text x="${x}" y="${hy}" ${headerStyle}>TEAM</text>`;
+  body += `<text x="${nameX}" y="${hy}" ${headerStyle}>TEAM</text>`;
   body += `<text x="${ballsEnd}" y="${hy}" ${headerStyle} text-anchor="end">BALLS</text>`;
   body += `<text x="${firstEnd}" y="${hy}" ${headerStyle} text-anchor="end">#1 PICK</text>`;
   body += `<text x="${top3End}" y="${hy}" ${headerStyle} text-anchor="end">TOP 3</text>`;
@@ -876,8 +930,9 @@ function renderLotteryOdds(
     if (idx % 2 === 0) {
       body += `<rect x="${x - 12}" y="${rowTop}" width="${w + 24}" height="${rowH}" rx="8" fill="${theme.colors.surface}" opacity="0.45" />`;
     }
-    body += `<text x="${x}" y="${cy + 6}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="20">${escape(
-      truncate(r.team, 22),
+    body += logoAvatar(r.logo, `odds-logo-${idx}`, x + logoR, cy, logoR, theme.colors.surface);
+    body += `<text x="${nameX}" y="${cy + 6}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="20">${escape(
+      truncate(r.team, nameCap),
     )}</text>`;
     const barH = Math.min(16, rowH * 0.35);
     const barW = Math.max(3, (r.balls / maxBalls) * barMaxW);
@@ -993,7 +1048,7 @@ function renderLotteryReveal(
 
 function renderLotteryBoard(
   payload: {
-    entries: Array<{ pick: number; team: string; balls?: number; oddsPct?: number }>;
+    entries: Array<{ pick: number; team: string; balls?: number; oddsPct?: number; logo?: string }>;
   },
   theme: typeof DEFAULT_THEME,
   width: number,
@@ -1008,6 +1063,11 @@ function renderLotteryBoard(
   const bottom = height - 56;
   const rowH = Math.min(72, (bottom - top) / entries.length);
   const r = Math.min(24, rowH * 0.38);
+  // Mixed leagues stay aligned: the avatar column is reserved when ANY entry has a logo (#254).
+  const anyLogo = entries.some((e) => isCardLogo(e.logo));
+  // Where the pick badge ends — the avatar (when present) and the name both hang off this.
+  const badgeEnd = x + r * 2 + 18;
+  const nameX = anyLogo ? badgeEnd + r * 2 + 12 : badgeEnd;
 
   let body = '';
   entries.forEach((e, idx) => {
@@ -1019,9 +1079,10 @@ function renderLotteryBoard(
     body += `<text x="${x + r}" y="${cy + 7}" fill="${numColor}" font-family="${theme.fonts.heading}" font-size="${Math.round(
       r * 0.95,
     )}" font-weight="bold" text-anchor="middle">${e.pick}</text>`;
-    body += `<text x="${x + r * 2 + 18}" y="${cy + 8}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="26"${
+    body += logoAvatar(e.logo, `board-logo-${idx}`, badgeEnd + r, cy, r, theme.colors.surface);
+    body += `<text x="${nameX}" y="${cy + 8}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="26"${
       idx === 0 ? ' font-weight="bold"' : ''
-    }>${escape(truncate(e.team, 24))}</text>`;
+    }>${escape(truncate(e.team, anyLogo ? 22 : 24))}</text>`;
     const note = [
       typeof e.balls === 'number' ? `${e.balls} ${e.balls === 1 ? 'ball' : 'balls'}` : '',
       typeof e.oddsPct === 'number' ? `${pct(e.oddsPct)} odds` : '',

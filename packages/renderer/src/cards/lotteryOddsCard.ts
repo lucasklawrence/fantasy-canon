@@ -8,6 +8,8 @@ export interface LotteryOddsRow {
   firstPct: number;
   /** Chance of landing a top-3 pick, percent 0–100. */
   top3Pct: number;
+  /** Team logo as a `data:` URI (#254) — circular avatar beside the name; absent ⇒ today's row. */
+  logo?: string;
 }
 
 export interface LotteryOddsCardOptions extends RenderOptions {

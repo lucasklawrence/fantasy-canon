@@ -89,8 +89,44 @@ async function readCapped(res: Response, cap: number): Promise<Buffer | null> {
 }
 
 /**
+ * The content type a raster body actually is, from its magic bytes — never the remote header.
+ * The header is attacker-influenced (a logo URL is member-controlled), and downstream it is
+ * embedded verbatim in a `data:` URI that the renderer interpolates into card SVG — so it must
+ * be one of these fixed strings, nothing a server said. WebP is included for the stage push
+ * (#249) — browsers render it on the Activity's balls and cars — even though the cards' own
+ * gate only draws what resvg decodes (PNG/JPEG/GIF), so a WebP league keeps its Activity art
+ * and simply gets plain card rows.
+ */
+function sniffRasterType(bytes: Buffer): string | null {
+  if (bytes.length >= 4 && bytes.readUInt32BE(0) === 0x89504e47) return 'image/png';
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+    return 'image/jpeg';
+  if (bytes.length >= 6 && /^GIF8[79]a$/.test(bytes.subarray(0, 6).toString('latin1')))
+    return 'image/gif';
+  if (
+    bytes.length >= 12 &&
+    bytes.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    bytes.subarray(8, 12).toString('latin1') === 'WEBP'
+  )
+    return 'image/webp';
+  return null;
+}
+
+/**
+ * SVG has no magic number, so "is it SVG" is a document sniff: an `<svg` tag within the first
+ * chunk of text (past any BOM/whitespace/XML prolog/comments). Only consulted after the raster
+ * sniff came up empty, and only to decide whether to hand the bytes to the rasterizer — which
+ * parses defensively anyway, so a false positive costs one failed parse, never a bad logo.
+ */
+function looksLikeSvg(bytes: Buffer): boolean {
+  return bytes.subarray(0, 1024).toString('utf8').toLowerCase().includes('<svg');
+}
+
+/**
  * Fetch one logo the way only the bot can (#249): cookies for ESPN hosts, SVG flattened to PNG,
- * raster passed through — bounded, and null for anything unusable.
+ * raster passed through — bounded, and null for anything unusable. The returned contentType is
+ * always derived from the bytes (sniffed, or our own rasterizer's PNG), never echoed from the
+ * remote header.
  */
 export async function fetchLogoForPush(
   url: string,
@@ -128,48 +164,106 @@ export async function fetchLogoForPush(
         return null;
       }
     }
-    const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
-    if (!contentType.startsWith('image/')) return null;
+    // The header is not consulted for acceptance at all — CDNs serve real images as
+    // octet-stream, binary/octet-stream, text/plain, or nothing. The body is bounded either
+    // way (readCapped), so the only cost of reading a non-image is one capped read, and the
+    // magic bytes below are the sole authority on what the payload is.
     const declared = Number(res.headers.get('content-length') ?? '0');
     if (declared > LOGO_MAX_BYTES) return null;
     const raw = await readCapped(res, LOGO_MAX_BYTES);
     if (!raw || raw.byteLength === 0) return null;
-    if (contentType.includes('svg')) {
+    const sniffed = sniffRasterType(raw);
+    if (sniffed) return { contentType: sniffed, body: raw };
+    if (looksLikeSvg(raw)) {
       // Stock logos: flatten to PNG here, where resvg already lives. resvg executes nothing and
-      // fetches nothing, so a hostile SVG can at worst fail to parse.
+      // fetches nothing, so a hostile SVG can at worst fail to parse. Detected from the bytes,
+      // like everything else — an SVG behind a generic header still flattens.
       const png = rasterize(raw.toString('utf8'));
       if (!png || png.byteLength > LOGO_MAX_BYTES) return null;
       return { contentType: 'image/png', body: png };
     }
-    return { contentType, body: raw };
+    return null;
   } catch {
     return null;
   }
 }
 
+/** Fetched-and-flattened logo bytes, base64 — the shape both the stage push and cards consume. */
+export interface LogoBytes {
+  contentType: string;
+  data: string;
+}
+
+/**
+ * Completion of each prefetch's background fills, keyed by the map it returned — this is how
+ * {@link pushTeamLogos} waits out a straggler instead of racing it with a duplicate fetch.
+ * WeakMap so a discarded session's cache never pins its promise.
+ */
+const prefetchSettled = new WeakMap<ReadonlyMap<string, LogoBytes>, Promise<unknown>>();
+
+/**
+ * Fetch every roster logo into a base64 byte cache (#254), bounded by a soft deadline: the map
+ * is returned once everything settled OR `capMs` elapsed — whichever first — and slow fetches
+ * keep filling it in the background, so a later reader (the stage push, the finish card) sees
+ * more than the caller that raced the cap. This is what lets the setup preview usually carry
+ * logos without coupling the setup hot path to twelve third-party image hosts.
+ */
+export async function prefetchLogoBytes(
+  logos: ReadonlyMap<string, string>,
+  cookies: LogoPushCookies,
+  deps: LogoPushDeps = {},
+  capMs = 4000,
+): Promise<Map<string, LogoBytes>> {
+  const out = new Map<string, LogoBytes>();
+  if (logos.size === 0) return out;
+  const all = [...logos].map(async ([teamId, url]) => {
+    const image = await fetchLogoForPush(url, cookies, deps);
+    if (image)
+      out.set(teamId, { contentType: image.contentType, data: image.body.toString('base64') });
+  });
+  const settled = Promise.allSettled(all);
+  prefetchSettled.set(out, settled);
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    settled,
+    new Promise((resolve) => {
+      deadline = setTimeout(resolve, capMs);
+    }),
+  ]);
+  // A won race must not leave the loser's timer holding the event loop open for capMs.
+  clearTimeout(deadline);
+  return out;
+}
+
 /**
  * Push every fetchable logo for this roster to the stage's cache, one team at a time,
- * best-effort. Returns the count that landed (for the log line); a stage without the `logo`
- * method — a test double, an older api — means zero pushes and zero noise.
+ * best-effort. `bytes` (the #254 prefetch) is consulted first so nothing is fetched twice;
+ * teams it lacks fall back to a live fetch — and a fallback that lands is written BACK into
+ * `bytes`, so the cards rendered later (hype, adjusted preview, the finish board) wear
+ * everything the stage wears instead of permanently missing whatever raced the prefetch cap.
+ * Returns the count that landed (for the log line); a stage without the `logo` method — a
+ * test double, an older api — means zero pushes.
  */
 export async function pushTeamLogos(
   stage: InspectableRevealStage,
   logos: ReadonlyMap<string, string>,
   cookies: LogoPushCookies,
   deps: LogoPushDeps = {},
+  bytes?: Map<string, LogoBytes>,
 ): Promise<number> {
   if (!stage.logo || logos.size === 0) return 0;
+  // If the cache came from a prefetch whose stragglers are still in flight, wait them out —
+  // fetching a team the prefetch is mid-download would race it with a duplicate request.
+  if (bytes) await prefetchSettled.get(bytes);
   let pushed = 0;
   for (const [teamId, url] of logos) {
-    const image = await fetchLogoForPush(url, cookies, deps);
+    const cached = bytes?.get(teamId);
+    const image = cached ?? (await fetchLogoForPush(url, cookies, deps));
     if (!image) continue;
+    const data = 'data' in image ? image.data : image.body.toString('base64');
+    if (!cached) bytes?.set(teamId, { contentType: image.contentType, data });
     try {
-      await stage.logo({
-        teamId,
-        url,
-        contentType: image.contentType,
-        data: image.body.toString('base64'),
-      });
+      await stage.logo({ teamId, url, contentType: image.contentType, data });
       pushed += 1;
     } catch (error) {
       // Per-team and non-fatal: the ceremony must never depend on cosmetics (#242's rule).
