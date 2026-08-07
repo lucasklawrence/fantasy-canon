@@ -33,6 +33,17 @@ export interface StageAdjustmentDetail {
   guildId?: string;
 }
 
+/**
+ * The Activity's "start a lottery" doorbell (#253); mirrors the api's `LotterySetupRequest`.
+ * Everything re-validated bot-side — most importantly `requestedBy`'s Manage Server permission
+ * in `guildId`, the same gate the slash command uses.
+ */
+export interface StageSetupRequest {
+  guildId: string;
+  requestedBy: string;
+  season: number;
+}
+
 /** One bulk level-all (#252); mirrors the api's `LotteryAdjustAllDetail`. */
 export interface StageAdjustAllDetail {
   balls: number;
@@ -88,6 +99,13 @@ export interface StageWatcherOptions {
    * open ceremony, a bag in flux). Omitted ⇒ begin requests are ignored.
    */
   begin?: (guildId: string | undefined, request: StageBeginRequest) => Promise<boolean>;
+  /**
+   * Honour a "start a lottery" press from a dead-idle stage (#253) — verify Manage Server, then
+   * run the slash-`setup` flow (ESPN import, public preview, lobby arm). Resolves false on
+   * refusal, and the refusing implementation releases the doorbell with a reason so the idle
+   * screens recover. Omitted ⇒ setup requests are ignored.
+   */
+  setup?: (request: StageSetupRequest) => Promise<boolean>;
   /** Injected for tests; defaults to a `ws` socket (works on every Node this repo runs on). */
   socketFactory?: (url: string) => StageSocket;
   /** Injected for tests; defaults to `setTimeout`. Must return a handle `clearReconnect` accepts. */
@@ -154,6 +172,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     post,
     reimport,
     begin,
+    setup,
     // `ws`, not the global `WebSocket`. Node only exposes that global from 22 onward, and the
     // repo's `engines: node >= 24` is a floor we declare, not one anything enforces — a bot
     // started on Node 20 threw `ReferenceError: WebSocket is not defined` here on every reconnect
@@ -176,6 +195,8 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
   const reimporting = new Set<string>();
   /** Guilds whose begin is already running — a broadcast storm must not seal a bag twice (#233). */
   const beginning = new Set<string>();
+  /** Guilds whose setup is already running — one press, one ESPN import (#253). */
+  const settingUp = new Set<string>();
 
   const key = (guildId: string | undefined): string => guildId ?? '';
   /** Lines currently being delivered, so a duplicate frame can't double-post while one is in flight. */
@@ -404,8 +425,22 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
         reimportRequested?: unknown;
         beginRequested?: unknown;
         auditMode?: unknown;
+        setupRequested?: unknown;
       };
       if (snapshot.phase !== 'lobby') {
+        // A dead-idle stage can still carry the one thing pressable there: the setup doorbell
+        // (#253). Same single-flight discipline as re-import/begin; the callback releases the
+        // request itself when it must refuse, so a false here needs no watcher-side action.
+        const setupRequest =
+          snapshot.phase === 'idle' ? toSetupRequest(snapshot.setupRequested) : undefined;
+        if (setupRequest && setup && !settingUp.has(setupRequest.guildId)) {
+          settingUp.add(setupRequest.guildId);
+          void setup(setupRequest)
+            .catch((error: unknown) => {
+              console.error('[draftorder] in-Activity setup failed:', error);
+            })
+            .finally(() => settingUp.delete(setupRequest.guildId));
+        }
         // Nothing armed ⇒ nothing editable, and any prior lobby is behind us.
         announced.clear();
         announcedNames.clear();
@@ -514,6 +549,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       // Otherwise a guild whose import was in flight at stop() stays blocked after the next start.
       reimporting.clear();
       beginning.clear();
+      settingUp.clear();
       if (open) {
         try {
           open.close();
@@ -565,6 +601,23 @@ function toBeginRequest(raw: unknown): StageBeginRequest | undefined {
     ...(d.ballFaces === 'numbers' || d.ballFaces === 'logos' ? { ballFaces: d.ballFaces } : {}),
     ...(typeof d.requestedBy === 'string' ? { requestedBy: d.requestedBy } : {}),
   };
+}
+
+/** Guard the setup doorbell off an untrusted frame (#253) — every field re-validated bot-side. */
+function toSetupRequest(raw: unknown): StageSetupRequest | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const d = raw as Record<string, unknown>;
+  if (typeof d.guildId !== 'string' || !d.guildId) return undefined;
+  if (typeof d.requestedBy !== 'string' || !d.requestedBy) return undefined;
+  if (
+    typeof d.season !== 'number' ||
+    !Number.isInteger(d.season) ||
+    d.season < 2020 ||
+    d.season > 2100
+  ) {
+    return undefined;
+  }
+  return { guildId: d.guildId, requestedBy: d.requestedBy, season: d.season };
 }
 
 /** Guard the `adjustedAll` detail off an untrusted frame (#252). */

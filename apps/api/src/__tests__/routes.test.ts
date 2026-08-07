@@ -772,6 +772,77 @@ describe('commissioner lobby edits (#210)', () => {
     ).toBe(400);
   });
 
+  it('records a setup press at idle, stamped with the verified caller (#253)', async () => {
+    const d = deps(hub(), { stageKey: 'sekrit' });
+    const body = JSON.stringify({ guildId: 'g-a', season: 2026 });
+
+    // Bearer-gated but NOT commissioner-gated — there is no commissioner at idle.
+    expect((await routeRequest('POST', '/api/lottery/setup-request', body, d)).status).toBe(401);
+    expect(
+      (
+        await routeRequest('POST', '/api/lottery/setup-request', body, d, {
+          authorization: 'Bearer user-anyone',
+        })
+      ).status,
+    ).toBe(200);
+    const state = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(state.setupRequested).toEqual({ guildId: 'g-a', requestedBy: 'anyone', season: 2026 });
+
+    // A second press while one is pending backs off cleanly.
+    expect(
+      (
+        await routeRequest('POST', '/api/lottery/setup-request', body, d, {
+          authorization: 'Bearer user-rival',
+        })
+      ).status,
+    ).toBe(409);
+
+    // The bot's release clears it and carries the denial once — behind the stage key.
+    const release = JSON.stringify({ guildId: 'g-a', reason: 'not a manager' });
+    expect((await routeRequest('POST', '/api/lottery/setup-release', release, d)).status).toBe(401);
+    expect(
+      (
+        await routeRequest('POST', '/api/lottery/setup-release', release, d, {
+          'x-stage-key': 'sekrit',
+        })
+      ).status,
+    ).toBe(200);
+    const after = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(after.setupRequested).toBeUndefined();
+    expect(after.setupDenied).toBe('not a manager');
+  });
+
+  it('refuses a setup press off-idle and junk payloads (#253)', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+    expect(
+      (
+        await routeRequest(
+          'POST',
+          '/api/lottery/setup-request',
+          JSON.stringify({ guildId: 'g-a', season: 2026 }),
+          d,
+          { authorization: 'Bearer user-anyone' },
+        )
+      ).status,
+    ).toBe(409);
+
+    const idle = deps(hub());
+    for (const bad of [{ season: 2026 }, { guildId: 'g-a', season: 1999 }, {}]) {
+      expect(
+        (
+          await routeRequest('POST', '/api/lottery/setup-request', JSON.stringify(bad), idle, {
+            authorization: 'Bearer user-anyone',
+          })
+        ).status,
+      ).toBe(400);
+    }
+  });
+
   it('never accepts the bot’s stage key in place of a bearer (the two auth paths stay disjoint)', async () => {
     const d = deps(hub(), { stageKey: 'sekrit' });
     await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d, {

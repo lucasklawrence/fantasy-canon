@@ -57,13 +57,22 @@ import {
   runCeremony,
   setCeremony,
 } from '../../lib/draftOrderCeremony.js';
-import { createFileCeremonyStore, type CeremonyStore } from '../../lib/ceremonyStore.js';
+import {
+  createFileCeremonyStore,
+  recallLotteryChannel,
+  rememberLotteryChannel,
+  type CeremonyStore,
+} from '../../lib/ceremonyStore.js';
 import {
   DEFAULT_STAGE_URL,
   stageFromEnv,
   type InspectableRevealStage,
 } from '../../lib/lotteryStageClient.js';
-import { createStageWatcher, type StageBeginRequest } from '../../lib/lotteryStageWatcher.js';
+import {
+  createStageWatcher,
+  type StageBeginRequest,
+  type StageSetupRequest,
+} from '../../lib/lotteryStageWatcher.js';
 import { pushTeamLogos } from '../../lib/logoPush.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
@@ -229,6 +238,17 @@ function teamLogoMap(teams: SetupTeam[]): Map<string, string> {
   return new Map(teams.flatMap((team) => (team.logo ? [[team.teamId, team.logo] as const] : [])));
 }
 
+/** Where a guild's lottery lives (#253) — injectable so tests never touch the state dir. */
+export interface LotteryChannelMemo {
+  remember(guildId: string, channelId: string): void;
+  recall(guildId: string): string | undefined;
+}
+
+const fileChannelMemo: LotteryChannelMemo = {
+  remember: (guildId, channelId) => rememberLotteryChannel(guildId, channelId),
+  recall: (guildId) => recallLotteryChannel(guildId),
+};
+
 /**
  * Fire-and-forget logo delivery (#249): fetch what only the bot can (league cookies for ESPN
  * hosts, resvg for stock SVGs) and push raster bytes to the stage's same-origin cache. Never
@@ -322,6 +342,7 @@ async function applyStandingsWeights(
 export async function handleDraftOrderSetupSubcommand(
   interaction: ChatInputCommandInteraction,
   context: BotContext,
+  memo: LotteryChannelMemo = fileChannelMemo,
 ): Promise<void> {
   if (!(await denyUnlessCommissioner(interaction))) return;
   const guildId = interaction.guildId as string;
@@ -416,6 +437,9 @@ export async function handleDraftOrderSetupSubcommand(
     // commitment preimage never sees a logo. Manual `teams:` setups simply have none.
     session.logos = teamLogoMap(teams);
     setCeremony(session);
+    // The Activity's "start a lottery" press (#253) anchors here next time — a doorbell from a
+    // dead-idle stage has no channel of its own.
+    memo.remember(guildId, interaction.channelId);
 
     // Best-effort: arm the Activity lobby (#198) so members can join before `begin`.
     // Failures are logged but never propagate — the ceremony state is already committed above.
@@ -1030,10 +1054,153 @@ export function performActivityBegin(
 }
 
 /**
+ * Honour a "start a lottery" press from a dead-idle stage (#253).
+ *
+ * The one doorbell whose authority the lobby cannot vouch for — there IS no lobby yet — so the
+ * gate is the slash command's own: **Manage Server in the named guild, verified against
+ * Discord**, never against anything the client claimed. Past the gate this is the slash `setup`
+ * ESPN path verbatim: import the roster, derive standings weights, post the public odds preview
+ * (to the guild's remembered lottery channel — a doorbell has no channel of its own), stamp the
+ * presser as commissioner, arm the lobby (which answers the doorbell at the stage), push logos.
+ *
+ * Every refusal *releases* the press with a reason the idle screens show once (#236's rule):
+ * a denied press must never strand every viewer's start button.
+ */
+export function performActivitySetup(
+  client: Client,
+  context: BotContext,
+  stage: InspectableRevealStage = stageFromEnv(),
+  memo: LotteryChannelMemo = fileChannelMemo,
+): (request: StageSetupRequest) => Promise<boolean> {
+  return async (request) => {
+    const { guildId, requestedBy, season } = request;
+    const release = (reason: string): false => {
+      void stage.setupRelease?.({ guildId, reason }).catch((error: unknown) => {
+        console.error('[draftorder] could not release the setup press:', error);
+      });
+      return false;
+    };
+
+    let allowed: boolean;
+    try {
+      const guild = await client.guilds.fetch(guildId);
+      const member = await guild.members.fetch(requestedBy);
+      allowed = member.permissions.has(PermissionFlagsBits.ManageGuild);
+    } catch (error) {
+      console.error('[draftorder] setup press permission check failed:', error);
+      return release('could not verify your server permissions — try again in a moment');
+    }
+    if (!allowed) {
+      return release('only a member with Manage Server can start the lottery');
+    }
+
+    if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
+      return release('a ceremony is already running — abort it first');
+    }
+
+    const channelId = memo.recall(guildId);
+    if (!channelId) {
+      return release(
+        'run /canon draftorder setup once from your lottery channel — after that the Activity remembers it',
+      );
+    }
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isSendable()) {
+      return release(
+        'the remembered lottery channel is unreachable — run /canon draftorder setup once from the channel you want',
+      );
+    }
+
+    const leagueId =
+      (await context.leagueConfigRepo.getByGuildId(guildId))?.leagueId ??
+      context.env.defaultLeagueId;
+    if (!leagueId) {
+      return release('no ESPN league is configured for this server — use /canon draftorder setup');
+    }
+
+    try {
+      const teams = await resolveEspnTeams(context, leagueId, season);
+      const notes = await applyStandingsWeights(context, leagueId, season, teams);
+      const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
+        teamId: team.teamId,
+        displayName: team.name,
+        baseBalls: team.baseBalls,
+        bonusBalls: team.bonusBalls,
+      }));
+      const names = new Map(teams.map((team) => [team.teamId, team.name]));
+      // Throws on a roster `begin` would later choke on (duplicate names, odds cap) — caught
+      // below and released with the reason, before anything posts.
+      const session = createCeremony(
+        guildId,
+        `${season} Draft Lottery`,
+        { teams: configTeams, baseBallCount: 1 },
+        names,
+      );
+      // Re-validate after the ESPN round-trips, same as the slash handler: replacing a session
+      // that started running meanwhile would orphan a live draw.
+      if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
+        return release('a ceremony started while the import was running');
+      }
+
+      // The preview is the public record the whole feature hangs off (ADR 0006). The intro line
+      // names who pressed the button — the same audit slot the slash runner's command invocation
+      // occupies in the channel history. The setup notes ride here too: there is no ephemeral
+      // surface to whisper them through.
+      await channel.send({
+        content: [
+          `🎰 **${session.title}** — <@${requestedBy}> started the lottery from the Activity.`,
+          ...notes,
+        ].join('\n'),
+        allowedMentions: { parse: [] },
+      });
+      await channelIo(channel).post(await buildPreviewPost(session));
+      markPreviewPosted(session);
+      session.lobbyChannelId = channelId;
+      session.leagueId = leagueId;
+      session.season = season;
+      session.commissionerIds = [requestedBy];
+      session.logos = teamLogoMap(teams);
+      setCeremony(session);
+      memo.remember(guildId, channelId);
+
+      const lobbyRows = oddsRows(session);
+      await stage
+        .lobby({
+          title: session.title,
+          teamCount: session.config.teams.length,
+          totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
+          rows: lobbyRows,
+          guildId,
+          commissionerIds: [requestedBy],
+        })
+        .then(() => {
+          pushSessionLogos(session, context, stage);
+        })
+        .catch((error: unknown) => {
+          // The ceremony exists and its preview is public — but the arm is what answers the
+          // doorbell, so a failed arm must still free the idle screens.
+          console.error('[draftorder] Activity setup armed nothing — stage unreachable:', error);
+          release(
+            'the stage is unreachable — the ceremony is set up; continue with /canon draftorder',
+          );
+        });
+      console.log(
+        `[draftorder] Activity setup: ${teams.length} teams for guild ${guildId} by ${requestedBy}`,
+      );
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[draftorder] in-Activity setup failed:', error);
+      return release(`setup failed: ${message.slice(0, 200)}`);
+    }
+  };
+}
+
+/**
  * Start watching the stage for commissioner activity (#220 edits, #219 re-import requests,
- * #233 begin requests). Best-effort and non-blocking: an unreachable api just retries with
- * backoff, and nothing about the ceremony depends on it — `begin` still re-posts the full odds
- * card before the commitment.
+ * #233 begin requests, #253 setup requests). Best-effort and non-blocking: an unreachable api
+ * just retries with backoff, and nothing about the ceremony depends on it — `begin` still
+ * re-posts the full odds card before the commitment.
  */
 export function watchActivityEdits(
   client: Client,
@@ -1045,6 +1212,7 @@ export function watchActivityEdits(
     post: postActivityEditLine(client),
     reimport: performActivityReimport(client, context),
     begin: performActivityBegin(client),
+    setup: performActivitySetup(client, context),
   });
   watcher.start();
 }

@@ -263,6 +263,14 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
       <tbody id="odds-rows"></tbody>
     </table>
     <p class="pulse">Waiting for the commissioner to seal the bag…</p>
+    <!-- The start doorbell (#253): idle-only, visible to everyone — the BOT verifies Manage
+         Server before honouring a press, and a refusal comes back on the status pill. -->
+    <div id="setup-actions" class="panel-row hidden">
+      <label class="pickwrap">Season
+        <input id="setup-season" class="picker bulk-input" type="number" min="2020" max="2100" value="2025">
+      </label>
+      <button id="setup-btn" class="replay" type="button">&#127920; Start a lottery</button>
+    </div>
     <!-- The commissioner panel (#252): every knob in one visibly-distinct card, because the
          scattered controls it replaces went unnoticed by the actual commissioner. -->
     <div id="commish-panel" class="hidden">

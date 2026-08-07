@@ -10,6 +10,7 @@ import {
   parseLotteryLobby,
   parseLotteryRename,
   parseLotteryReveal,
+  parseLotterySetupRequest,
   parseLotteryStart,
   DuplicateTeamNameError,
   StageNotEditableError,
@@ -661,6 +662,61 @@ describe('setAuditMode — the chatter preference (#252)', () => {
   });
 });
 
+describe('requestSetup / releaseSetup — the start-a-lottery doorbell (#253)', () => {
+  const PRESS = { guildId: 'g1', requestedBy: 'someone', season: 2026 };
+
+  it('records a press at idle, broadcasts it, and refuses a second while one is pending', () => {
+    const stage = createLotteryStage();
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+
+    stage.requestSetup(PRESS);
+    expect(stage.snapshot().setupRequested).toEqual(PRESS);
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('lottery-state');
+
+    // The loser of a button race gets a clean refusal, not a silent overwrite.
+    expect(() => stage.requestSetup({ ...PRESS, requestedBy: 'rival' })).toThrow(
+      StageNotEditableError,
+    );
+    expect(stage.snapshot().setupRequested?.requestedBy).toBe('someone');
+  });
+
+  it('is idle-only: a lobby, a live run, and a finished board all refuse', () => {
+    const armed = createLotteryStage();
+    armed.lobby(EDITABLE);
+    expect(() => armed.requestSetup(PRESS)).toThrow(StageNotEditableError);
+
+    const live = createLotteryStage();
+    live.start(START);
+    expect(() => live.requestSetup(PRESS)).toThrow(StageNotEditableError);
+  });
+
+  it('release clears the press and carries the reason once; the next press clears the denial', () => {
+    const stage = createLotteryStage();
+    stage.requestSetup(PRESS);
+
+    // Guild-scoped like clear(): another guild's release is a no-op.
+    stage.releaseSetup({ guildId: 'other', reason: 'nope' });
+    expect(stage.snapshot().setupRequested).toEqual(PRESS);
+
+    stage.releaseSetup({ guildId: 'g1', reason: 'only a member with Manage Server can start' });
+    expect(stage.snapshot().setupRequested).toBeUndefined();
+    expect(stage.snapshot().setupDenied).toBe('only a member with Manage Server can start');
+
+    stage.requestSetup(PRESS);
+    expect(stage.snapshot().setupDenied).toBeUndefined();
+  });
+
+  it('the arm that answers the press clears both flags', () => {
+    const stage = createLotteryStage();
+    stage.requestSetup(PRESS);
+    stage.lobby(EDITABLE);
+    expect(stage.snapshot().setupRequested).toBeUndefined();
+    expect(stage.snapshot().setupDenied).toBeUndefined();
+  });
+});
+
 describe('requestBegin — the in-Activity seal-and-start doorbell (#233)', () => {
   const REQUEST = {
     delaySeconds: 20,
@@ -737,6 +793,26 @@ describe('requestBegin — the in-Activity seal-and-start doorbell (#233)', () =
 });
 
 describe('lottery payload guards', () => {
+  it('parseLotterySetupRequest wants a guildId and a sane season; requestedBy is never read (#253)', () => {
+    expect(parseLotterySetupRequest(JSON.stringify({ guildId: 'g1', season: 2026 }))).toEqual({
+      value: { guildId: 'g1', season: 2026 },
+    });
+    for (const bad of [
+      { season: 2026 },
+      { guildId: 'g1' },
+      { guildId: 'g1', season: 1999 },
+      { guildId: 'g1', season: 2026.5 },
+      { guildId: 'g1', season: '2026' },
+    ]) {
+      expect(parseLotterySetupRequest(JSON.stringify(bad))).toHaveProperty('error');
+    }
+    // The route stamps identity from the bearer; a body-supplied one is dropped.
+    const spoofed = parseLotterySetupRequest(
+      JSON.stringify({ guildId: 'g1', season: 2026, requestedBy: 'victim' }),
+    );
+    expect(spoofed).toEqual({ value: { guildId: 'g1', season: 2026 } });
+  });
+
   it('parseLotteryBegin accepts only the picker vocabulary and never a requestedBy (#233)', () => {
     // Absent `visual` defaults to the machine — an older bundle simply has no picker (#235).
     expect(

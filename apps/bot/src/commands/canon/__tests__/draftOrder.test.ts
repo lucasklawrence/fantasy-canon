@@ -34,6 +34,7 @@ import {
   parseManualTeams,
   performActivityBegin,
   performActivityReimport,
+  performActivitySetup,
   postActivityEditLine,
   recoverInterruptedCeremonies,
 } from '../draftOrder.js';
@@ -1279,6 +1280,151 @@ describe('performActivityReimport (#219)', () => {
     resetCeremoniesForTests();
     espnSession({ lobbyChannelId: undefined });
     await expect(run('guild-1')).resolves.toBe(false);
+    expect(sent).toHaveLength(0);
+  });
+});
+
+describe('performActivitySetup (#253)', () => {
+  const PRESS = { guildId: 'guild-1', requestedBy: 'presser', season: 2026 };
+
+  function setupClient(
+    sent: ChannelPost[],
+    opts: { manager?: boolean; permissionThrow?: boolean; sendable?: boolean } = {},
+  ): Client {
+    const { manager = true, permissionThrow = false, sendable = true } = opts;
+    return {
+      guilds: {
+        fetch: () => {
+          if (permissionThrow) return Promise.reject(new Error('discord down'));
+          return Promise.resolve({
+            members: {
+              fetch: () => Promise.resolve({ permissions: { has: () => manager } }),
+            },
+          });
+        },
+      },
+      channels: {
+        fetch: () =>
+          Promise.resolve({
+            isSendable: () => sendable,
+            send: (p: ChannelPost) => {
+              sent.push(p);
+              return Promise.resolve({ id: `m${sent.length}` });
+            },
+          }),
+      },
+    } as unknown as Client;
+  }
+
+  function memoWith(channelId?: string) {
+    const remembered: { guildId: string; channelId: string }[] = [];
+    return {
+      memo: {
+        recall: () => channelId,
+        remember: (guildId: string, chan: string) =>
+          void remembered.push({ guildId, channelId: chan }),
+      },
+      remembered,
+    };
+  }
+
+  function releasingStage() {
+    const releases: { guildId?: string; reason?: string }[] = [];
+    const arms: { commissionerIds?: string[] }[] = [];
+    const stage: InspectableRevealStage = {
+      ...stageHolding(),
+      lobby: (req) => {
+        arms.push({ commissionerIds: req.commissionerIds });
+        return Promise.resolve();
+      },
+      setupRelease: (release) => {
+        releases.push(release);
+        return Promise.resolve();
+      },
+    };
+    return { stage, releases, arms };
+  }
+
+  it('runs the slash-setup flow for a verified manager: preview, session, arm, memo', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const sent: ChannelPost[] = [];
+    const { stage, releases, arms } = releasingStage();
+    const { memo, remembered } = memoWith('lobby-chan');
+
+    await expect(
+      performActivitySetup(setupClient(sent), context, stage, memo)(PRESS),
+    ).resolves.toBe(true);
+
+    // The channel record: who pressed, then the odds preview card.
+    expect(sent[0].content).toContain('started the lottery from the Activity');
+    expect(sent[0].allowedMentions).toEqual({ parse: [] });
+    expect(sent[1].files).toHaveLength(1);
+    // The session is the slash flow's: presser stamped as commissioner, ESPN league recorded.
+    const session = getCeremony('guild-1');
+    expect(session?.commissionerIds).toEqual(['presser']);
+    expect(session?.leagueId).toBe('league-1');
+    expect(session?.season).toBe(2026);
+    expect(session?.state).toBe('GAME_OPEN');
+    expect(session?.lobbyChannelId).toBe('lobby-chan');
+    // The arm answers the doorbell (stage-side) and carries the presser as editor.
+    expect(arms).toEqual([{ commissionerIds: ['presser'] }]);
+    expect(releases).toHaveLength(0);
+    expect(remembered).toEqual([{ guildId: 'guild-1', channelId: 'lobby-chan' }]);
+  });
+
+  it('releases with a reason for every refusal — nothing stranded, nothing posted', async () => {
+    const { context } = createMockContext({ defaultLeagueId: 'league-1' });
+    const sent: ChannelPost[] = [];
+
+    // Not a manager.
+    {
+      const { stage, releases } = releasingStage();
+      const { memo } = memoWith('lobby-chan');
+      await expect(
+        performActivitySetup(setupClient(sent, { manager: false }), context, stage, memo)(PRESS),
+      ).resolves.toBe(false);
+      expect(releases[0].reason).toContain('Manage Server');
+    }
+    // Permission check unreachable.
+    {
+      const { stage, releases } = releasingStage();
+      const { memo } = memoWith('lobby-chan');
+      await expect(
+        performActivitySetup(
+          setupClient(sent, { permissionThrow: true }),
+          context,
+          stage,
+          memo,
+        )(PRESS),
+      ).resolves.toBe(false);
+      expect(releases[0].reason).toContain('could not verify');
+    }
+    // No remembered channel — guidance to run the slash setup once.
+    {
+      const { stage, releases } = releasingStage();
+      const { memo } = memoWith(undefined);
+      await expect(
+        performActivitySetup(setupClient(sent), context, stage, memo)(PRESS),
+      ).resolves.toBe(false);
+      expect(releases[0].reason).toContain('/canon draftorder setup');
+    }
+    expect(sent).toHaveLength(0);
+  });
+
+  it('releases when the ESPN import fails, with the failure named', async () => {
+    // No mTeam payload wired ⇒ resolveEspnTeams finds no teams and throws.
+    const { context } = createMockContext({ defaultLeagueId: 'league-1' });
+    const sent: ChannelPost[] = [];
+    const { stage, releases } = releasingStage();
+    const { memo } = memoWith('lobby-chan');
+
+    await expect(
+      performActivitySetup(setupClient(sent), context, stage, memo)(PRESS),
+    ).resolves.toBe(false);
+    expect(releases[0].reason).toContain('setup failed:');
     expect(sent).toHaveLength(0);
   });
 });

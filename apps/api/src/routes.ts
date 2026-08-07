@@ -32,6 +32,8 @@ import {
   parseLotteryLobby,
   parseLotteryRename,
   parseLotteryReveal,
+  parseLotterySetupRelease,
+  parseLotterySetupRequest,
   parseLotteryStart,
   DuplicateTeamNameError,
   StageBusyError,
@@ -328,6 +330,31 @@ async function lotteryRoute(
   }
   if (method !== 'POST') return json(404, { error: 'not found' });
 
+  // The setup doorbell (#253) is bearer-identified but NOT commissioner-gated — at a dead-idle
+  // stage there is no lobby and therefore no commissioner list. Authority is the BOT's to check
+  // (Manage Server in the named guild); this route records verified identity + intent only.
+  if (path === '/api/lottery/setup-request') {
+    // Cheap local rejection first, same rationale as the commissioner routes: junk bearers must
+    // not turn into Discord round-trips, and the phase is already public via /state.
+    if (deps.lottery.snapshot().phase !== 'idle') {
+      return json(409, { error: 'a ceremony is already on the stage' });
+    }
+    const caller = await identifyCaller(deps, headers);
+    if ('reply' in caller) return caller.reply;
+    const parsed = parseLotterySetupRequest(body);
+    if ('error' in parsed) return json(400, { error: parsed.error });
+    try {
+      deps.lottery.requestSetup({ ...parsed.value, requestedBy: caller.user.id });
+    } catch (error) {
+      // A press already pending — the loser of a button race backs off cleanly.
+      if (error instanceof StageNotEditableError) {
+        return json(409, { error: 'a setup request is already pending' });
+      }
+      throw error;
+    }
+    return json(200, { ok: true });
+  }
+
   // The commissioner's edits (#210 balls, #219 rename/re-import, #233 begin) are the POSTs that
   // are *not* bot-only, so they resolve their own identity and return before the `x-stage-key`
   // gate below.
@@ -350,6 +377,14 @@ async function lotteryRoute(
   }
 
   switch (path) {
+    case '/api/lottery/setup-release': {
+      // Bot-keyed refusal of a setup press (#253): frees every idle screen's button and carries
+      // the reason once, so a denied presser is never left staring at silence.
+      const parsed = parseLotterySetupRelease(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.releaseSetup(parsed.value);
+      return json(200, { ok: true });
+    }
     case '/api/lottery/logo-cache': {
       // Bot-pushed logo bytes (#249). Raster only — the bot rasterizes SVG before pushing, and
       // this gate makes sure nothing scriptable can be laundered into the same-origin cache.

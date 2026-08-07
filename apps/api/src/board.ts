@@ -29,6 +29,10 @@ export function boardHtml(clientId: string): string {
   header { padding: 14px 20px; border-bottom: 1px solid #222634; display: flex; align-items: center;
     gap: 14px; flex-wrap: wrap; position: sticky; top: 0; background: #0f1115; z-index: 5; }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; color: #aab2c5; }
+  /* The clock keeps its margin-left:auto right-push; the link rides just left of it. */
+  .lottery-link { font-size: 12px; font-weight: 700; color: #f5d67b; text-decoration: none;
+    border: 1px solid rgba(245,214,123,.35); border-radius: 999px; padding: 4px 12px; }
+  .lottery-link:hover { background: rgba(245,214,123,.08); }
   .pill { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: #1b2130; color: #9aa4bd; }
   .pill.live { background: #113526; color: #4ade80; }
   .pill.err { background: #3a1620; color: #f87171; }
@@ -82,6 +86,11 @@ export function boardHtml(clientId: string): string {
   <h1>Draft Dashboard</h1>
   <span id="status" class="pill">connecting…</span>
   <div class="clock" id="clock"></div>
+  <!-- The doorway to the idle lottery screen (#253): the Activity always opens at the root, and
+       the #192 mode-switch serves this dashboard while the stage is idle — which is exactly the
+       phase the "start a lottery" button lives in. Same-origin relative nav works through the
+       Discord proxy. -->
+  <a class="lottery-link" href="./lottery">&#127920; Draft-order lottery</a>
 </header>
 <main>
   <form class="entry" id="entry">
