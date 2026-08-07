@@ -64,6 +64,7 @@ import {
   type InspectableRevealStage,
 } from '../../lib/lotteryStageClient.js';
 import { createStageWatcher, type StageBeginRequest } from '../../lib/lotteryStageWatcher.js';
+import { pushTeamLogos } from '../../lib/logoPush.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
@@ -226,6 +227,30 @@ function channelIo(channel: SendableChannel): CeremonyIo {
 /** The `teamId → logo URL` map a roster carries (#242); empty entries are simply omitted. */
 function teamLogoMap(teams: SetupTeam[]): Map<string, string> {
   return new Map(teams.flatMap((team) => (team.logo ? [[team.teamId, team.logo] as const] : [])));
+}
+
+/**
+ * Fire-and-forget logo delivery (#249): fetch what only the bot can (league cookies for ESPN
+ * hosts, resvg for stock SVGs) and push raster bytes to the stage's same-origin cache. Never
+ * awaited on a hot path — the ceremony must never depend on cosmetics.
+ */
+function pushSessionLogos(
+  session: CeremonySession,
+  context: BotContext,
+  stage: InspectableRevealStage = stageFromEnv(),
+): void {
+  const logos = session.logos;
+  if (!logos || logos.size === 0) return;
+  void pushTeamLogos(stage, logos, {
+    espnS2: context.env.espnS2,
+    espnSwid: context.env.espnSwid,
+  })
+    .then((pushed) => {
+      if (pushed > 0) console.log(`[draftorder] pushed ${pushed} team logo(s) to the stage`);
+    })
+    .catch((error: unknown) => {
+      console.error('[draftorder] logo push failed:', error);
+    });
 }
 
 async function resolveEspnTeams(
@@ -398,7 +423,8 @@ export async function handleDraftOrderSetupSubcommand(
     // member who ran this command, which `denyUnlessCommissioner` already gated on Manage Server.
     // No `keepAdjustments` — this is a brand-new bag, so edits to the previous one are meaningless.
     const lobbyRows = oddsRows(session);
-    void stageFromEnv()
+    const armStage = stageFromEnv();
+    void armStage
       .lobby({
         title: session.title,
         teamCount: session.config.teams.length,
@@ -406,6 +432,13 @@ export async function handleDraftOrderSetupSubcommand(
         rows: lobbyRows,
         guildId,
         commissionerIds: [interaction.user.id],
+      })
+      .then(() => {
+        // Deliver the logos the api can't fetch itself (#249): ESPN-hosted art needs the league's
+        // cookies, stock logos need rasterizing. Strictly AFTER the lobby claimed the stage — a
+        // rejected arm (another guild's ceremony owns it) must not seed the shared cache with
+        // this guild's art under colliding ESPN team ids.
+        pushSessionLogos(session, context, armStage);
       })
       .catch((error: unknown) => {
         console.error('[draftorder] failed to arm the Activity lobby:', error);
@@ -801,6 +834,12 @@ export function performActivityReimport(
           rows,
           guildId,
           commissionerIds: session.commissionerIds ?? [],
+        })
+        .then(() => {
+          // The refetched roster's logos travel the same push channel as setup's (#249), and
+          // with the same ordering rule: only after the re-arm proved this guild still owns the
+          // stage. Entries record their source URL, so a changed logo replaces cleanly.
+          pushSessionLogos(session, context, stage);
         })
         .catch((error: unknown) => {
           console.error(

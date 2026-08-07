@@ -202,6 +202,19 @@ export interface RevealStage {
    * matching lobby is armed, so it is always safe to fire.
    */
   clear(clear: { guildId?: string }): Promise<void>;
+  /**
+   * Push one team's logo bytes to the stage's same-origin cache (#249). Optional and
+   * best-effort: only the bot can fetch ESPN-hosted art (league cookies) or flatten stock SVGs
+   * (resvg), so it does both and hands the api ready-to-serve raster bytes. A stage without the
+   * route, or a failed push, just leaves that team on its hue ball.
+   */
+  logo?(entry: {
+    teamId: string;
+    url: string;
+    contentType: string;
+    /** Base64 of the raster bytes — JSON-safe and well under the api's body cap. */
+    data: string;
+  }): Promise<void>;
   start(start: {
     title: string;
     commitment: string;

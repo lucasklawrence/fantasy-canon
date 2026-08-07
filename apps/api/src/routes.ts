@@ -88,6 +88,16 @@ export interface RouteDeps {
    * big, timeout). Omitted ⇒ the logo route 404s and clients fall back to hue balls.
    */
   fetchLogo?: (url: string) => Promise<{ contentType: string; body: Buffer } | null>;
+  /**
+   * Bot-pushed logo bytes (#249), keyed by teamId. The bot fetches with the league's ESPN
+   * cookies and rasterizes SVG — neither of which this process can or should do — then POSTs the
+   * result to `/api/lottery/logo-cache`. Each entry records the source `url` it was fetched
+   * from, so the GET can refuse to serve art that no longer matches the stamped row.
+   */
+  logoStore?: {
+    put(entry: { teamId: string; url: string; contentType: string; body: Buffer }): void;
+    get(teamId: string): { url: string; contentType: string; body: Buffer } | undefined;
+  };
   /** The lottery-machine reveal stage the bot paces via `POST /api/lottery/*` (#169). */
   lottery: LotteryStage;
   /** The lottery client bundle (`dist/client/lottery.js`), or `undefined` if `build:client` hasn't run. */
@@ -104,6 +114,46 @@ const json = (status: number, value: unknown): HttpReply => ({
   contentType: 'application/json',
   body: JSON.stringify(value),
 });
+
+/** Max decoded logo the push cache accepts — mirrors the anonymous fetcher's cap (#242). */
+const LOGO_PUSH_MAX_BYTES = 512 * 1024;
+
+type ParsedLogoCache =
+  { value: { teamId: string; url: string; contentType: string; body: Buffer } } | { error: string };
+
+/**
+ * Guard for `POST /api/lottery/logo-cache` (#249). Bot-authored (behind `x-stage-key`), but the
+ * bytes end up served from this origin, so the gate re-checks everything the bot promised:
+ * raster image/* only (never SVG), bounded size, and a real http(s) source URL — the GET refuses
+ * to serve an entry whose `url` no longer matches the stamped row, which is what keeps a
+ * re-imported team from wearing stale art.
+ */
+function parseLogoCache(body: string): ParsedLogoCache {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(body);
+  } catch {
+    return { error: 'logo-cache needs a JSON body' };
+  }
+  if (!raw || typeof raw !== 'object') return { error: 'logo-cache needs a JSON object' };
+  const r = raw as Record<string, unknown>;
+  if (typeof r.teamId !== 'string' || !r.teamId) return { error: 'logo-cache needs a teamId' };
+  if (typeof r.url !== 'string' || !/^https?:\/\//i.test(r.url)) {
+    return { error: 'logo-cache needs the http(s) source url' };
+  }
+  // Lowercased before the gate: `image/SVG+xml` must not sneak past a case-sensitive check.
+  const contentType = (typeof r.contentType === 'string' ? r.contentType : '').toLowerCase();
+  if (!contentType.startsWith('image/') || contentType.includes('svg')) {
+    return { error: 'logo-cache accepts raster image/* only' };
+  }
+  if (typeof r.data !== 'string' || !r.data) return { error: 'logo-cache needs base64 data' };
+  const bytes = Buffer.from(r.data, 'base64');
+  if (bytes.byteLength === 0) return { error: 'logo-cache data decoded empty' };
+  if (bytes.byteLength > LOGO_PUSH_MAX_BYTES) {
+    return { error: 'logo-cache data exceeds the 512KB cap' };
+  }
+  return { value: { teamId: r.teamId, url: r.url, contentType, body: bytes } };
+}
 
 /**
  * Strip the query string and a single leading `/.proxy` segment. Inside a Discord Activity every
@@ -235,20 +285,18 @@ async function lotteryRoute(
   }
   if (method === 'GET' && path === '/api/lottery/logo') {
     // Same-origin image proxy (#242): the Activity CSP forbids loading ESPN's CDN directly, so
-    // the client asks us by teamId and we fetch EXACTLY the URL the bot stamped on the current
-    // lobby/start row — never a caller-supplied URL, so this can't be turned into an open proxy.
+    // the client asks us by teamId and we serve EXACTLY what the bot vouched for — never a
+    // caller-supplied URL, so this can't be turned into an open proxy.
     // Unauthenticated like `/api/lottery/state`: the URL itself is already public on the wire.
     const teamId = new URLSearchParams(query ?? '').get('team') ?? '';
     const snapshot = deps.lottery.snapshot();
     const rows = snapshot.lobby?.rows ?? snapshot.start?.rows ?? [];
     const url = teamId ? rows.find((row) => row.teamId === teamId)?.logo : undefined;
-    // Belt over the bot-side filter: only http(s) ever reaches a fetch, whatever rode the wire.
-    if (!deps.fetchLogo || !url || !/^https?:\/\//i.test(url)) {
+    // Belt over the bot-side filter: only http(s) is servable, whatever rode the wire.
+    if (!url || !/^https?:\/\//i.test(url)) {
       return json(404, { error: 'no logo for that team' });
     }
-    const image = await deps.fetchLogo(url);
-    if (!image) return json(404, { error: 'logo unavailable' });
-    return {
+    const serve = (image: { contentType: string; body: Buffer }): HttpReply => ({
       status: 200,
       contentType: image.contentType,
       body: '',
@@ -256,7 +304,17 @@ async function lotteryRoute(
       // Stable for the ceremony's lifetime, and the odds table repaints per broadcast — without
       // this every repaint would refetch every avatar through the Discord proxy.
       cacheControl: 'public, max-age=3600',
-    };
+    });
+    // Bot-pushed bytes first (#249): ESPN-hosted art needs the league's cookies and stock logos
+    // arrive as SVG — only the bot can fetch and rasterize those, so it pushes the result here.
+    // The entry must vouch for the CURRENT row URL, or a re-imported team could keep stale art.
+    const pushed = deps.logoStore?.get(teamId);
+    if (pushed && pushed.url === url) return serve(pushed);
+    // Anonymous raster fetch is still the fallback — public hosts (imgur) need no bot help.
+    if (!deps.fetchLogo) return json(404, { error: 'no logo for that team' });
+    const image = await deps.fetchLogo(url);
+    if (!image) return json(404, { error: 'logo unavailable' });
+    return serve(image);
   }
   if (method === 'GET' && path === '/api/lottery/me') {
     const caller = await identifyCaller(deps, headers);
@@ -288,6 +346,15 @@ async function lotteryRoute(
   }
 
   switch (path) {
+    case '/api/lottery/logo-cache': {
+      // Bot-pushed logo bytes (#249). Raster only — the bot rasterizes SVG before pushing, and
+      // this gate makes sure nothing scriptable can be laundered into the same-origin cache.
+      const parsed = parseLogoCache(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      if (!deps.logoStore) return json(503, { error: 'no logo store wired' });
+      deps.logoStore.put(parsed.value);
+      return json(200, { ok: true });
+    }
     case '/api/lottery/lobby': {
       const parsed = parseLotteryLobby(body);
       if ('error' in parsed) return json(400, { error: parsed.error });

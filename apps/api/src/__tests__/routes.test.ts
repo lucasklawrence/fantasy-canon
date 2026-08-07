@@ -37,6 +37,7 @@ function deps(h: DraftHub, over: Partial<RouteDeps> = {}): RouteDeps {
           ? Promise.resolve({ id: token.slice('user-'.length) })
           : Promise.reject(new Error('bad token'))),
     fetchLogo: over.fetchLogo,
+    logoStore: over.logoStore,
     lottery: over.lottery ?? createLotteryStage(),
     lotteryScript: over.lotteryScript ?? ((): string | undefined => 'export const machine = 1;'),
     stageKey: over.stageKey ?? '',
@@ -825,6 +826,129 @@ describe('team-logo proxy (#242)', () => {
     });
     const reply = await routeRequest('GET', '/api/lottery/logo?team=t-b', '', ok);
     expect(reply.status).toBe(200);
+  });
+});
+
+describe('bot-pushed logo cache (#249)', () => {
+  /** A tiny in-memory store matching the RouteDeps shape, so tests see exactly what landed. */
+  function memoryStore() {
+    const map = new Map<string, { url: string; contentType: string; body: Buffer }>();
+    return {
+      put(entry: { teamId: string; url: string; contentType: string; body: Buffer }): void {
+        map.set(entry.teamId, entry);
+      },
+      get: (teamId: string) => map.get(teamId),
+      map,
+    };
+  }
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  const pushBody = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      teamId: 't-b',
+      url: 'https://cdn.example/b.png',
+      contentType: 'image/png',
+      data: PNG.toString('base64'),
+      ...over,
+    });
+
+  it('accepts a bot push behind the stage key and serves it before any anonymous fetch', async () => {
+    const store = memoryStore();
+    const fetched: string[] = [];
+    const d = deps(hub(), {
+      logoStore: store,
+      stageKey: 'sekrit',
+      fetchLogo: (url: string) => {
+        fetched.push(url);
+        return Promise.resolve(null);
+      },
+    });
+    const withKey = { 'x-stage-key': 'sekrit' };
+
+    // The push path is bot-only: no key ⇒ 401, key ⇒ stored.
+    expect((await routeRequest('POST', '/api/lottery/logo-cache', pushBody(), d)).status).toBe(401);
+    expect(
+      (await routeRequest('POST', '/api/lottery/logo-cache', pushBody(), d, withKey)).status,
+    ).toBe(200);
+    expect(store.map.get('t-b')?.body.equals(PNG)).toBe(true);
+
+    // Arm a lobby whose row names that exact URL — the GET serves the pushed bytes and the
+    // anonymous fetcher is never consulted.
+    await routeRequest(
+      'POST',
+      '/api/lottery/lobby',
+      JSON.stringify({
+        title: 'Lottery',
+        teamCount: 1,
+        totalBalls: 2,
+        rows: [
+          {
+            teamId: 't-b',
+            team: 'B',
+            balls: 2,
+            firstPct: 100,
+            top3Pct: 100,
+            logo: 'https://cdn.example/b.png',
+          },
+        ],
+      }),
+      d,
+      withKey,
+    );
+    const reply = await routeRequest('GET', '/api/lottery/logo?team=t-b', '', d);
+    expect(reply.status).toBe(200);
+    expect(reply.bodyBytes).toEqual(PNG);
+    expect(fetched).toEqual([]);
+  });
+
+  it('refuses a pushed entry whose source URL no longer matches the stamped row', async () => {
+    const store = memoryStore();
+    store.put({
+      teamId: 't-b',
+      url: 'https://cdn.example/OLD.png',
+      contentType: 'image/png',
+      body: PNG,
+    });
+    const d = deps(hub(), { logoStore: store, fetchLogo: () => Promise.resolve(null) });
+    await routeRequest(
+      'POST',
+      '/api/lottery/lobby',
+      JSON.stringify({
+        title: 'Lottery',
+        teamCount: 1,
+        totalBalls: 2,
+        rows: [
+          {
+            teamId: 't-b',
+            team: 'B',
+            balls: 2,
+            firstPct: 100,
+            top3Pct: 100,
+            logo: 'https://cdn.example/NEW.png',
+          },
+        ],
+      }),
+      d,
+    );
+    // Stale art is worse than no art: the entry is ignored and the (failing) fallback 404s.
+    expect((await routeRequest('GET', '/api/lottery/logo?team=t-b', '', d)).status).toBe(404);
+  });
+
+  it('gates the push payload: raster only, bounded, real source URL', async () => {
+    const store = memoryStore();
+    const d = deps(hub(), { logoStore: store });
+    for (const bad of [
+      pushBody({ contentType: 'image/svg+xml' }),
+      pushBody({ contentType: 'image/SVG+xml' }), // the gate must not be case-sensitive
+      pushBody({ contentType: 'text/html' }),
+      pushBody({ url: 'javascript:alert(1)' }),
+      pushBody({ data: '' }),
+      pushBody({ data: Buffer.alloc(513 * 1024).toString('base64') }),
+      pushBody({ teamId: '' }),
+      'not json',
+    ]) {
+      expect((await routeRequest('POST', '/api/lottery/logo-cache', bad, d)).status).toBe(400);
+    }
+    expect(store.map.size).toBe(0);
   });
 });
 
