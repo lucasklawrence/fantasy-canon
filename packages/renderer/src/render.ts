@@ -898,18 +898,22 @@ function renderLotteryOdds(
   const logoR = Math.min(20, rowH * 0.36);
   // The avatar column shifts the name AND the ball bar together, so the name field keeps its
   // width (the bar gets slightly shorter instead). The tightened cap then clears the bar even
-  // for a name of nothing but full-width caps: 118 + 16×18(W at size 20) = 406 < barX ≈ 422 —
-  // verified against a rendered all-W roster, the pathological worst case.
+  // for a name of nothing but full-width caps and a generous fallback font: 118 + 15×20 (a
+  // worst-case W advance at size 20 — 'Inter' is not guaranteed installed, so the resolved
+  // font varies by host) = 418 < barX ≈ 422 at the default 1080 width. Verified against a
+  // rendered all-W roster, the pathological worst case.
   const logoShift = anyLogo ? logoR * 2 + 14 : 0;
   const nameX = x + logoShift;
-  const nameCap = anyLogo ? 16 : 22;
+  const nameCap = anyLogo ? 15 : 22;
 
   // Right-anchored numeric columns; the ball bar fills the gap between name and numbers.
   const ballsEnd = x + w - 320;
   const firstEnd = x + w - 160;
   const top3End = x + w;
   const barX = x + Math.min(320, w * 0.32) + logoShift;
-  const barMaxW = ballsEnd - barX - 90;
+  // Floored: a caller-overridden narrow canvas can push barX past ballsEnd, and a negative
+  // budget must degrade to stub bars, not negative-width rects.
+  const barMaxW = Math.max(0, ballsEnd - barX - 90);
   const maxBalls = Math.max(1, ...rows.map((r) => r.balls));
 
   const headerStyle = `fill="${theme.colors.muted}" font-family="${theme.fonts.heading}" font-size="15" font-weight="bold"`;

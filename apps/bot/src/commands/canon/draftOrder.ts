@@ -418,12 +418,15 @@ export async function handleDraftOrderSetupSubcommand(
     const notes: string[] = [];
     let resolvedLeagueId: string | undefined;
     let teams: SetupTeam[];
+    let dressing: Promise<SessionLogoDress>;
     if (manualTeams) {
       teams = parseManualTeams(manualTeams).map((team, index) => ({
         teamId: `team-${index + 1}`,
         name: team.name,
         bonusBalls: team.bonusBalls,
       }));
+      // Manual rosters carry no logos — this resolves immediately.
+      dressing = fetchSessionLogoDress(teams, context);
     } else {
       resolvedLeagueId = await resolveLeagueId(interaction, context);
       const leagueId = resolvedLeagueId;
@@ -433,6 +436,11 @@ export async function handleDraftOrderSetupSubcommand(
         );
       }
       teams = await resolveEspnTeams(context, leagueId, season);
+      // Cosmetic only (#242): the Activity's odds table, drop ball, race cars — and, since
+      // #254, the odds/board cards — wear these; the commitment preimage never sees a logo.
+      // Started here so the prefetch overlaps the standings round-trip below, and awaited
+      // BEFORE the re-validation so the check-then-act window never spans it.
+      dressing = fetchSessionLogoDress(teams, context);
       if (weightsMode === 'standings') {
         notes.push(...(await applyStandingsWeights(context, leagueId, season, teams)));
       }
@@ -454,12 +462,7 @@ export async function handleDraftOrderSetupSubcommand(
       names,
     );
 
-    // Cosmetic only (#242): the Activity's odds table, drop ball, race cars — and, since #254,
-    // the odds/board cards — wear these; the commitment preimage never sees a logo. Manual
-    // `teams:` setups simply have none. Fetched (bounded) BEFORE the re-validation below so
-    // the check-then-act window never spans this network wait, and before the preview renders
-    // so the first public card already carries them.
-    const dress = await fetchSessionLogoDress(teams, context);
+    const dress = await dressing;
 
     // Re-validate after the awaits above (ESPN fetch, logo prefetch): if a ceremony started
     // running meanwhile, replacing it now would orphan a live draw.

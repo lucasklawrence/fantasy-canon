@@ -113,6 +113,16 @@ function sniffRasterType(bytes: Buffer): string | null {
 }
 
 /**
+ * SVG has no magic number, so "is it SVG" is a document sniff: an `<svg` tag within the first
+ * chunk of text (past any BOM/whitespace/XML prolog/comments). Only consulted after the raster
+ * sniff came up empty, and only to decide whether to hand the bytes to the rasterizer — which
+ * parses defensively anyway, so a false positive costs one failed parse, never a bad logo.
+ */
+function looksLikeSvg(bytes: Buffer): boolean {
+  return bytes.subarray(0, 1024).toString('utf8').toLowerCase().includes('<svg');
+}
+
+/**
  * Fetch one logo the way only the bot can (#249): cookies for ESPN hosts, SVG flattened to PNG,
  * raster passed through — bounded, and null for anything unusable. The returned contentType is
  * always derived from the bytes (sniffed, or our own rasterizer's PNG), never echoed from the
@@ -154,30 +164,25 @@ export async function fetchLogoForPush(
         return null;
       }
     }
-    const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
-    // The header only screens out things that are clearly not images (HTML error pages, JSON);
-    // acceptance is decided by the magic bytes below. Octet-stream and a missing header pass —
-    // hotlink-protecting CDNs commonly serve real images that way.
-    if (
-      !contentType.startsWith('image/') &&
-      !contentType.startsWith('application/octet-stream') &&
-      contentType !== ''
-    )
-      return null;
+    // The header is not consulted for acceptance at all — CDNs serve real images as
+    // octet-stream, binary/octet-stream, text/plain, or nothing. The body is bounded either
+    // way (readCapped), so the only cost of reading a non-image is one capped read, and the
+    // magic bytes below are the sole authority on what the payload is.
     const declared = Number(res.headers.get('content-length') ?? '0');
     if (declared > LOGO_MAX_BYTES) return null;
     const raw = await readCapped(res, LOGO_MAX_BYTES);
     if (!raw || raw.byteLength === 0) return null;
-    if (contentType.includes('svg')) {
+    const sniffed = sniffRasterType(raw);
+    if (sniffed) return { contentType: sniffed, body: raw };
+    if (looksLikeSvg(raw)) {
       // Stock logos: flatten to PNG here, where resvg already lives. resvg executes nothing and
-      // fetches nothing, so a hostile SVG can at worst fail to parse.
+      // fetches nothing, so a hostile SVG can at worst fail to parse. Detected from the bytes,
+      // like everything else — an SVG behind a generic header still flattens.
       const png = rasterize(raw.toString('utf8'));
       if (!png || png.byteLength > LOGO_MAX_BYTES) return null;
       return { contentType: 'image/png', body: png };
     }
-    const sniffed = sniffRasterType(raw);
-    if (!sniffed) return null;
-    return { contentType: sniffed, body: raw };
+    return null;
   } catch {
     return null;
   }

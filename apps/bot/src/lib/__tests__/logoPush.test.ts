@@ -143,7 +143,7 @@ describe('fetchLogoForPush (#249)', () => {
     ).toBeNull();
   });
 
-  it('keeps WebP for the stage and rescues real images behind octet-stream headers', async () => {
+  it('keeps WebP for the stage and lets the bytes decide regardless of the header', async () => {
     const webp = Buffer.concat([
       Buffer.from('RIFF', 'latin1'),
       Buffer.from([16, 0, 0, 0]),
@@ -153,23 +153,44 @@ describe('fetchLogoForPush (#249)', () => {
     const { impl } = fakeFetch({
       // WebP displayed on the Activity before #254's sniffing — it must keep working (#249).
       'https://i.imgur.com/a.webp': { contentType: 'image/webp', body: webp },
-      // Hotlink-protecting CDNs serve real images as octet-stream; the bytes decide.
+      // Real images behind the generic headers CDNs actually use: all accepted by bytes.
       'https://cdn.example/raw': { contentType: 'application/octet-stream', body: PNG },
-      // No content-type header at all: same rule.
+      'https://cdn.example/s3': { contentType: 'binary/octet-stream', body: PNG },
+      'https://cdn.example/plain': { contentType: 'text/plain', body: JPEG },
       'https://cdn.example/bare': { body: JPEG },
+      // An SVG behind a generic header still reaches the rasterizer — byte-sniffed too.
+      'https://cdn.example/logo': {
+        contentType: 'application/octet-stream',
+        body: Buffer.from('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>', 'utf8'),
+      },
     });
     const kept = await fetchLogoForPush('https://i.imgur.com/a.webp', {}, { fetchImpl: impl });
     expect(kept?.contentType).toBe('image/webp');
-    const octet = await fetchLogoForPush('https://cdn.example/raw', {}, { fetchImpl: impl });
-    expect(octet?.contentType).toBe('image/png');
-    const bare = await fetchLogoForPush('https://cdn.example/bare', {}, { fetchImpl: impl });
-    expect(bare?.contentType).toBe('image/jpeg');
+    for (const [url, type] of [
+      ['https://cdn.example/raw', 'image/png'],
+      ['https://cdn.example/s3', 'image/png'],
+      ['https://cdn.example/plain', 'image/jpeg'],
+      ['https://cdn.example/bare', 'image/jpeg'],
+    ] as const) {
+      const got = await fetchLogoForPush(url, {}, { fetchImpl: impl });
+      expect(got?.contentType).toBe(type);
+    }
+    const rasterized = Buffer.from([7, 7, 7]);
+    const svg = await fetchLogoForPush(
+      'https://cdn.example/logo',
+      {},
+      { fetchImpl: impl, rasterize: () => rasterized },
+    );
+    expect(svg).toEqual({ contentType: 'image/png', body: rasterized });
   });
 
   it('returns null for errors, non-images, oversize bodies, junk URLs, and unparseable SVG', async () => {
     const { impl } = fakeFetch({
       'https://a.example/401': { status: 401 },
-      'https://a.example/html': { contentType: 'text/html', body: PNG },
+      'https://a.example/html': {
+        contentType: 'text/html',
+        body: Buffer.from('<html>not an image</html>', 'utf8'),
+      },
       'https://a.example/big': {
         contentType: 'image/png',
         body: Buffer.alloc(LOGO_MAX_BYTES + 1),

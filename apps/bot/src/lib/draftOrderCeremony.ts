@@ -576,13 +576,19 @@ export async function buildAdjustedPreviewPost(
   };
 }
 
+/** What the card renderer can actually draw (resvg's `<image>` decoders). The byte cache can
+ * hold more — WebP rides it to the stage (#249) — but building a data URI the renderer's gate
+ * would only scan and reject wastes ~700KB of string work per team per card. */
+const CARD_RASTER_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
+
 /**
  * A team's logo as a card-ready data URI (#254), or undefined — which also SCRUBS the http(s)
  * URL `oddsRows` carries for the stage: the renderer must only ever see local bytes.
  */
 function cardLogo(session: CeremonySession, teamId: string | undefined): string | undefined {
   const bytes = teamId !== undefined ? session.logoBytes?.get(teamId) : undefined;
-  return bytes ? `data:${bytes.contentType};base64,${bytes.data}` : undefined;
+  if (!bytes || !CARD_RASTER_TYPES.has(bytes.contentType)) return undefined;
+  return `data:${bytes.contentType};base64,${bytes.data}`;
 }
 
 /** Odds rows dressed for the renderer (#254): stage URLs out, data URIs in where we have bytes. */
