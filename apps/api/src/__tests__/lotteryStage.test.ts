@@ -582,11 +582,91 @@ describe('row logos ride the wire untouched (#242)', () => {
   });
 });
 
+describe('adjustAll — the level-all tool (#252)', () => {
+  it('levels every team in one act: one event, equal odds, full pending set', () => {
+    const stage = createLotteryStage();
+    stage.lobby({ ...EDITABLE, guildId: 'g1' });
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+
+    stage.adjustAll(4);
+
+    expect(events).toHaveLength(1);
+    const event = events[0] as { adjustedAll?: unknown; adjustments?: unknown };
+    expect(event.adjustedAll).toEqual({ balls: 4, guildId: 'g1' });
+    const snap = stage.snapshot();
+    expect(snap.lobby?.rows.map((r) => r.balls)).toEqual([4, 4, 4]);
+    expect(snap.lobby?.totalBalls).toBe(12);
+    // Equal counts land as exact equal odds, recomputed — not carried over.
+    for (const row of snap.lobby?.rows ?? []) {
+      expect(row.firstPct).toBeCloseTo(100 / 3, 5);
+    }
+    // The whole field is pending until `begin` drains it, like any stepper edit.
+    expect(snap.adjustments).toEqual([
+      { teamId: 't-c', balls: 4 },
+      { teamId: 't-b', balls: 4 },
+      { teamId: 't-a', balls: 4 },
+    ]);
+  });
+
+  it('refuses outside an editable lobby: no lobby, sealed, frozen, or no team ids', () => {
+    const stage = createLotteryStage();
+    expect(() => stage.adjustAll(3)).toThrow(StageNotEditableError);
+    stage.lobby(LOBBY); // no teamIds — armed read-only
+    expect(() => stage.adjustAll(3)).toThrow(StageNotEditableError);
+
+    const frozen = createLotteryStage();
+    frozen.lobby(EDITABLE);
+    frozen.requestBegin({
+      delaySeconds: 20,
+      direction: 'worst-to-first',
+      visual: 'machine',
+      ballFaces: 'numbers',
+    });
+    expect(() => frozen.adjustAll(3)).toThrow(StageNotEditableError);
+  });
+});
+
+describe('setAuditMode — the chatter preference (#252)', () => {
+  it('rides the wire only when non-default, and survives re-arms', () => {
+    const stage = createLotteryStage();
+    stage.lobby(EDITABLE);
+    expect(stage.snapshot().auditMode).toBeUndefined(); // 'live' is the silent default
+
+    stage.setAuditMode('seal-only');
+    expect(stage.snapshot().auditMode).toBe('seal-only');
+
+    // A mini-game or re-import re-arm republishes the lobby — the preference must not flip back.
+    stage.lobby({ ...EDITABLE, keepAdjustments: true });
+    expect(stage.snapshot().auditMode).toBe('seal-only');
+    stage.lobby(EDITABLE);
+    expect(stage.snapshot().auditMode).toBe('seal-only');
+
+    // …but it dies with the lobby lifecycle.
+    stage.start(START);
+    expect(stage.snapshot().auditMode).toBeUndefined();
+  });
+
+  it('is a commissioner write like the rest: lobby-phase only, frozen while sealing', () => {
+    const stage = createLotteryStage();
+    expect(() => stage.setAuditMode('seal-only')).toThrow(StageNotEditableError);
+    stage.lobby(EDITABLE);
+    stage.requestBegin({
+      delaySeconds: 20,
+      direction: 'worst-to-first',
+      visual: 'machine',
+      ballFaces: 'numbers',
+    });
+    expect(() => stage.setAuditMode('live')).toThrow(StageNotEditableError);
+  });
+});
+
 describe('requestBegin — the in-Activity seal-and-start doorbell (#233)', () => {
   const REQUEST = {
     delaySeconds: 20,
     direction: 'worst-to-first',
     visual: 'machine',
+    ballFaces: 'numbers',
     requestedBy: 'commish',
   } as const;
 
@@ -661,19 +741,58 @@ describe('lottery payload guards', () => {
     // Absent `visual` defaults to the machine — an older bundle simply has no picker (#235).
     expect(
       parseLotteryBegin(JSON.stringify({ delaySeconds: 20, direction: 'worst-to-first' })),
-    ).toEqual({ value: { delaySeconds: 20, direction: 'worst-to-first', visual: 'machine' } });
+    ).toEqual({
+      value: {
+        delaySeconds: 20,
+        direction: 'worst-to-first',
+        visual: 'machine',
+        ballFaces: 'numbers',
+      },
+    });
     expect(
       parseLotteryBegin(JSON.stringify({ delaySeconds: 5, direction: 'first-to-last' })),
-    ).toEqual({ value: { delaySeconds: 5, direction: 'first-to-last', visual: 'machine' } });
+    ).toEqual({
+      value: {
+        delaySeconds: 5,
+        direction: 'first-to-last',
+        visual: 'machine',
+        ballFaces: 'numbers',
+      },
+    });
     expect(
       parseLotteryBegin(
         JSON.stringify({ delaySeconds: 10, direction: 'worst-to-first', visual: 'race' }),
       ),
-    ).toEqual({ value: { delaySeconds: 10, direction: 'worst-to-first', visual: 'race' } });
+    ).toEqual({
+      value: {
+        delaySeconds: 10,
+        direction: 'worst-to-first',
+        visual: 'race',
+        ballFaces: 'numbers',
+      },
+    });
     // Present-but-junk visual is refused like the rest of the vocabulary, not coerced.
     expect(
       parseLotteryBegin(
         JSON.stringify({ delaySeconds: 10, direction: 'worst-to-first', visual: 'zoetrope' }),
+      ),
+    ).toHaveProperty('error');
+    // Same rule for the ball faces (#252): 'logos' passes, junk is refused.
+    expect(
+      parseLotteryBegin(
+        JSON.stringify({ delaySeconds: 10, direction: 'worst-to-first', ballFaces: 'logos' }),
+      ),
+    ).toEqual({
+      value: {
+        delaySeconds: 10,
+        direction: 'worst-to-first',
+        visual: 'machine',
+        ballFaces: 'logos',
+      },
+    });
+    expect(
+      parseLotteryBegin(
+        JSON.stringify({ delaySeconds: 10, direction: 'worst-to-first', ballFaces: 'emoji' }),
       ),
     ).toHaveProperty('error');
     // Closed vocabulary: this body comes from the public Activity client, and the delay becomes
@@ -700,7 +819,12 @@ describe('lottery payload guards', () => {
       }),
     );
     expect(spoofed).toEqual({
-      value: { delaySeconds: 20, direction: 'worst-to-first', visual: 'machine' },
+      value: {
+        delaySeconds: 20,
+        direction: 'worst-to-first',
+        visual: 'machine',
+        ballFaces: 'numbers',
+      },
     });
   });
 

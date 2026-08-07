@@ -76,7 +76,15 @@ interface BallMeta {
   fadeStart?: number;
 }
 
-export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
+/**
+ * `getLogo` (#252): resolve a team's decoded logo for the pile's ball faces, or null for the
+ * classic numbered ball. Resolved per sprite build — the caller gates it on the ceremony's
+ * `ballFaces` mode, so the lobby pile and numbers-mode ceremonies never pay for it.
+ */
+export function createHopperSim(
+  canvas: HTMLCanvasElement,
+  getLogo: (team: string) => CanvasImageSource | null = () => null,
+): HopperSim {
   const reducedMotion =
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -290,7 +298,10 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
         meta.set(body, {
           num,
           team: range.team,
-          sprite: buildBallSprite(String(num), range.hue, radius, dpr),
+          // Logo faces (#252) keep the number badged on top (ballSprite's backing disc) where
+          // the radius permits — the number is the commitment made visible, so it yields only
+          // to physical unreadability.
+          sprite: buildBallSprite(String(num), range.hue, radius, dpr, getLogo(range.team)),
         });
         Composite.add(engine.world, body);
       }

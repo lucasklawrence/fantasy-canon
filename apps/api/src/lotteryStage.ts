@@ -31,7 +31,9 @@ import type {
   LotteryAbort,
   LotteryAbortRequest,
   LotteryAdjustment,
+  LotteryAdjustAllDetail,
   LotteryAdjustmentDetail,
+  LotteryAuditMode,
   LotteryBeat,
   LotteryBeginRequest,
   LotteryClear,
@@ -110,6 +112,18 @@ export interface LotteryStage {
    * {@link LotteryStage.isCommissioner} first.
    */
   adjust(adjustment: LotteryAdjustment): void;
+  /**
+   * Level every team to the same ball count in one act (#252) — the Activity's "set all to N"
+   * tool. One recompute, one broadcast, one pending set; the broadcast carries an
+   * {@link LotteryAdjustAllDetail} so the bot posts one audit line instead of twelve. Same
+   * guards as {@link LotteryStage.adjust}.
+   */
+  adjustAll(balls: number): void;
+  /**
+   * Set the audit chatter preference (#252). Commissioner-gated like every lobby write; frozen
+   * while a begin is pending (#233's rule). Survives re-arms, resets when the lobby dies.
+   */
+  setAuditMode(mode: LotteryAuditMode): void;
   /**
    * Apply a commissioner's in-Activity display-name fix (#219) and re-broadcast the lobby. Same
    * lobby-only guard as {@link LotteryStage.adjust}; additionally throws
@@ -221,6 +235,8 @@ export function parseLotteryStart(body: string): Parsed<LotteryStart> {
       // Unknown values are dropped rather than rejected (#235): the visual is presentation-only,
       // so a newer bot's vocabulary degrades to the machine instead of stalling the ceremony.
       ...(r.visual === 'machine' || r.visual === 'race' ? { visual: r.visual } : {}),
+      // Same rule for the ball faces (#252): numbers is the absent default, junk degrades.
+      ...(r.ballFaces === 'logos' ? { ballFaces: 'logos' as const } : {}),
     },
   };
 }
@@ -425,7 +441,7 @@ export const BEGIN_DELAY_CHOICES = [5, 10, 20, 30] as const;
  */
 export function parseLotteryBegin(
   body: string,
-): Parsed<Pick<LotteryBeginRequest, 'delaySeconds' | 'direction' | 'visual'>> {
+): Parsed<Pick<LotteryBeginRequest, 'delaySeconds' | 'direction' | 'visual' | 'ballFaces'>> {
   const parsed = parseJson(body);
   if ('error' in parsed) return parsed;
   const r = parsed.value;
@@ -440,13 +456,40 @@ export function parseLotteryBegin(
   if (r.visual !== undefined && r.visual !== 'machine' && r.visual !== 'race') {
     return { error: 'begin needs visual "machine" or "race"' };
   }
+  // Same shape for the ball faces (#252): absent ⇒ numbers, junk rejected.
+  if (r.ballFaces !== undefined && r.ballFaces !== 'numbers' && r.ballFaces !== 'logos') {
+    return { error: 'begin needs ballFaces "numbers" or "logos"' };
+  }
   return {
     value: {
       delaySeconds: r.delaySeconds as number,
       direction: r.direction,
       visual: r.visual === 'race' ? 'race' : 'machine',
+      ballFaces: r.ballFaces === 'logos' ? 'logos' : 'numbers',
     },
   };
+}
+
+/** Guard for `POST /api/lottery/audit-mode` (#252) — a two-word closed vocabulary. */
+export function parseLotteryAuditMode(body: string): Parsed<{ mode: LotteryAuditMode }> {
+  const parsed = parseJson(body);
+  if ('error' in parsed) return parsed;
+  const r = parsed.value;
+  if (r.mode !== 'live' && r.mode !== 'seal-only') {
+    return { error: 'audit-mode needs mode "live" or "seal-only"' };
+  }
+  return { value: { mode: r.mode } };
+}
+
+/** Guard for `POST /api/lottery/adjust-all` (#252) — same public-client rigor as `adjust`. */
+export function parseLotteryAdjustAll(body: string): Parsed<{ balls: number }> {
+  const parsed = parseJson(body);
+  if ('error' in parsed) return parsed;
+  const r = parsed.value;
+  if (!isPosInt(r.balls) || r.balls > MAX_TEAM_BALLS) {
+    return { error: `adjust-all needs balls between 1 and ${MAX_TEAM_BALLS}` };
+  }
+  return { value: { balls: r.balls } };
 }
 
 /** Guard for `POST /api/lottery/clear` — an optional guild scope is the whole payload. */
@@ -542,6 +585,13 @@ export function createLotteryStage(): LotteryStage {
   /** The commissioner asked to seal the bag and start the draw; only the bot can (#233). */
   let beginRequested: LotteryBeginRequest | undefined;
   /**
+   * Audit chatter preference (#252): 'live' (default) posts a silent line per edit, 'seal-only'
+   * saves it all for begin's adjusted odds card. Survives re-arms (a mini-game or re-import
+   * republishing the lobby must not silently flip the commissioner's preference back on) and
+   * dies with the lobby lifecycle in {@link dropLobby}.
+   */
+  let auditMode: LotteryAuditMode = 'live';
+  /**
    * Monotonic arm counter for {@link LotteryLobby.armedSeq} (#232). Seeded from the clock so the
    * values a restarted api hands out never collide with the previous process's — a client that
    * kept its iframe open across the restart must still see the next arm as new.
@@ -568,6 +618,7 @@ export function createLotteryStage(): LotteryStage {
     renames?: LotteryRename[];
     reimportRequested?: boolean;
     beginRequested?: LotteryBeginRequest;
+    auditMode?: LotteryAuditMode;
   } {
     return {
       ...(adjustments.size > 0
@@ -578,6 +629,7 @@ export function createLotteryStage(): LotteryStage {
         : {}),
       ...(reimportRequested ? { reimportRequested: true } : {}),
       ...(beginRequested ? { beginRequested } : {}),
+      ...(auditMode !== 'live' ? { auditMode } : {}),
     };
   }
 
@@ -593,6 +645,7 @@ export function createLotteryStage(): LotteryStage {
     renames = new Map();
     reimportRequested = false;
     beginRequested = undefined;
+    auditMode = 'live';
   }
 
   return {
@@ -706,6 +759,28 @@ export function createLotteryStage(): LotteryStage {
       // exactly what changed, so nobody has to diff two lobbies to describe a human's action.
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), adjusted: detail });
     },
+    adjustAll(balls) {
+      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
+      const pending = new Map<string, number>();
+      for (const row of lobby.rows) {
+        if (row.teamId === undefined) {
+          throw new StageNotEditableError(
+            'this lobby was armed without team ids, so it cannot be edited',
+          );
+        }
+        pending.set(row.teamId, balls);
+      }
+      // One recompute for the whole field — applyAdjustments re-validates and re-derives odds
+      // exactly as a single-team edit does, so equal counts land as exact equal odds.
+      const rows = applyAdjustments(lobby.rows, pending);
+      const detail: LotteryAdjustAllDetail = {
+        balls,
+        ...(lobby.guildId ? { guildId: lobby.guildId } : {}),
+      };
+      adjustments = pending;
+      lobby = { ...lobby, rows, totalBalls: rows.reduce((sum, row) => sum + row.balls, 0) };
+      emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), adjustedAll: detail });
+    },
     rename(next) {
       if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
       const target = lobby.rows.find((row) => row.teamId === next.teamId);
@@ -725,6 +800,11 @@ export function createLotteryStage(): LotteryStage {
       const rows = applyRenames(lobby.rows, renames);
       lobby = { ...lobby, rows };
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), renamed: detail });
+    },
+    setAuditMode(mode) {
+      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
+      auditMode = mode;
+      emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
     requestReimport() {
       if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();

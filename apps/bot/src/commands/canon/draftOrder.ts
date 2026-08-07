@@ -712,8 +712,14 @@ export function postActivityEditLine(
       return false;
     }
     // Team names come from ESPN, so a league could have one called `@everyone`. This announcement
-    // never needs to mention anyone; without this it would ping the server on every edit.
-    await channel.send({ content, allowedMentions: { parse: [] } });
+    // never needs to mention anyone; without this it would ping the server on every edit. The
+    // SuppressNotifications flag (#252, live commissioner feedback) keeps the line as channel
+    // record without badging the whole league for every stepper tap.
+    await channel.send({
+      content,
+      allowedMentions: { parse: [] },
+      flags: MessageFlags.SuppressNotifications,
+    });
     return true;
   };
 }
@@ -926,6 +932,7 @@ export function performActivityBegin(
         : DEFAULT_REVEAL_DELAY_SECONDS;
     const direction = request.direction === 'first-to-last' ? 'first-to-last' : 'worst-to-first';
     const visual = request.visual === 'race' ? 'race' : 'machine';
+    const ballFaces = request.ballFaces === 'logos' ? 'logos' : 'numbers';
 
     const channel = await client.channels.fetch(session.lobbyChannelId).catch(() => null);
     if (!channel?.isSendable()) {
@@ -1010,6 +1017,7 @@ export function performActivityBegin(
       delayMs: delaySeconds * 1000,
       direction,
       visual,
+      ballFaces,
       store: createFileCeremonyStore(),
       stage,
     }).catch((error) => {

@@ -54,12 +54,32 @@ export interface LotteryStart {
    */
   visual?: LotteryVisual;
   /**
+   * What the hopper pile's balls wear (#252): numbers (default — the published commitment made
+   * visible) or the teams' logos with the ball number badged on top where the radius permits.
+   * Rides `start` for the same reason `visual` does: one spectacle, one crowd (ADR 0008). The
+   * audit trail survives either way — the odds table's ball-range labels and the drop ball's
+   * `#N` text never change. Absent ⇒ `'numbers'`.
+   */
+  ballFaces?: LotteryBallFaces;
+  /**
    * Originating guild. The single process-wide stage serves one live ceremony at a time; a
    * different guild's `start` during a live reveal is rejected (that bot falls back to its
    * in-channel reveal) so two ceremonies can never interleave on shared screens.
    */
   guildId?: string;
 }
+
+/** Hopper-ball face mode (#252) — see {@link LotteryStart.ballFaces}. */
+export type LotteryBallFaces = 'numbers' | 'logos';
+
+/**
+ * How chatty the in-channel audit trail is while the lobby is editable (#252, commissioner
+ * feedback): `'live'` posts one silent line per change (#220), `'seal-only'` stays quiet and
+ * lets `begin`'s adjusted odds card be the single finalized record. The fairness invariant is
+ * identical in both — the bag's fresh public preview always posts before the commitment binds
+ * anything (ADR 0006); this only tunes the play-by-play.
+ */
+export type LotteryAuditMode = 'live' | 'seal-only';
 
 /** Drum-roll: the next pick is about to be revealed. */
 export interface LotteryBeat {
@@ -202,6 +222,8 @@ export interface LotterySnapshot {
    * lifetime every client's begin button spends disabled.
    */
   beginRequested?: LotteryBeginRequest;
+  /** Audit chatter preference (#252). Omitted ⇒ `'live'`. Lobby-lifecycle-scoped. */
+  auditMode?: LotteryAuditMode;
 }
 
 /**
@@ -256,11 +278,22 @@ export interface LotteryBeginRequest {
   direction: 'worst-to-first' | 'first-to-last';
   /** Reveal visualization (#235) — the bot echoes it onto {@link LotteryStart.visual}. */
   visual: LotteryVisual;
+  /** Hopper-ball faces (#252) — the bot echoes it onto {@link LotteryStart.ballFaces}. */
+  ballFaces: LotteryBallFaces;
   /**
    * Discord user id of the commissioner who pressed the button, stamped server-side from the
    * verified bearer — never client-supplied — so the in-channel audit line can name them.
    */
   requestedBy?: string;
+}
+
+/**
+ * One bulk ball-set (#252) — the commissioner leveled every team to the same count in a single
+ * act. Carried on the broadcast so the bot posts ONE audit line instead of one per team.
+ */
+export interface LotteryAdjustAllDetail {
+  balls: number;
+  guildId?: string;
 }
 
 /** The events fanned out over the WS, tagged for the client. */
@@ -283,8 +316,12 @@ export type LotteryEvent =
       reimportRequested?: boolean;
       /** Mirrors {@link LotterySnapshot.beginRequested}. */
       beginRequested?: LotteryBeginRequest;
+      /** Mirrors {@link LotterySnapshot.auditMode} (#252). */
+      auditMode?: LotteryAuditMode;
       /** Set only when this broadcast came from a commissioner edit rather than a bot re-arm. */
       adjusted?: LotteryAdjustmentDetail;
+      /** Set only when this broadcast came from a bulk level-all (#252) — one audit line. */
+      adjustedAll?: LotteryAdjustAllDetail;
       /** Set only when this broadcast came from a commissioner rename. */
       renamed?: LotteryRenameDetail;
     }
