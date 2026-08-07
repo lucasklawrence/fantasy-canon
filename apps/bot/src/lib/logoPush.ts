@@ -92,8 +92,10 @@ async function readCapped(res: Response, cap: number): Promise<Buffer | null> {
  * The content type a raster body actually is, from its magic bytes — never the remote header.
  * The header is attacker-influenced (a logo URL is member-controlled), and downstream it is
  * embedded verbatim in a `data:` URI that the renderer interpolates into card SVG — so it must
- * be one of these fixed strings, nothing a server said. The allowlist is exactly what resvg
- * decodes inside `<image>`; anything else would render as a conspicuous empty avatar ring.
+ * be one of these fixed strings, nothing a server said. WebP is included for the stage push
+ * (#249) — browsers render it on the Activity's balls and cars — even though the cards' own
+ * gate only draws what resvg decodes (PNG/JPEG/GIF), so a WebP league keeps its Activity art
+ * and simply gets plain card rows.
  */
 function sniffRasterType(bytes: Buffer): string | null {
   if (bytes.length >= 4 && bytes.readUInt32BE(0) === 0x89504e47) return 'image/png';
@@ -101,6 +103,12 @@ function sniffRasterType(bytes: Buffer): string | null {
     return 'image/jpeg';
   if (bytes.length >= 6 && /^GIF8[79]a$/.test(bytes.subarray(0, 6).toString('latin1')))
     return 'image/gif';
+  if (
+    bytes.length >= 12 &&
+    bytes.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    bytes.subarray(8, 12).toString('latin1') === 'WEBP'
+  )
+    return 'image/webp';
   return null;
 }
 
@@ -147,7 +155,15 @@ export async function fetchLogoForPush(
       }
     }
     const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
-    if (!contentType.startsWith('image/')) return null;
+    // The header only screens out things that are clearly not images (HTML error pages, JSON);
+    // acceptance is decided by the magic bytes below. Octet-stream and a missing header pass —
+    // hotlink-protecting CDNs commonly serve real images that way.
+    if (
+      !contentType.startsWith('image/') &&
+      !contentType.startsWith('application/octet-stream') &&
+      contentType !== ''
+    )
+      return null;
     const declared = Number(res.headers.get('content-length') ?? '0');
     if (declared > LOGO_MAX_BYTES) return null;
     const raw = await readCapped(res, LOGO_MAX_BYTES);
@@ -217,15 +233,18 @@ export async function prefetchLogoBytes(
 /**
  * Push every fetchable logo for this roster to the stage's cache, one team at a time,
  * best-effort. `bytes` (the #254 prefetch) is consulted first so nothing is fetched twice;
- * teams it lacks fall back to a live fetch. Returns the count that landed (for the log line);
- * a stage without the `logo` method — a test double, an older api — means zero pushes.
+ * teams it lacks fall back to a live fetch — and a fallback that lands is written BACK into
+ * `bytes`, so the cards rendered later (hype, adjusted preview, the finish board) wear
+ * everything the stage wears instead of permanently missing whatever raced the prefetch cap.
+ * Returns the count that landed (for the log line); a stage without the `logo` method — a
+ * test double, an older api — means zero pushes.
  */
 export async function pushTeamLogos(
   stage: InspectableRevealStage,
   logos: ReadonlyMap<string, string>,
   cookies: LogoPushCookies,
   deps: LogoPushDeps = {},
-  bytes?: ReadonlyMap<string, LogoBytes>,
+  bytes?: Map<string, LogoBytes>,
 ): Promise<number> {
   if (!stage.logo || logos.size === 0) return 0;
   // If the cache came from a prefetch whose stragglers are still in flight, wait them out —
@@ -237,6 +256,7 @@ export async function pushTeamLogos(
     const image = cached ?? (await fetchLogoForPush(url, cookies, deps));
     if (!image) continue;
     const data = 'data' in image ? image.data : image.body.toString('base64');
+    if (!cached) bytes?.set(teamId, { contentType: image.contentType, data });
     try {
       await stage.logo({ teamId, url, contentType: image.contentType, data });
       pushed += 1;

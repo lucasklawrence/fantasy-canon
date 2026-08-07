@@ -56,6 +56,9 @@ describe('lottery odds card logos (#254)', () => {
       'data:image/png"/><rect width="1080" height="1080"/><a href=";base64,AAAA',
       // A valid-looking head with a non-base64 payload is just as dead.
       'data:image/png;base64,AAAA"/><rect/>',
+      // Empty and torso payloads: nothing to draw, so no column and no ring either.
+      'data:image/png;base64,',
+      'data:image/png;base64,QUJDRA==',
     ]) {
       const rendered = await renderLotteryOddsCard({
         title: 'Odds',

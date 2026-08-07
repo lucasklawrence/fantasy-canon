@@ -143,6 +143,29 @@ describe('fetchLogoForPush (#249)', () => {
     ).toBeNull();
   });
 
+  it('keeps WebP for the stage and rescues real images behind octet-stream headers', async () => {
+    const webp = Buffer.concat([
+      Buffer.from('RIFF', 'latin1'),
+      Buffer.from([16, 0, 0, 0]),
+      Buffer.from('WEBP', 'latin1'),
+      Buffer.from([1, 2, 3]),
+    ]);
+    const { impl } = fakeFetch({
+      // WebP displayed on the Activity before #254's sniffing — it must keep working (#249).
+      'https://i.imgur.com/a.webp': { contentType: 'image/webp', body: webp },
+      // Hotlink-protecting CDNs serve real images as octet-stream; the bytes decide.
+      'https://cdn.example/raw': { contentType: 'application/octet-stream', body: PNG },
+      // No content-type header at all: same rule.
+      'https://cdn.example/bare': { body: JPEG },
+    });
+    const kept = await fetchLogoForPush('https://i.imgur.com/a.webp', {}, { fetchImpl: impl });
+    expect(kept?.contentType).toBe('image/webp');
+    const octet = await fetchLogoForPush('https://cdn.example/raw', {}, { fetchImpl: impl });
+    expect(octet?.contentType).toBe('image/png');
+    const bare = await fetchLogoForPush('https://cdn.example/bare', {}, { fetchImpl: impl });
+    expect(bare?.contentType).toBe('image/jpeg');
+  });
+
   it('returns null for errors, non-images, oversize bodies, junk URLs, and unparseable SVG', async () => {
     const { impl } = fakeFetch({
       'https://a.example/401': { status: 401 },
@@ -343,6 +366,26 @@ describe('pushTeamLogos (#249)', () => {
     expect(count).toBe(1);
     expect(calls).toHaveLength(1);
     expect(Buffer.from(pushes[0]?.data ?? '', 'base64').equals(JPEG)).toBe(true);
+  });
+
+  it('writes a successful fallback fetch back into the cache, so cards catch up (#254)', async () => {
+    const { impl } = fakeFetch({
+      'https://i.imgur.com/late.jpg': { contentType: 'image/jpeg', body: JPEG },
+    });
+    const pushes: unknown[] = [];
+    // A prefetch cache that missed this team entirely (its host timed out at setup).
+    const bytes = new Map<string, { contentType: string; data: string }>();
+    const count = await pushTeamLogos(
+      stageWith(pushes),
+      new Map([['9', 'https://i.imgur.com/late.jpg']]),
+      {},
+      { fetchImpl: impl },
+      bytes,
+    );
+    expect(count).toBe(1);
+    // The bytes now live in the SAME map the session holds — the finish board will wear them.
+    expect(bytes.get('9')?.contentType).toBe('image/jpeg');
+    expect(Buffer.from(bytes.get('9')?.data ?? '', 'base64').equals(JPEG)).toBe(true);
   });
 
   it('is a quiet no-op against a stage without the logo method', async () => {

@@ -367,6 +367,30 @@ describe('standings-derived weights (#165)', () => {
     expect(lastContent()).toContain('2025 final standings');
   });
 
+  it('slash setup stamps the prefetched logo bytes onto the session (#254)', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      snapshots: [lastSeasonSnapshot(RICH_TEAMS)],
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    logoFetchStub.mockImplementation(() =>
+      Promise.resolve(
+        new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        }),
+      ),
+    );
+    const { interaction } = ceremonyInteraction({ options: { season: 2026 } });
+
+    await handleDraftOrderSetupSubcommand(interaction, context);
+
+    const session = getCeremony('guild-1');
+    // Team 1 has the roster's only real logo URL; the junk-scheme one never fetches.
+    expect(session?.logoBytes?.get('1')?.contentType).toBe('image/png');
+    expect(session?.logoBytes?.has('2')).toBe(false);
+  });
+
   it('weights:equal keeps the flat #164 behavior', async () => {
     const { context } = createMockContext({
       defaultLeagueId: 'league-1',
@@ -1234,6 +1258,26 @@ describe('performActivityReimport (#219)', () => {
     expect(session.names.get('4')).toBe('Delta Ducks');
   });
 
+  it('re-import REPLACES the logo byte cache — stale bytes never outlive their roster (#254)', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const session = espnSession({
+      // Ghost bytes from the pre-re-import roster; the default 404 fetch stub means the
+      // refetched roster's prefetch lands nothing — the cache must still be swapped, not kept.
+      logoBytes: new Map([['a', { contentType: 'image/png', data: 'QUJD' }]]),
+    });
+    const sent: { content?: string; files?: unknown[] }[] = [];
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stageHolding())('guild-1'),
+    ).resolves.toBe(true);
+
+    expect(session.logoBytes?.has('a')).toBe(false);
+    expect(session.logoBytes?.size).toBe(0);
+  });
+
   it('blocks begin while it is publishing, so no commitment precedes the fresh preview', async () => {
     const { context } = createMockContext({
       defaultLeagueId: 'league-1',
@@ -1380,6 +1424,14 @@ describe('performActivitySetup (#253)', () => {
       defaultLeagueId: 'league-1',
       fetchPayloads: { mTeam: FOUR_TEAMS },
     });
+    logoFetchStub.mockImplementation(() =>
+      Promise.resolve(
+        new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        }),
+      ),
+    );
     const sent: ChannelPost[] = [];
     const { stage, releases, arms } = releasingStage();
     const { memo, remembered } = memoWith('lobby-chan');
@@ -1399,6 +1451,8 @@ describe('performActivitySetup (#253)', () => {
     expect(session?.season).toBe(2026);
     expect(session?.state).toBe('GAME_OPEN');
     expect(session?.lobbyChannelId).toBe('lobby-chan');
+    // The doorbell path stamps prefetched logo bytes too (#254) — same as the slash flow.
+    expect(session?.logoBytes?.get('1')?.contentType).toBe('image/png');
     // The arm answers the doorbell (stage-side) and carries the presser as editor.
     expect(arms).toEqual([{ commissionerIds: ['presser'] }]);
     expect(releases).toHaveLength(0);

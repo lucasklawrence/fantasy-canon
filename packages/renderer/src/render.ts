@@ -845,7 +845,9 @@ function renderGrade(
  * execute either, but the contract should say so, not rely on it). Case-insensitive, like
  * every other image gate in the pipeline.
  */
-const CARD_LOGO_URI = /^data:image\/(?:png|jpe?g|gif);base64,[a-z0-9+/]*={0,2}$/i;
+// The 40-char payload floor rejects empty/torso payloads (the smallest real GIF is ~48 chars of
+// base64) so a junk URI never reserves the avatar column or draws a ring around nothing.
+const CARD_LOGO_URI = /^data:image\/(?:png|jpe?g|gif);base64,[a-z0-9+/]{40,}={0,2}$/i;
 
 function isCardLogo(logo: string | undefined): logo is string {
   return logo !== undefined && CARD_LOGO_URI.test(logo);
@@ -894,14 +896,19 @@ function renderLotteryOdds(
   // must never run into the ball bar at barX.
   const anyLogo = rows.some((r) => isCardLogo(r.logo));
   const logoR = Math.min(20, rowH * 0.36);
-  const nameX = anyLogo ? x + logoR * 2 + 14 : x;
-  const nameCap = anyLogo ? 18 : 22;
+  // The avatar column shifts the name AND the ball bar together, so the name field keeps its
+  // width (the bar gets slightly shorter instead). The tightened cap then clears the bar even
+  // for a name of nothing but full-width caps: 118 + 16×18(W at size 20) = 406 < barX ≈ 422 —
+  // verified against a rendered all-W roster, the pathological worst case.
+  const logoShift = anyLogo ? logoR * 2 + 14 : 0;
+  const nameX = x + logoShift;
+  const nameCap = anyLogo ? 16 : 22;
 
   // Right-anchored numeric columns; the ball bar fills the gap between name and numbers.
   const ballsEnd = x + w - 320;
   const firstEnd = x + w - 160;
   const top3End = x + w;
-  const barX = x + Math.min(320, w * 0.32);
+  const barX = x + Math.min(320, w * 0.32) + logoShift;
   const barMaxW = ballsEnd - barX - 90;
   const maxBalls = Math.max(1, ...rows.map((r) => r.balls));
 
@@ -1071,7 +1078,7 @@ function renderLotteryBoard(
     body += logoAvatar(e.logo, `board-logo-${idx}`, badgeEnd + r, cy, r, theme.colors.surface);
     body += `<text x="${nameX}" y="${cy + 8}" fill="${theme.colors.text}" font-family="${theme.fonts.body}" font-size="26"${
       idx === 0 ? ' font-weight="bold"' : ''
-    }>${escape(truncate(e.team, 24))}</text>`;
+    }>${escape(truncate(e.team, anyLogo ? 22 : 24))}</text>`;
     const note = [
       typeof e.balls === 'number' ? `${e.balls} ${e.balls === 1 ? 'ball' : 'balls'}` : '',
       typeof e.oddsPct === 'number' ? `${pct(e.oddsPct)} odds` : '',

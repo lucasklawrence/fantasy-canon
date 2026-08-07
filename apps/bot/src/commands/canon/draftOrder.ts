@@ -73,7 +73,12 @@ import {
   type StageBeginRequest,
   type StageSetupRequest,
 } from '../../lib/lotteryStageWatcher.js';
-import { prefetchLogoBytes, pushTeamLogos, type LogoBytes } from '../../lib/logoPush.js';
+import {
+  prefetchLogoBytes,
+  pushTeamLogos,
+  type LogoBytes,
+  type LogoPushCookies,
+} from '../../lib/logoPush.js';
 import { DEFAULT_WINDOW_MS, runReactionRound } from '../../lib/reactionRound.js';
 
 export const DEFAULT_REVEAL_DELAY_SECONDS = 20;
@@ -250,14 +255,14 @@ const fileChannelMemo: LotteryChannelMemo = {
 };
 
 /** The cookie pair every logo fetch shares — attached only to https ESPN hosts downstream. */
-function espnCookies(context: BotContext): { espnS2?: string; espnSwid?: string } {
+function espnCookies(context: BotContext): LogoPushCookies {
   return { espnS2: context.env.espnS2, espnSwid: context.env.espnSwid };
 }
 
 /** A roster's full logo dress (#254): the URL map plus the prefetched bytes behind it. */
 interface SessionLogoDress {
   logos: Map<string, string>;
-  logoBytes: Map<string, LogoBytes> | undefined;
+  logoBytes: Map<string, LogoBytes>;
 }
 
 /**
@@ -266,16 +271,15 @@ interface SessionLogoDress {
  * stage push and the finish board see more later. Pure fetch, no session writes: callers run
  * this BEFORE their registry re-validation and stamp the result with {@link dressSession}
  * afterwards — a network wait must never sit inside a check-then-act window, and the stamp
- * must never suspend halfway through a roster install.
+ * must never suspend halfway through a roster install. A logo-less roster yields an empty map
+ * (prefetch's own fast path), so "no logos" has exactly one spelling downstream.
  */
 async function fetchSessionLogoDress(
   teams: SetupTeam[],
   context: BotContext,
 ): Promise<SessionLogoDress> {
   const logos = teamLogoMap(teams);
-  const logoBytes =
-    logos.size > 0 ? await prefetchLogoBytes(logos, espnCookies(context)) : undefined;
-  return { logos, logoBytes };
+  return { logos, logoBytes: await prefetchLogoBytes(logos, espnCookies(context)) };
 }
 
 /**
@@ -827,10 +831,13 @@ export function performActivityReimport(
     // this league/season/view, so a cache read would hand back exactly the roster the commissioner
     // is asking us to replace and the re-import would silently do nothing.
     const teams = await resolveEspnTeams(context, leagueId, season, true);
+    // The refetched roster's logo bytes (#254) start fetching now — they need only the roster,
+    // so they overlap the standings round-trip instead of adding to it. Never awaited between
+    // the re-validation below and the roster install, which must stay adjacent. Safe to leave
+    // in flight: the dress never rejects (per-logo failures are swallowed inside the prefetch).
+    const dressing = fetchSessionLogoDress(teams, context);
     const notes = await applyStandingsWeights(context, leagueId, season, teams, true);
-    // The refetched roster's logo bytes (#254), fetched HERE with the other slow round-trips —
-    // never between the re-validation below and the roster install, which must stay adjacent.
-    const dress = await fetchSessionLogoDress(teams, context);
+    const dress = await dressing;
     // Re-validate after the round-trips above (ESPN, logo prefetch) — a `begin`/`abort`/replacing
     // `setup` can land while we were fetching, and rebuilding a session that is no longer current
     // would be a silent clobber of whatever replaced it.
@@ -1170,6 +1177,9 @@ export function performActivitySetup(
 
     try {
       const teams = await resolveEspnTeams(context, leagueId, season);
+      // The logo prefetch (#254) starts now and overlaps the standings round-trip — it needs
+      // only the roster, and it never rejects (per-logo failures are swallowed inside it).
+      const dressing = fetchSessionLogoDress(teams, context);
       const notes = await applyStandingsWeights(context, leagueId, season, teams);
       const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
         teamId: team.teamId,
@@ -1186,9 +1196,9 @@ export function performActivitySetup(
         { teams: configTeams, baseBallCount: 1 },
         names,
       );
-      // Fetched (bounded) before the re-validation below — the check-then-act window must not
+      // Awaited (bounded) before the re-validation below — the check-then-act window must not
       // span this network wait — and before the preview renders so the card wears them (#254).
-      const dress = await fetchSessionLogoDress(teams, context);
+      const dress = await dressing;
 
       // Re-validate after the round-trips above (ESPN, logo prefetch), same as the slash
       // handler: replacing a session that started running meanwhile would orphan a live draw.

@@ -669,7 +669,9 @@ export async function buildHypePost(
   session: CeremonySession,
   note?: string,
 ): Promise<CeremonyPost> {
-  const rows = oddsRows(session);
+  // Already card-dressed: the favorite/long-shot template reads only team/pct fields, and one
+  // call means one pick-odds DP instead of two.
+  const rows = cardOddsRows(session);
   const favorite = rows[0];
   const longShot = rows[rows.length - 1];
   const index = session.hypeCount ?? 0;
@@ -687,7 +689,7 @@ export async function buildHypePost(
   const image = await renderLotteryOddsCard({
     title: session.title,
     subtitle: `${session.config.teams.length} teams • ${totalBalls(session.config)} balls in the hopper`,
-    rows: cardOddsRows(session),
+    rows,
   });
   return {
     kind: 'hype',
