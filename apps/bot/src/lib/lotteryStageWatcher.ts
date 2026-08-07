@@ -206,22 +206,33 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
   /**
    * One line for a bulk level-all (#252), same record-only-on-delivery discipline as `announce`.
    * Marking every covered team at the new count is what keeps the per-team loop (and every later
-   * reconnect snapshot) silent about the same act.
+   * reconnect snapshot) silent about the same act. Routed by the FRAME's guild — the reconcile
+   * already knows whose lobby this is, and a detail without (or with a mismatched) guildId must
+   * not be able to misroute the line. Every covered team's per-team flight key is reserved for
+   * the delivery window, so a frame that lands mid-flight without the `adjustedAll` detail can't
+   * spray the same act as twelve individual lines.
    */
-  function announceBulk(seen: AnnouncedBalls, detail: StageAdjustAllDetail, teams: string[]): void {
+  function announceBulk(
+    seen: AnnouncedBalls,
+    detail: StageAdjustAllDetail,
+    teams: string[],
+    guildId: string | undefined,
+  ): void {
     // A duplicate frame or a reconnect replay of an already-posted level-all is not news.
     if (teams.length === 0 || teams.every((teamId) => seen.get(teamId) === detail.balls)) return;
-    const flight = `all|${key(detail.guildId)}|${detail.balls}`;
-    if (inFlight.has(flight)) return;
-    inFlight.add(flight);
-    void post(detail.guildId, adjustAllLine(detail))
+    const flights = teams.map((teamId) => `${key(guildId)}|${teamId}|${detail.balls}`);
+    if (flights.some((flight) => inFlight.has(flight))) return;
+    for (const flight of flights) inFlight.add(flight);
+    void post(guildId, adjustAllLine(detail))
       .then((delivered) => {
         if (delivered) for (const teamId of teams) seen.set(teamId, detail.balls);
       })
       .catch((error: unknown) => {
         console.error('[draftorder] failed to post an Activity level-all to the channel:', error);
       })
-      .finally(() => inFlight.delete(flight));
+      .finally(() => {
+        for (const flight of flights) inFlight.delete(flight);
+      });
   }
 
   /**
@@ -280,11 +291,14 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     }
 
     // Seal-only audit mode (#252): the commissioner opted out of play-by-play — `begin`'s
-    // adjusted odds card is the single finalized record. The announced maps are still pruned
-    // above and marked below via delivery, so flipping back to 'live' announces only what is
-    // genuinely new. The re-import and begin triggers further down are unaffected: those are
-    // actions, not chatter.
+    // adjusted odds card is the single finalized record. Silence is a choice, not a deferral:
+    // everything pending is marked as seen NOW, so flipping back to 'live' later announces only
+    // edits made after the flip, never a replay of what was deliberately kept quiet. The
+    // re-import and begin triggers further down are unaffected: those are actions, not chatter.
     const quiet = auditMode === 'seal-only';
+    if (quiet) {
+      for (const entry of pending) seen.set(entry.teamId, entry.balls);
+    }
 
     // A bulk level-all (#252) speaks once for every team it covered; the per-team loop below
     // skips those so the same act never also produces twelve individual lines.
@@ -293,6 +307,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
         seen,
         bulk,
         pending.filter((entry) => entry.balls === bulk.balls).map((entry) => entry.teamId),
+        guildId,
       );
     }
 
@@ -318,6 +333,9 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     const stillNamed = new Set(pendingNames.map((entry) => entry.teamId));
     for (const teamId of [...seenNames.keys()]) {
       if (!stillNamed.has(teamId)) seenNames.delete(teamId);
+    }
+    if (quiet) {
+      for (const entry of pendingNames) seenNames.set(entry.teamId, entry.displayName);
     }
     for (const entry of pendingNames) {
       if (quiet) break;

@@ -511,6 +511,67 @@ describe('createStageWatcher (#220)', () => {
     expect(h.posts).toHaveLength(0);
     // …but the re-import request was still honoured — quiet is not dead.
     expect(reimports).toEqual(['g1']);
+
+    // Silence is a choice, not a deferral: flipping back to 'live' with the same pending set
+    // must not replay the edits the commissioner deliberately kept quiet.
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [{ teamId: 't1', team: 'Alpha' }] },
+      adjustments: [{ teamId: 't1', balls: 4 }],
+      renames: [{ teamId: 't1', displayName: 'Alpha Prime' }],
+    });
+    expect(h.posts).toHaveLength(0);
+  });
+
+  it('reserves bulk-covered teams while the bulk line is in flight (#252)', async () => {
+    let release: ((delivered: boolean) => void) | undefined;
+    const h = harness(() => new Promise<boolean>((resolve) => (release = resolve)));
+    h.watcher.start();
+    h.latest().open();
+
+    const pending = [
+      { teamId: 't1', balls: 5 },
+      { teamId: 't2', balls: 5 },
+    ];
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      adjustments: pending,
+      adjustedAll: { balls: 5, guildId: 'g1' },
+    });
+    expect(h.posts).toHaveLength(1); // the bulk line, delivery still pending
+
+    // A frame that lands mid-delivery WITHOUT the bulk detail (a rename broadcast, say) must not
+    // spray the same act as per-team lines — the covered teams are reserved until it settles.
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      adjustments: pending,
+    });
+    expect(h.posts).toHaveLength(1);
+
+    release?.(true);
+    await flush();
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      adjustments: pending,
+    });
+    expect(h.posts).toHaveLength(1); // now recorded as seen — still one line total
+  });
+
+  it('routes the bulk line by the frame guild, not the detail (#252)', async () => {
+    const h = harness();
+    h.watcher.start();
+    h.latest().open();
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      adjustments: [{ teamId: 't1', balls: 3 }],
+      adjustedAll: { balls: 3 }, // no guildId on the detail
+    });
+    expect(h.posts).toHaveLength(1);
+    expect(h.posts[0].guildId).toBe('g1');
   });
 
   it('honours a begin request exactly once while it is in flight (#233)', async () => {

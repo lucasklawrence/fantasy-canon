@@ -40,6 +40,12 @@ export interface HopperSim {
    * {@link HopperSim.removeTeam}, which the reveal path calls first).
    */
   sync(rows: { team: string; balls: number }[], drawnTeams: string[]): void;
+  /**
+   * Rebuild every ball's face in place (#252) — for a face-mode change (`sync` short-circuits on
+   * an unchanged bag, so the lobby pile would otherwise stay numbered into a logo-face ceremony)
+   * or a logo that decoded after the pile was built.
+   */
+  reface(): void;
   /** Drum-roll boil on/off. */
   agitate(on: boolean): void;
   /** The suck moment: kick the pile away from the chute mouth so the extraction has recoil. */
@@ -72,6 +78,9 @@ interface BallMeta {
   num: number;
   team: string;
   sprite: HTMLCanvasElement;
+  /** What the sprite was built with, so {@link HopperSim.reface} can rebuild in place (#252). */
+  hue: number;
+  radius: number;
   /** Fade start timestamp once the team is drawn; the body is removed when the fade ends. */
   fadeStart?: number;
 }
@@ -298,6 +307,8 @@ export function createHopperSim(
         meta.set(body, {
           num,
           team: range.team,
+          hue: range.hue,
+          radius,
           // Logo faces (#252) keep the number badged on top (ballSprite's backing disc) where
           // the radius permits — the number is the commitment made visible, so it yields only
           // to physical unreadability.
@@ -342,6 +353,17 @@ export function createHopperSim(
       }
       if (reducedMotion) settleAndPaint();
       else wake();
+    },
+    reface(): void {
+      for (const entry of meta.values()) {
+        entry.sprite = buildBallSprite(
+          String(entry.num),
+          entry.hue,
+          entry.radius,
+          dpr,
+          getLogo(entry.team),
+        );
+      }
     },
     agitate(on): void {
       if (agitating === on) return;

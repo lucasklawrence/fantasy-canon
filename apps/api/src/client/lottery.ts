@@ -188,10 +188,12 @@ function ensureLogos(rows: LotteryOddsRow[]): void {
     img.decoding = 'async';
     img.onload = () => {
       // Everything already painted with the fallback face catches up now rather than at the next
-      // broadcast: the odds table repaints, the race refaces in place (its `sync` no-ops on an
-      // unchanged bag), and a drop ball on screen re-dresses.
+      // broadcast: the odds table repaints, both sims reface in place (their `sync` no-ops on an
+      // unchanged bag), and a drop ball on screen re-dresses. The hopper reface is a no-op cost
+      // outside logo-face mode — its lookup returns null there.
       if (currentLobby) repaintLobbyEdits();
       raceSim?.reface();
+      hopperSim?.reface();
       redressDropBall();
     };
     img.onerror = () => logoImages.set(teamId, { url, img: 'failed' });
@@ -806,8 +808,19 @@ function renderLobby(lobby: LotteryLobby): void {
   }
 }
 
+/** The last ball-face mode the hopper was built/refaced under (#252), so a change is one-shot. */
+let facesApplied: string | undefined;
+
 function renderWaiting(start: LotteryStart, drawn: { pick: number; team: string }[] = []): void {
   currentStart = start; // remembered for pull scheduling (delayMs) across later phases
+  // A face-mode change (#252): the lobby built a numbered pile, and the hopper's `sync`
+  // deliberately short-circuits on an unchanged bag — so the moment the committed start declares
+  // its mode, reface in place. Guarded so the per-reveal repaints don't rebuild 78 sprites each.
+  const faces = start.ballFaces ?? 'numbers';
+  if (faces !== facesApplied) {
+    facesApplied = faces;
+    hopperSim?.reface();
+  }
   // The commitment binds the bag: past this point nothing on screen is editable, so drop the
   // lobby we were holding and retract the offer (#210) — the seal controls with it (#233), or a
   // slash-started draw would leave a live-looking begin button on the waiting screen.
