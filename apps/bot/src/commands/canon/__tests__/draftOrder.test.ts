@@ -37,7 +37,7 @@ import {
   postActivityEditLine,
   recoverInterruptedCeremonies,
 } from '../draftOrder.js';
-import type { ButtonInteraction } from 'discord.js';
+import { MessageFlags, type ButtonInteraction } from 'discord.js';
 import { createMemoryCeremonyStore, type PersistedCeremony } from '../../../lib/ceremonyStore.js';
 import type { StageBeginRequest } from '../../../lib/lotteryStageWatcher.js';
 import type {
@@ -1035,13 +1035,20 @@ describe('postActivityEditLine (#220)', () => {
     return session;
   }
 
-  it('posts to the channel where that guild’s setup ran', async () => {
-    const sent: { content?: string }[] = [];
+  it('posts to the channel where that guild’s setup ran — silent, mentions suppressed', async () => {
+    const sent: { content?: string; flags?: unknown }[] = [];
     openSession();
     await expect(postActivityEditLine(clientWith(sent))('guild-1', '🛠 line')).resolves.toBe(true);
     // Mentions suppressed: team names come from ESPN, so a league could have one called
-    // `@everyone` and every edit line would ping the server.
-    expect(sent).toEqual([{ content: '🛠 line', allowedMentions: { parse: [] } }]);
+    // `@everyone` and every edit line would ping the server. And the whole line is a silent
+    // message (#252, live commissioner feedback): channel record, no league-wide badge.
+    expect(sent).toEqual([
+      {
+        content: '🛠 line',
+        allowedMentions: { parse: [] },
+        flags: MessageFlags.SuppressNotifications,
+      },
+    ]);
   });
 
   it('drops an edit for a guild this bot is not running a ceremony for', async () => {
@@ -1350,9 +1357,11 @@ describe('performActivityBegin (#233)', () => {
     expect(calls[0].stage).toBe(stage);
     // No visual on the request (an older api) ⇒ the machine, never undefined pass-through.
     expect(calls[0].visual).toBe('machine');
+    // Same absent-default rule for the ball faces (#252).
+    expect(calls[0].ballFaces).toBe('numbers');
   });
 
-  it('passes the race visual through to the ceremony (#235)', async () => {
+  it('passes the race visual and logo faces through to the ceremony (#235/#252)', async () => {
     openSession();
     const sent: ChannelPost[] = [];
     const calls: RunCeremonyOptions[] = [];
@@ -1362,9 +1371,10 @@ describe('performActivityBegin (#233)', () => {
         beginClient(sent),
         stageHolding(),
         fakeRun(calls),
-      )('guild-1', { ...REQUEST, visual: 'race' }),
+      )('guild-1', { ...REQUEST, visual: 'race', ballFaces: 'logos' }),
     ).resolves.toBe(true);
     expect(calls[0].visual).toBe('race');
+    expect(calls[0].ballFaces).toBe('logos');
   });
 
   it('drains pending Activity edits into the bag before sealing, exactly like slash begin (#210)', async () => {

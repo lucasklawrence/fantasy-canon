@@ -133,7 +133,13 @@ function paintBoardList(
 // The physics hopper (#211). Lazy: the canvas is static markup, but boot order shouldn't matter.
 let hopperSim: HopperSim | null = null;
 function hopper(): HopperSim {
-  if (!hopperSim) hopperSim = createHopperSim(byId('hopper-canvas') as HTMLCanvasElement);
+  // Logo faces (#252) resolve per sprite build: the mode rides `start` (ADR 0008), so the same
+  // lookup returns null in numbers mode and during the lobby, keeping the pile numbered there.
+  if (!hopperSim) {
+    hopperSim = createHopperSim(byId('hopper-canvas') as HTMLCanvasElement, (team) =>
+      currentStart?.ballFaces === 'logos' ? teamLogo(team) : null,
+    );
+  }
   return hopperSim;
 }
 
@@ -182,10 +188,12 @@ function ensureLogos(rows: LotteryOddsRow[]): void {
     img.decoding = 'async';
     img.onload = () => {
       // Everything already painted with the fallback face catches up now rather than at the next
-      // broadcast: the odds table repaints, the race refaces in place (its `sync` no-ops on an
-      // unchanged bag), and a drop ball on screen re-dresses.
+      // broadcast: the odds table repaints, both sims reface in place (their `sync` no-ops on an
+      // unchanged bag), and a drop ball on screen re-dresses. The hopper reface is a no-op cost
+      // outside logo-face mode — its lookup returns null there.
       if (currentLobby) repaintLobbyEdits();
       raceSim?.reface();
+      hopperSim?.reface();
       redressDropBall();
     };
     img.onerror = () => logoImages.set(teamId, { url, img: 'failed' });
@@ -424,6 +432,8 @@ const editsInFlight = new Set<string>();
 let reimportPending = false;
 /** Server-truth "a seal-and-start is pending" (#233) — same broadcast-driven discipline. */
 let beginPending = false;
+/** Server-truth audit chatter mode (#252) — the select reflects this, never the reverse. */
+let auditModeCurrent: 'live' | 'seal-only' = 'live';
 
 /**
  * A `Balls` cell with −/+ steppers. One edit per row at a time: the buttons disable on click and
@@ -601,14 +611,54 @@ async function sendBegin(): Promise<void> {
   const delaySeconds = Number((byId('begin-delay') as HTMLSelectElement).value);
   const direction = (byId('begin-direction') as HTMLSelectElement).value;
   const visual = (byId('begin-visual') as HTMLSelectElement).value;
+  const ballFaces = (byId('begin-faces') as HTMLSelectElement).value;
   button.disabled = true;
   setStatus('sealing the bag…', 'live');
   const accepted = await commissionerPost(
     '/api/lottery/begin',
-    { delaySeconds, direction, visual },
+    { delaySeconds, direction, visual, ballFaces },
     (status) => (status === 409 ? 'the lobby changed — begin rejected' : 'begin rejected'),
   );
   if (!accepted) button.disabled = false;
+}
+
+/**
+ * Level every team to the same ball count (#252) — one authorized write, one recompute, one
+ * broadcast repaint. No optimistic paint: the table updates when the echo lands, same as the
+ * steppers.
+ */
+async function sendBulk(): Promise<void> {
+  const button = byId('bulk-btn') as HTMLButtonElement;
+  const input = byId('bulk-balls') as HTMLInputElement;
+  const balls = Number(input.value);
+  const cap = MAX_EDIT_BALLS;
+  if (!Number.isInteger(balls) || balls < 1 || balls > cap) {
+    setStatus(`balls must be a whole number from 1 to ${cap}`, 'err');
+    return;
+  }
+  button.disabled = true;
+  const accepted = await commissionerPost(
+    '/api/lottery/adjust-all',
+    { balls },
+    () => 'level-all rejected',
+  );
+  if (accepted) setStatus(`every team set to ${balls} ball${balls === 1 ? '' : 's'}`, 'live');
+  button.disabled = false;
+}
+
+/** Flip the audit chatter preference (#252); the select reflects the broadcast echo. */
+async function sendAuditMode(): Promise<void> {
+  const select = byId('audit-mode') as HTMLSelectElement;
+  const mode = select.value;
+  select.disabled = true;
+  const accepted = await commissionerPost(
+    '/api/lottery/audit-mode',
+    { mode },
+    () => 'setting rejected',
+  );
+  // A rejected flip snaps the select back to server truth rather than lying about the mode.
+  if (!accepted) select.value = auditModeCurrent;
+  select.disabled = false;
 }
 
 /** Shared POST plumbing for the commissioner routes: bearer, error surfacing, no optimistic paint. */
@@ -709,21 +759,29 @@ function renderLobby(lobby: LotteryLobby): void {
   // A pending seal freezes the whole lobby server-side (#233) — render the table read-only too,
   // so the steppers don't offer writes the stage is going to 409.
   renderOddsTable(lobby.rows, [], commissioner && !beginPending);
-  show('edit-hint', commissioner && !beginPending);
-  // Re-import only makes sense for an ESPN-backed ceremony, but the client can't tell — the bot
-  // refuses a manual `teams:` setup server-side and says so.
-  show('edit-actions', commissioner);
-  show('begin-actions', commissioner);
+  show('edit-hint', !beginPending);
+  // The whole panel (#252) shows only to the commissioner — re-import still only makes sense for
+  // an ESPN-backed ceremony, but the client can't tell; the bot refuses a manual setup and says so.
+  show('commish-panel', commissioner);
   // The buttons follow the broadcast, not a timer (#227): each flag is set the moment its request
   // is accepted and cleared when the bot's re-arm or `start` replaces the lobby — the exact
   // lifetime of "that work is actually pending". Every viewer's snapshot agrees, so late joiners
   // see the true state too. The two block each other (#233): a re-import replaces the very bag a
   // seal would commit, and a seal makes a refetch moot.
-  (byId('reimport-btn') as HTMLButtonElement).disabled = reimportPending || beginPending;
-  (byId('begin-btn') as HTMLButtonElement).disabled = beginPending || reimportPending;
+  const frozen = beginPending || reimportPending;
+  (byId('reimport-btn') as HTMLButtonElement).disabled = frozen;
+  (byId('begin-btn') as HTMLButtonElement).disabled = frozen;
   (byId('begin-delay') as HTMLSelectElement).disabled = beginPending;
   (byId('begin-direction') as HTMLSelectElement).disabled = beginPending;
   (byId('begin-visual') as HTMLSelectElement).disabled = beginPending;
+  (byId('begin-faces') as HTMLSelectElement).disabled = beginPending;
+  (byId('bulk-balls') as HTMLInputElement).disabled = frozen;
+  (byId('bulk-btn') as HTMLButtonElement).disabled = frozen;
+  const auditSelect = byId('audit-mode') as HTMLSelectElement;
+  auditSelect.disabled = frozen;
+  // Server truth wins over whatever the select was left showing — a late joiner or a second
+  // commissioner device must see the mode the stage actually holds.
+  auditSelect.value = auditModeCurrent;
   // The answer is lobby-scoped server-side, and commissioner-ship is stamped fresh at every arm —
   // so re-ask whenever a *newly armed* lobby appears (`armedSeq` bumps per arm, not per edit
   // echo, #232), not just once per page. The once-per-page latch left an open Activity holding a
@@ -750,15 +808,25 @@ function renderLobby(lobby: LotteryLobby): void {
   }
 }
 
+/** The last ball-face mode the hopper was built/refaced under (#252), so a change is one-shot. */
+let facesApplied: string | undefined;
+
 function renderWaiting(start: LotteryStart, drawn: { pick: number; team: string }[] = []): void {
   currentStart = start; // remembered for pull scheduling (delayMs) across later phases
+  // A face-mode change (#252): the lobby built a numbered pile, and the hopper's `sync`
+  // deliberately short-circuits on an unchanged bag — so the moment the committed start declares
+  // its mode, reface in place. Guarded so the per-reveal repaints don't rebuild 78 sprites each.
+  const faces = start.ballFaces ?? 'numbers';
+  if (faces !== facesApplied) {
+    facesApplied = faces;
+    hopperSim?.reface();
+  }
   // The commitment binds the bag: past this point nothing on screen is editable, so drop the
   // lobby we were holding and retract the offer (#210) — the seal controls with it (#233), or a
   // slash-started draw would leave a live-looking begin button on the waiting screen.
   currentLobby = undefined;
   show('edit-hint', false);
-  show('edit-actions', false);
-  show('begin-actions', false);
+  show('commish-panel', false);
   byId('title').textContent = start.title;
   byId('waiting-sub').textContent =
     `${start.teamCount} teams · ${start.totalBalls} balls in the hopper`;
@@ -1523,8 +1591,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       // No lobby ⇒ nothing to edit (#210); the stage refuses adjustments in this phase anyway.
       currentLobby = undefined;
       show('edit-hint', false);
-      show('edit-actions', false);
-      show('begin-actions', false);
+      show('commish-panel', false);
       hopperSim?.sync([], []); // empty the pile — the canvas clears on the next frame
       // An idle stage means an api restart or a cleared lobby — either way the armedSeq space
       // may reset (#232), so forget everything commissioner-related and let the next lobby's
@@ -1537,6 +1604,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       // Pre-commitment lobby (#198): show odds without the commitment hash.
       reimportPending = snapshot.reimportRequested === true;
       beginPending = snapshot.beginRequested !== undefined;
+      auditModeCurrent = snapshot.auditMode === 'seal-only' ? 'seal-only' : 'live';
       if (snapshot.lobby) renderLobby(snapshot.lobby);
       setStatus(
         beginPending ? 'sealing the bag — draw starting…' : 'setup complete — draw pending',
@@ -1624,6 +1692,7 @@ function applyEvent(event: LotteryEvent): void {
         reveals: [],
         ...(event.reimportRequested ? { reimportRequested: true } : {}),
         ...(event.beginRequested ? { beginRequested: event.beginRequested } : {}),
+        ...(event.auditMode ? { auditMode: event.auditMode } : {}),
       });
       break;
     case 'lottery-start':
@@ -1776,6 +1845,8 @@ async function boot(): Promise<void> {
   byId('replay-skip').addEventListener('click', skipReplay);
   byId('reimport-btn').addEventListener('click', () => void sendReimport());
   byId('begin-btn').addEventListener('click', () => void sendBegin());
+  byId('bulk-btn').addEventListener('click', () => void sendBulk());
+  byId('audit-mode').addEventListener('change', () => void sendAuditMode());
   byId('sound-btn').addEventListener('click', () => audio.toggle());
   document.addEventListener('visibilitychange', onVisibilityChange);
   const inDiscord = isDiscordActivity(window.location);

@@ -619,6 +619,7 @@ describe('commissioner lobby edits (#210)', () => {
       delaySeconds: 10,
       direction: 'first-to-last',
       visual: 'machine',
+      ballFaces: 'numbers',
       requestedBy: 'commish',
     });
     // A doorbell, not a draw: the lobby is still armed and untouched.
@@ -701,6 +702,74 @@ describe('commissioner lobby edits (#210)', () => {
       (await routeRequest('GET', '/api/lottery/state', '', d)).body,
     ) as LotterySnapshot;
     expect(state.start?.visual).toBe('race');
+  });
+
+  it('levels every team via adjust-all and flips the audit mode, both commissioner-gated (#252)', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+
+    // Same gate ladder as every commissioner write.
+    const body = JSON.stringify({ balls: 5 });
+    expect((await routeRequest('POST', '/api/lottery/adjust-all', body, d)).status).toBe(401);
+    expect(
+      (
+        await routeRequest('POST', '/api/lottery/adjust-all', body, d, {
+          authorization: 'Bearer user-rando',
+        })
+      ).status,
+    ).toBe(403);
+
+    expect(
+      (await routeRequest('POST', '/api/lottery/adjust-all', body, d, asCommissioner)).status,
+    ).toBe(200);
+    const state = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(state.lobby?.rows.map((r) => r.balls)).toEqual([5, 5]);
+    expect(state.lobby?.totalBalls).toBe(10);
+
+    // Junk stays out, exactly like the single-team stepper.
+    for (const balls of [0, -1, 2.5, 31, 'four']) {
+      expect(
+        (
+          await routeRequest(
+            'POST',
+            '/api/lottery/adjust-all',
+            JSON.stringify({ balls }),
+            d,
+            asCommissioner,
+          )
+        ).status,
+      ).toBe(400);
+    }
+
+    // The audit-mode preference rides the same ladder and lands on the snapshot.
+    expect(
+      (
+        await routeRequest(
+          'POST',
+          '/api/lottery/audit-mode',
+          JSON.stringify({ mode: 'seal-only' }),
+          d,
+          asCommissioner,
+        )
+      ).status,
+    ).toBe(200);
+    const after = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(after.auditMode).toBe('seal-only');
+    expect(
+      (
+        await routeRequest(
+          'POST',
+          '/api/lottery/audit-mode',
+          JSON.stringify({ mode: 'loud' }),
+          d,
+          asCommissioner,
+        )
+      ).status,
+    ).toBe(400);
   });
 
   it('never accepts the bot’s stage key in place of a bearer (the two auth paths stay disjoint)', async () => {

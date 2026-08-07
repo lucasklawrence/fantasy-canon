@@ -40,6 +40,12 @@ export interface HopperSim {
    * {@link HopperSim.removeTeam}, which the reveal path calls first).
    */
   sync(rows: { team: string; balls: number }[], drawnTeams: string[]): void;
+  /**
+   * Rebuild every ball's face in place (#252) — for a face-mode change (`sync` short-circuits on
+   * an unchanged bag, so the lobby pile would otherwise stay numbered into a logo-face ceremony)
+   * or a logo that decoded after the pile was built.
+   */
+  reface(): void;
   /** Drum-roll boil on/off. */
   agitate(on: boolean): void;
   /** The suck moment: kick the pile away from the chute mouth so the extraction has recoil. */
@@ -72,11 +78,22 @@ interface BallMeta {
   num: number;
   team: string;
   sprite: HTMLCanvasElement;
+  /** What the sprite was built with, so {@link HopperSim.reface} can rebuild in place (#252). */
+  hue: number;
+  radius: number;
   /** Fade start timestamp once the team is drawn; the body is removed when the fade ends. */
   fadeStart?: number;
 }
 
-export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
+/**
+ * `getLogo` (#252): resolve a team's decoded logo for the pile's ball faces, or null for the
+ * classic numbered ball. Resolved per sprite build — the caller gates it on the ceremony's
+ * `ballFaces` mode, so the lobby pile and numbers-mode ceremonies never pay for it.
+ */
+export function createHopperSim(
+  canvas: HTMLCanvasElement,
+  getLogo: (team: string) => CanvasImageSource | null = () => null,
+): HopperSim {
   const reducedMotion =
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -290,7 +307,12 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
         meta.set(body, {
           num,
           team: range.team,
-          sprite: buildBallSprite(String(num), range.hue, radius, dpr),
+          hue: range.hue,
+          radius,
+          // Logo faces (#252) keep the number badged on top (ballSprite's backing disc) where
+          // the radius permits — the number is the commitment made visible, so it yields only
+          // to physical unreadability.
+          sprite: buildBallSprite(String(num), range.hue, radius, dpr, getLogo(range.team)),
         });
         Composite.add(engine.world, body);
       }
@@ -331,6 +353,17 @@ export function createHopperSim(canvas: HTMLCanvasElement): HopperSim {
       }
       if (reducedMotion) settleAndPaint();
       else wake();
+    },
+    reface(): void {
+      for (const entry of meta.values()) {
+        entry.sprite = buildBallSprite(
+          String(entry.num),
+          entry.hue,
+          entry.radius,
+          dpr,
+          getLogo(entry.team),
+        );
+      }
     },
     agitate(on): void {
       if (agitating === on) return;

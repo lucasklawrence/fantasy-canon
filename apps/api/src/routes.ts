@@ -23,6 +23,8 @@ import { lotteryHtml } from './lotteryPage.js';
 import {
   parseLotteryAbort,
   parseLotteryAdjust,
+  parseLotteryAdjustAll,
+  parseLotteryAuditMode,
   parseLotteryBegin,
   parseLotteryBeat,
   parseLotteryClear,
@@ -331,6 +333,8 @@ async function lotteryRoute(
   // gate below.
   if (
     path === '/api/lottery/adjust' ||
+    path === '/api/lottery/adjust-all' ||
+    path === '/api/lottery/audit-mode' ||
     path === '/api/lottery/rename' ||
     path === '/api/lottery/reimport' ||
     path === '/api/lottery/begin'
@@ -476,6 +480,16 @@ async function commissionerRoute(
       const parsed = parseLotteryRename(body);
       if ('error' in parsed) return json(400, { error: parsed.error });
       deps.lottery.rename(parsed.value);
+    } else if (path === '/api/lottery/adjust-all') {
+      // Bulk level-all (#252): one stage op so the field recomputes once and the bot posts one
+      // audit line — twelve stepper taps' worth of intent in a single authorized write.
+      const parsed = parseLotteryAdjustAll(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.adjustAll(parsed.value.balls);
+    } else if (path === '/api/lottery/audit-mode') {
+      const parsed = parseLotteryAuditMode(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.setAuditMode(parsed.value.mode);
     } else {
       const parsed = parseLotteryAdjust(body);
       if ('error' in parsed) return json(400, { error: parsed.error });

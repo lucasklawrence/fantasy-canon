@@ -152,6 +152,11 @@ export interface RunCeremonyOptions {
    * without {@link RunCeremonyOptions.stage}.
    */
   visual?: 'machine' | 'race';
+  /**
+   * What the hopper pile's balls wear (#252): numbers (default) or team logos with the number
+   * badged on top where the radius permits. Same presentational-only rules as `visual`.
+   */
+  ballFaces?: 'numbers' | 'logos';
 }
 
 /** One row of the stage's pre-reveal odds table (matches the api's `LotteryOddsRow`). */
@@ -226,6 +231,8 @@ export interface RevealStage {
     guildId?: string;
     /** Reveal visualization every viewer renders (#235). Absent ⇒ the machine. */
     visual?: 'machine' | 'race';
+    /** Hopper-ball faces (#252): team logos instead of numbers. Absent ⇒ numbers. */
+    ballFaces?: 'numbers' | 'logos';
   }): Promise<void>;
   beat(beat: { pick: number; remaining: string[] }): Promise<void>;
   reveal(reveal: {
@@ -938,6 +945,7 @@ export async function runCeremony(
           rows: oddsRows(session),
           guildId: session.guildId,
           ...(options.visual ? { visual: options.visual } : {}),
+          ...(options.ballFaces === 'logos' ? { ballFaces: 'logos' as const } : {}),
         });
       } catch (stageError) {
         console.error(

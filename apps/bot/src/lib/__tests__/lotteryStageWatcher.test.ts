@@ -435,6 +435,145 @@ describe('createStageWatcher (#220)', () => {
     expect(h.posts).toHaveLength(0);
   });
 
+  it('posts ONE line for a bulk level-all, and stays silent about its per-team entries (#252)', async () => {
+    const h = harness();
+    h.watcher.start();
+    h.latest().open();
+
+    const bulkFrame = {
+      type: 'lottery-lobby',
+      lobby: {
+        guildId: 'g1',
+        rows: [
+          { teamId: 't1', team: 'Alpha' },
+          { teamId: 't2', team: 'Bravo' },
+        ],
+      },
+      adjustments: [
+        { teamId: 't1', balls: 5 },
+        { teamId: 't2', balls: 5 },
+      ],
+      adjustedAll: { balls: 5, guildId: 'g1' },
+    };
+    await h.send(bulkFrame);
+    expect(h.contents()).toEqual([
+      '🛠 Commissioner set every team to 5 balls in the Lottery Machine.',
+    ]);
+
+    // A duplicate frame, and the reconnect snapshot carrying the same cumulative set, are old news.
+    await h.send(bulkFrame);
+    await h.send({
+      type: 'lottery-state',
+      snapshot: {
+        phase: 'lobby',
+        lobby: bulkFrame.lobby,
+        adjustments: bulkFrame.adjustments,
+        reveals: [],
+      },
+    });
+    expect(h.posts).toHaveLength(1);
+
+    // A later single-team edit on top of the leveled field speaks normally.
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: bulkFrame.lobby,
+      adjustments: [
+        { teamId: 't1', balls: 7 },
+        { teamId: 't2', balls: 5 },
+      ],
+      adjusted: { teamId: 't1', team: 'Alpha', from: 5, to: 7, guildId: 'g1' },
+    });
+    expect(h.posts).toHaveLength(2);
+    expect(h.contents()[1]).toContain('Alpha');
+  });
+
+  it('seal-only audit mode silences the play-by-play but never the action triggers (#252)', async () => {
+    const reimports: (string | undefined)[] = [];
+    const h = harness(undefined, (guildId) => {
+      reimports.push(guildId);
+      return Promise.resolve(true);
+    });
+    h.watcher.start();
+    h.latest().open();
+
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [{ teamId: 't1', team: 'Alpha' }] },
+      adjustments: [{ teamId: 't1', balls: 4 }],
+      renames: [{ teamId: 't1', displayName: 'Alpha Prime' }],
+      adjusted: { teamId: 't1', team: 'Alpha', from: 1, to: 4, guildId: 'g1' },
+      adjustedAll: { balls: 4, guildId: 'g1' },
+      reimportRequested: true,
+      auditMode: 'seal-only',
+    });
+
+    // No chatter of any kind…
+    expect(h.posts).toHaveLength(0);
+    // …but the re-import request was still honoured — quiet is not dead.
+    expect(reimports).toEqual(['g1']);
+
+    // Silence is a choice, not a deferral: flipping back to 'live' with the same pending set
+    // must not replay the edits the commissioner deliberately kept quiet.
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [{ teamId: 't1', team: 'Alpha' }] },
+      adjustments: [{ teamId: 't1', balls: 4 }],
+      renames: [{ teamId: 't1', displayName: 'Alpha Prime' }],
+    });
+    expect(h.posts).toHaveLength(0);
+  });
+
+  it('reserves bulk-covered teams while the bulk line is in flight (#252)', async () => {
+    let release: ((delivered: boolean) => void) | undefined;
+    const h = harness(() => new Promise<boolean>((resolve) => (release = resolve)));
+    h.watcher.start();
+    h.latest().open();
+
+    const pending = [
+      { teamId: 't1', balls: 5 },
+      { teamId: 't2', balls: 5 },
+    ];
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      adjustments: pending,
+      adjustedAll: { balls: 5, guildId: 'g1' },
+    });
+    expect(h.posts).toHaveLength(1); // the bulk line, delivery still pending
+
+    // A frame that lands mid-delivery WITHOUT the bulk detail (a rename broadcast, say) must not
+    // spray the same act as per-team lines — the covered teams are reserved until it settles.
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      adjustments: pending,
+    });
+    expect(h.posts).toHaveLength(1);
+
+    release?.(true);
+    await flush();
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      adjustments: pending,
+    });
+    expect(h.posts).toHaveLength(1); // now recorded as seen — still one line total
+  });
+
+  it('routes the bulk line by the frame guild, not the detail (#252)', async () => {
+    const h = harness();
+    h.watcher.start();
+    h.latest().open();
+    await h.send({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      adjustments: [{ teamId: 't1', balls: 3 }],
+      adjustedAll: { balls: 3 }, // no guildId on the detail
+    });
+    expect(h.posts).toHaveLength(1);
+    expect(h.posts[0].guildId).toBe('g1');
+  });
+
   it('honours a begin request exactly once while it is in flight (#233)', async () => {
     const calls: { guildId: string | undefined; request: StageBeginRequest }[] = [];
     let release: (() => void) | undefined;

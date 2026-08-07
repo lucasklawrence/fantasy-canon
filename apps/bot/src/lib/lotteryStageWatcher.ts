@@ -33,6 +33,12 @@ export interface StageAdjustmentDetail {
   guildId?: string;
 }
 
+/** One bulk level-all (#252); mirrors the api's `LotteryAdjustAllDetail`. */
+export interface StageAdjustAllDetail {
+  balls: number;
+  guildId?: string;
+}
+
 /** What one display-name fix changed (#219); mirrors the api's `LotteryRenameDetail`. */
 export interface StageRenameDetail {
   teamId: string;
@@ -49,6 +55,8 @@ export interface StageRenameDetail {
 export interface StageBeginRequest {
   delaySeconds: number;
   direction: 'worst-to-first' | 'first-to-last';
+  /** Hopper-ball faces (#252): numbers (default) or team logos. */
+  ballFaces?: 'numbers' | 'logos';
   /** Reveal visualization (#235). Absent (an older api) ⇒ the machine. */
   visual?: 'machine' | 'race';
   /** Discord user id of the commissioner who pressed the button, stamped by the api's route. */
@@ -116,6 +124,11 @@ export function adjustmentLine(detail: StageAdjustmentDetail): string {
   const was =
     detail.from !== undefined && detail.from !== detail.to ? ` (was ${plural(detail.from)})` : '';
   return `🛠 Commissioner set **${detail.team}** to ${plural(detail.to)} in the Lottery Machine${was}.`;
+}
+
+/** The single audit line a bulk level-all produces (#252) — one act, one line, not twelve. */
+export function adjustAllLine(detail: StageAdjustAllDetail): string {
+  return `🛠 Commissioner set every team to ${detail.balls} ball${detail.balls === 1 ? '' : 's'} in the Lottery Machine.`;
 }
 
 /** The audit line one rename produces (#219). Same "don't invent a before-value" rule as above. */
@@ -191,6 +204,38 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
   }
 
   /**
+   * One line for a bulk level-all (#252), same record-only-on-delivery discipline as `announce`.
+   * Marking every covered team at the new count is what keeps the per-team loop (and every later
+   * reconnect snapshot) silent about the same act. Routed by the FRAME's guild — the reconcile
+   * already knows whose lobby this is, and a detail without (or with a mismatched) guildId must
+   * not be able to misroute the line. Every covered team's per-team flight key is reserved for
+   * the delivery window, so a frame that lands mid-flight without the `adjustedAll` detail can't
+   * spray the same act as twelve individual lines.
+   */
+  function announceBulk(
+    seen: AnnouncedBalls,
+    detail: StageAdjustAllDetail,
+    teams: string[],
+    guildId: string | undefined,
+  ): void {
+    // A duplicate frame or a reconnect replay of an already-posted level-all is not news.
+    if (teams.length === 0 || teams.every((teamId) => seen.get(teamId) === detail.balls)) return;
+    const flights = teams.map((teamId) => `${key(guildId)}|${teamId}|${detail.balls}`);
+    if (flights.some((flight) => inFlight.has(flight))) return;
+    for (const flight of flights) inFlight.add(flight);
+    void post(guildId, adjustAllLine(detail))
+      .then((delivered) => {
+        if (delivered) for (const teamId of teams) seen.set(teamId, detail.balls);
+      })
+      .catch((error: unknown) => {
+        console.error('[draftorder] failed to post an Activity level-all to the channel:', error);
+      })
+      .finally(() => {
+        for (const flight of flights) inFlight.delete(flight);
+      });
+  }
+
+  /**
    * Bring the channel level with the stage's pending-edit set for one lobby.
    *
    * Dedupe is deliberately **state-based**: what has been announced is compared against the
@@ -223,6 +268,8 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     beginRequest?: StageBeginRequest,
     detail?: StageAdjustmentDetail,
     renamed?: StageRenameDetail,
+    bulk?: StageAdjustAllDetail,
+    auditMode?: 'live' | 'seal-only',
   ): void {
     const seen = announced.get(key(guildId)) ?? new Map<string, number>();
     announced.set(key(guildId), seen);
@@ -243,7 +290,30 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       }
     }
 
+    // Seal-only audit mode (#252): the commissioner opted out of play-by-play — `begin`'s
+    // adjusted odds card is the single finalized record. Silence is a choice, not a deferral:
+    // everything pending is marked as seen NOW, so flipping back to 'live' later announces only
+    // edits made after the flip, never a replay of what was deliberately kept quiet. The
+    // re-import and begin triggers further down are unaffected: those are actions, not chatter.
+    const quiet = auditMode === 'seal-only';
+    if (quiet) {
+      for (const entry of pending) seen.set(entry.teamId, entry.balls);
+    }
+
+    // A bulk level-all (#252) speaks once for every team it covered; the per-team loop below
+    // skips those so the same act never also produces twelve individual lines.
+    if (bulk && !quiet) {
+      announceBulk(
+        seen,
+        bulk,
+        pending.filter((entry) => entry.balls === bulk.balls).map((entry) => entry.teamId),
+        guildId,
+      );
+    }
+
     for (const entry of pending) {
+      if (quiet) break;
+      if (bulk && entry.balls === bulk.balls) continue;
       const live = detail?.teamId === entry.teamId && detail.to === entry.balls;
       announce(seen, {
         teamId: entry.teamId,
@@ -264,7 +334,11 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     for (const teamId of [...seenNames.keys()]) {
       if (!stillNamed.has(teamId)) seenNames.delete(teamId);
     }
+    if (quiet) {
+      for (const entry of pendingNames) seenNames.set(entry.teamId, entry.displayName);
+    }
     for (const entry of pendingNames) {
+      if (quiet) break;
       if (seenNames.get(entry.teamId) === entry.displayName) continue;
       const live = renamed?.teamId === entry.teamId && renamed.to === entry.displayName;
       announceName(seenNames, {
@@ -306,7 +380,9 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     let event: {
       type?: unknown;
       adjusted?: unknown;
+      adjustedAll?: unknown;
       adjustments?: unknown;
+      auditMode?: unknown;
       renamed?: unknown;
       renames?: unknown;
       reimportRequested?: unknown;
@@ -327,6 +403,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
         renames?: unknown;
         reimportRequested?: unknown;
         beginRequested?: unknown;
+        auditMode?: unknown;
       };
       if (snapshot.phase !== 'lobby') {
         // Nothing armed ⇒ nothing editable, and any prior lobby is behind us.
@@ -341,6 +418,10 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
         toRenames(snapshot.renames),
         snapshot.reimportRequested === true,
         toBeginRequest(snapshot.beginRequested),
+        undefined,
+        undefined,
+        undefined,
+        snapshot.auditMode === 'seal-only' ? 'seal-only' : undefined,
       );
       return;
     }
@@ -363,6 +444,8 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       toBeginRequest(event.beginRequested),
       toDetail(event.adjusted),
       toRenameDetail(event.renamed),
+      toBulkDetail(event.adjustedAll),
+      event.auditMode === 'seal-only' ? 'seal-only' : undefined,
     );
   }
 
@@ -472,11 +555,26 @@ function toBeginRequest(raw: unknown): StageBeginRequest | undefined {
   // Same closed-vocabulary rule as the rest of the frame (#235): absent means an older api and
   // defaults machine downstream, but present-and-junk voids the whole request.
   if (d.visual !== undefined && d.visual !== 'machine' && d.visual !== 'race') return undefined;
+  if (d.ballFaces !== undefined && d.ballFaces !== 'numbers' && d.ballFaces !== 'logos') {
+    return undefined;
+  }
   return {
     delaySeconds: d.delaySeconds,
     direction: d.direction,
     ...(d.visual === 'machine' || d.visual === 'race' ? { visual: d.visual } : {}),
+    ...(d.ballFaces === 'numbers' || d.ballFaces === 'logos' ? { ballFaces: d.ballFaces } : {}),
     ...(typeof d.requestedBy === 'string' ? { requestedBy: d.requestedBy } : {}),
+  };
+}
+
+/** Guard the `adjustedAll` detail off an untrusted frame (#252). */
+function toBulkDetail(raw: unknown): StageAdjustAllDetail | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const d = raw as Record<string, unknown>;
+  if (typeof d.balls !== 'number' || !Number.isInteger(d.balls) || d.balls < 1) return undefined;
+  return {
+    balls: d.balls,
+    ...(typeof d.guildId === 'string' ? { guildId: d.guildId } : {}),
   };
 }
 
