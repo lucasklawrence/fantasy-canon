@@ -434,6 +434,36 @@ let reimportPending = false;
 let beginPending = false;
 /** Server-truth audit chatter mode (#252) — the select reflects this, never the reverse. */
 let auditModeCurrent: 'live' | 'seal-only' = 'live';
+/** The guild this Activity instance lives in (#253), from the SDK; null outside Discord. */
+let activityGuildId: string | null = null;
+/** Server-truth "a setup press is pending" (#253) — the start button's disabled lifetime. */
+let setupPending = false;
+
+/**
+ * Press the "start a lottery" doorbell (#253). Anyone can press; the BOT verifies Manage Server
+ * in this guild before honouring it, and a refusal comes back as `setupDenied` on the broadcast.
+ * No timer, no optimistic paint — the pending flag rides the snapshot like every other request.
+ */
+async function sendSetupRequest(): Promise<void> {
+  if (!activityGuildId) {
+    setStatus('open this inside your Discord server to start a lottery', 'err');
+    return;
+  }
+  const season = Number((byId('setup-season') as HTMLInputElement).value);
+  if (!Number.isInteger(season) || season < 2020 || season > 2100) {
+    setStatus('season needs to be a four-digit year', 'err');
+    return;
+  }
+  const button = byId('setup-btn') as HTMLButtonElement;
+  button.disabled = true;
+  setStatus('asking the bot to set up…', 'live');
+  const accepted = await commissionerPost(
+    '/api/lottery/setup-request',
+    { guildId: activityGuildId, season },
+    (status) => (status === 409 ? 'someone already pressed start' : 'start rejected'),
+  );
+  if (!accepted) button.disabled = false;
+}
 
 /**
  * A `Balls` cell with −/+ steppers. One edit per row at a time: the buttons disable on click and
@@ -1575,12 +1605,24 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
   // not kill a playing finale, and 'finished' arrives moments after pick #1 in worst-to-first.
   // Everything else — idle, a fresh lobby, a new start, an abort — retires it.
   if (snapshot.phase !== 'revealing' && snapshot.phase !== 'finished') closeEnvelope();
+  // The start doorbell (#253) is an idle-only surface.
+  show('setup-actions', snapshot.phase === 'idle');
   switch (snapshot.phase) {
-    case 'idle':
-      setStatus('no ceremony yet');
+    case 'idle': {
+      // The start doorbell (#253): pending state and one-shot denial both ride the snapshot,
+      // like every other request flag — no timers, every viewer agrees.
+      setupPending = snapshot.setupRequested !== undefined;
+      const denied = snapshot.setupDenied;
+      if (setupPending) setStatus('setting up — the bot is importing the league…', 'live');
+      else if (denied) setStatus(`start refused: ${denied}`, 'err');
+      else setStatus('no ceremony yet');
       show('waiting', true);
       show('stage', false);
-      byId('waiting-sub').textContent = 'The commissioner has not opened the stage.';
+      byId('waiting-sub').textContent = setupPending
+        ? 'Importing the league from ESPN…'
+        : 'No ceremony yet — a member with Manage Server can start one right here.';
+      (byId('setup-btn') as HTMLButtonElement).disabled = setupPending;
+      (byId('setup-season') as HTMLInputElement).disabled = setupPending;
       // Wipe anything a previous phase painted. This matters more now that a lobby can be armed
       // days before the draw (#198): an api restart, or a `clear` after a cancelled setup, drops
       // an open iframe back to idle, and a leftover odds table under "not opened yet" reads as a
@@ -1600,6 +1642,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       commissioner = false;
       commissionerCheck = null;
       break;
+    }
     case 'lobby':
       // Pre-commitment lobby (#198): show odds without the commitment hash.
       reimportPending = snapshot.reimportRequested === true;
@@ -1847,6 +1890,9 @@ async function boot(): Promise<void> {
   byId('begin-btn').addEventListener('click', () => void sendBegin());
   byId('bulk-btn').addEventListener('click', () => void sendBulk());
   byId('audit-mode').addEventListener('change', () => void sendAuditMode());
+  byId('setup-btn').addEventListener('click', () => void sendSetupRequest());
+  // Default the season picker to the year the page loaded — draft season in practice.
+  (byId('setup-season') as HTMLInputElement).value = String(new Date().getFullYear());
   byId('sound-btn').addEventListener('click', () => audio.toggle());
   document.addEventListener('visibilitychange', onVisibilityChange);
   const inDiscord = isDiscordActivity(window.location);
@@ -1854,7 +1900,9 @@ async function boot(): Promise<void> {
   activityBase = base;
   if (inDiscord) {
     try {
-      ({ accessToken } = await runHandshake(base));
+      const handshake = await runHandshake(base);
+      accessToken = handshake.accessToken;
+      activityGuildId = handshake.guildId ?? null;
     } catch (error) {
       // Three sinks, because the 2026-08-01 outage (a portal misconfiguration failing every
       // desktop handshake) was invisible in all of them (#231): the status pill got overwritten

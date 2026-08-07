@@ -73,6 +73,22 @@ export interface LotteryStart {
 export type LotteryBallFaces = 'numbers' | 'logos';
 
 /**
+ * The Activity's "start a lottery" doorbell (#253) — pressed at a dead-idle stage, honoured by
+ * the bot after it verifies the presser holds Manage Server in the named guild (the same gate
+ * the slash `setup` uses; ADR 0007's commissioner list cannot exist yet because there is no
+ * lobby). The api records intent only: the bot performs the ESPN import, posts the public odds
+ * preview, and arms the lobby — which clears this request.
+ */
+export interface LotterySetupRequest {
+  /** The guild the Activity instance lives in, from the SDK — verified bot-side, never trusted. */
+  guildId: string;
+  /** Stamped server-side from the verified bearer, like {@link LotteryBeginRequest.requestedBy}. */
+  requestedBy: string;
+  /** Season for the ESPN import + standings weights, from the idle screen's picker. */
+  season: number;
+}
+
+/**
  * How chatty the in-channel audit trail is while the lobby is editable (#252, commissioner
  * feedback): `'live'` posts one silent line per change (#220), `'seal-only'` stays quiet and
  * lets `begin`'s adjusted odds card be the single finalized record. The fairness invariant is
@@ -224,6 +240,17 @@ export interface LotterySnapshot {
   beginRequested?: LotteryBeginRequest;
   /** Audit chatter preference (#252). Omitted ⇒ `'live'`. Lobby-lifecycle-scoped. */
   auditMode?: LotteryAuditMode;
+  /**
+   * A pressed "start a lottery" doorbell (#253) — only ever present in the `idle` phase, and the
+   * exact lifetime every idle screen's start button spends disabled. Cleared when the bot's
+   * `lobby` arm answers it, or released with a reason when the bot must refuse.
+   */
+  setupRequested?: LotterySetupRequest;
+  /**
+   * Why the last setup request was refused (#253) — shown once on the idle screen so the presser
+   * is never left staring at a silently re-enabled button. Cleared by the next request or arm.
+   */
+  setupDenied?: string;
 }
 
 /**

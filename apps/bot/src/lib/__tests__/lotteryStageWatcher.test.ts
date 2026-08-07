@@ -6,6 +6,7 @@ import {
   MAX_BACKOFF_MS,
   stageWsUrl,
   type StageBeginRequest,
+  type StageSetupRequest,
   type StageSocket,
 } from '../lotteryStageWatcher.js';
 
@@ -48,6 +49,7 @@ function harness(
   deliver: (attempt: number) => Promise<boolean> = () => Promise.resolve(true),
   reimport?: (guildId: string | undefined) => Promise<boolean>,
   begin?: (guildId: string | undefined, request: StageBeginRequest) => Promise<boolean>,
+  setup?: (request: StageSetupRequest) => Promise<boolean>,
 ) {
   const posts: { guildId: string | undefined; content: string }[] = [];
   const sockets: ReturnType<typeof fakeSocket>[] = [];
@@ -67,6 +69,7 @@ function harness(
     },
     ...(reimport ? { reimport } : {}),
     ...(begin ? { begin } : {}),
+    ...(setup ? { setup } : {}),
     schedule: (fn, ms) => {
       scheduled.push({ fn, ms });
       return scheduled.length;
@@ -572,6 +575,43 @@ describe('createStageWatcher (#220)', () => {
     });
     expect(h.posts).toHaveLength(1);
     expect(h.posts[0].guildId).toBe('g1');
+  });
+
+  it('honours a setup press from an idle snapshot exactly once while it is in flight (#253)', async () => {
+    const calls: { guildId: string; requestedBy: string; season: number }[] = [];
+    let release: (() => void) | undefined;
+    const h = harness(undefined, undefined, undefined, (request) => {
+      calls.push(request);
+      return new Promise<boolean>((resolve) => {
+        release = () => resolve(true);
+      });
+    });
+    h.watcher.start();
+    h.latest().open();
+
+    const idle = {
+      type: 'lottery-state',
+      snapshot: {
+        phase: 'idle',
+        reveals: [],
+        setupRequested: { guildId: 'g1', requestedBy: 'presser', season: 2026 },
+      },
+    };
+    await h.send(idle);
+    await h.send(idle); // a reconnect snapshot must not double the ESPN import
+    expect(calls).toEqual([{ guildId: 'g1', requestedBy: 'presser', season: 2026 }]);
+
+    release?.();
+    await flush();
+    await h.send(idle);
+    expect(calls).toHaveLength(2); // settled ⇒ a later (still-pending) press is honoured again
+
+    // Junk frames never reach the callback, and non-idle phases don't carry the doorbell.
+    await h.send({
+      type: 'lottery-state',
+      snapshot: { phase: 'idle', reveals: [], setupRequested: { guildId: 'g1', season: 'x' } },
+    });
+    expect(calls).toHaveLength(2);
   });
 
   it('honours a begin request exactly once while it is in flight (#233)', async () => {

@@ -46,6 +46,7 @@ import type {
   LotteryRename,
   LotteryRenameDetail,
   LotteryReveal,
+  LotterySetupRequest,
   LotterySnapshot,
   LotteryStart,
 } from './lotteryTypes.js';
@@ -148,6 +149,20 @@ export interface LotteryStage {
    * re-confirmed against what the league can see.
    */
   requestBegin(request: LotteryBeginRequest): void;
+  /**
+   * A "start a lottery" press from a dead-idle stage (#253). Idle-phase only, one pending press
+   * at a time (a second press 409s). Authorization happens BOT-side — the bot verifies the
+   * presser holds Manage Server in the named guild before running the slash-`setup` flow — so
+   * this records intent, never authority. Cleared by the arm that answers it, or by
+   * {@link LotteryStage.releaseSetup} with a reason when the bot refuses.
+   */
+  requestSetup(request: LotterySetupRequest): void;
+  /**
+   * Bot-keyed release of a setup press it cannot honour (#253) — the #236 rule: a refused press
+   * must never strand every idle screen's button. `reason` rides the next snapshot once as
+   * {@link LotterySnapshot.setupDenied}. Guild-scoped no-op like {@link LotteryStage.clear}.
+   */
+  releaseSetup(release: { guildId?: string; reason?: string }): void;
   /**
    * Is this Discord user id allowed to {@link LotteryStage.adjust}? False whenever no lobby is
    * armed, so a stale token can never edit a committed or finished run.
@@ -470,6 +485,45 @@ export function parseLotteryBegin(
   };
 }
 
+/**
+ * Guard for `POST /api/lottery/setup-request` (#253). Public-client body: the guildId comes from
+ * the SDK (verified bot-side — a forged guild only redirects the ManageGuild check there), the
+ * season is a sane four-digit window, and `requestedBy` is stamped by the route, never read.
+ */
+export function parseLotterySetupRequest(
+  body: string,
+): Parsed<Pick<LotterySetupRequest, 'guildId' | 'season'>> {
+  const parsed = parseJson(body);
+  if ('error' in parsed) return parsed;
+  const r = parsed.value;
+  if (!isStr(r.guildId)) return { error: 'setup-request needs the Activity guildId' };
+  if (
+    typeof r.season !== 'number' ||
+    !Number.isInteger(r.season) ||
+    r.season < 2020 ||
+    r.season > 2100
+  ) {
+    return { error: 'setup-request needs a season between 2020 and 2100' };
+  }
+  return { value: { guildId: r.guildId, season: r.season } };
+}
+
+/** Guard for `POST /api/lottery/setup-release` (#253) — bot-keyed, guild scope + optional reason. */
+export function parseLotterySetupRelease(
+  body: string,
+): Parsed<{ guildId?: string; reason?: string }> {
+  const parsed = parseJson(body);
+  if ('error' in parsed) return parsed;
+  const r = parsed.value;
+  const reason = typeof r.reason === 'string' ? r.reason.slice(0, 300) : undefined;
+  return {
+    value: {
+      ...(isStr(r.guildId) ? { guildId: r.guildId } : {}),
+      ...(reason ? { reason } : {}),
+    },
+  };
+}
+
 /** Guard for `POST /api/lottery/audit-mode` (#252) — a two-word closed vocabulary. */
 export function parseLotteryAuditMode(body: string): Parsed<{ mode: LotteryAuditMode }> {
   const parsed = parseJson(body);
@@ -591,6 +645,10 @@ export function createLotteryStage(): LotteryStage {
    * dies with the lobby lifecycle in {@link dropLobby}.
    */
   let auditMode: LotteryAuditMode = 'live';
+  /** A pressed "start a lottery" doorbell (#253) — idle-phase only; the bot honours or releases. */
+  let setupRequested: LotterySetupRequest | undefined;
+  /** Why the last setup press was refused (#253) — one-shot idle-screen feedback. */
+  let setupDenied: string | undefined;
   /**
    * Monotonic arm counter for {@link LotteryLobby.armedSeq} (#232). Seeded from the clock so the
    * values a restarted api hands out never collide with the previous process's — a client that
@@ -648,8 +706,8 @@ export function createLotteryStage(): LotteryStage {
     auditMode = 'live';
   }
 
-  return {
-    snapshot: () => ({
+  function buildSnapshot(): LotterySnapshot {
+    return {
       phase,
       lobby,
       start,
@@ -659,7 +717,13 @@ export function createLotteryStage(): LotteryStage {
       abort,
       // Omitted entirely when empty so the common snapshot stays byte-identical to before (#210).
       ...pendingAdjustments(),
-    }),
+      ...(setupRequested ? { setupRequested } : {}),
+      ...(setupDenied ? { setupDenied } : {}),
+    };
+  }
+
+  return {
+    snapshot: buildSnapshot,
     isCommissioner: (userId) => phase === 'lobby' && commissionerIds.includes(userId),
     lobby(next) {
       // Stricter than start()'s check, and deliberately not guild-scoped: a committed run owns the
@@ -717,6 +781,10 @@ export function createLotteryStage(): LotteryStage {
       // change after the press must be re-confirmed against a fresh public preview).
       reimportRequested = false;
       beginRequested = undefined;
+      // An arm is also how the bot ANSWERS a setup doorbell (#253) — and any lingering denial
+      // notice is stale the moment a real lobby is on screen.
+      setupRequested = undefined;
+      setupDenied = undefined;
       lobby = {
         ...publicLobby,
         rows,
@@ -805,6 +873,25 @@ export function createLotteryStage(): LotteryStage {
       if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
       auditMode = mode;
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
+    },
+    requestSetup(request) {
+      // Idle only: a lobby, a live run, even a finished board — all mean "not yours to open".
+      // One pending press at a time keeps the bot's permission checks bounded; the loser of a
+      // button race gets a clean 409, and the flag's lifetime IS the disabled-button lifetime.
+      if (phase !== 'idle' || setupRequested) throw new StageNotEditableError();
+      setupRequested = request;
+      setupDenied = undefined;
+      emit({ type: 'lottery-state', snapshot: buildSnapshot() });
+    },
+    releaseSetup(release) {
+      // Bot-keyed: refusing a press it cannot honour (no permission, no channel, ESPN down)
+      // must free every idle screen's button — the #236 release rule, applied to setup. The
+      // reason rides the snapshot once so the presser is never left guessing.
+      if (!setupRequested) return;
+      if (release.guildId !== undefined && setupRequested.guildId !== release.guildId) return;
+      setupRequested = undefined;
+      setupDenied = release.reason;
+      emit({ type: 'lottery-state', snapshot: buildSnapshot() });
     },
     requestReimport() {
       if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();

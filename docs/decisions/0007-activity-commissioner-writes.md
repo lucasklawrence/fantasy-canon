@@ -174,3 +174,21 @@ stage — deferred, not dropped.
 > rather than hand-copied. The bundle cannot import core (it reaches `node:crypto` — see the
 > `lotteryTypes.ts` note), and a second literal would drift silently from the value the server
 > enforces.
+
+> **Amendment (#253, 2026-08-08) — setup from a dead-idle stage.** The one press §3's
+> lobby-scoped authority cannot cover: at idle there is no lobby and therefore nobody stamped.
+> The anchor becomes the slash command's own gate, relocated: `POST /api/lottery/setup-request`
+> records verified identity (§1's bearer flow) plus intent — the SDK-reported guild and a season
+> — and the **bot** verifies that the presser holds _Manage Server in that guild_ against
+> Discord before running the exact slash-`setup` flow (ESPN import, standings weights, public
+> odds preview, lobby arm — which stamps the presser as commissioner per §2 and answers the
+> doorbell). A forged guildId buys nothing: it only redirects the permission check to a guild
+> where the presser must genuinely hold Manage Server, and the ceremony then belongs there.
+>
+> The doorbell has no channel of its own, so the bot anchors the preview to the guild's
+> **remembered lottery channel** (`draftorder-channels.json`, written on every successful setup);
+> with no memo the press is refused with guidance to run the slash setup once. Every refusal
+> **releases** the request with a reason the idle screens show one time (`setupDenied`) — the
+> #236 rule, extended: a denied press must never strand every viewer's start button. One press
+> may be pending at a time (a second 409s), and the watcher single-flights per guild, which
+> bounds the Discord permission checks a spammer can induce.

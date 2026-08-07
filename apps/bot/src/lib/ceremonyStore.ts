@@ -134,3 +134,57 @@ export function createMemoryCeremonyStore(): CeremonyStore {
     loadPending: () => [...all.values()],
   };
 }
+
+/**
+ * Durable memo of where each guild's last lottery `setup` ran (#253). The Activity's
+ * "start a lottery" press has no channel of its own — a doorbell from a dead-idle stage — so the
+ * bot anchors the odds preview (and everything after it) to the channel the guild last used.
+ * Written on every successful setup, slash or Activity; survives restarts in the same state dir
+ * as the ceremony records. Failures degrade to "no memo" — the press is refused with guidance to
+ * run the slash setup once.
+ */
+export function lotteryChannelFile(): string {
+  const dir = process.env.FANTASY_STATE_DIR ?? path.join(process.cwd(), '.data');
+  return path.join(dir, 'draftorder-channels.json');
+}
+
+function readChannels(filePath: string): Record<string, string> {
+  if (!existsSync(filePath)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [guildId, channelId] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof channelId === 'string' && channelId) out[guildId] = channelId;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Remember the channel a guild's lottery lives in. Best-effort; a write failure only logs. */
+export function rememberLotteryChannel(
+  guildId: string,
+  channelId: string,
+  filePath = lotteryChannelFile(),
+): void {
+  try {
+    const all = readChannels(filePath);
+    all[guildId] = channelId;
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    const tmp = `${filePath}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(all, null, 2));
+    renameSync(tmp, filePath);
+  } catch (error) {
+    console.error('[draftorder] could not remember the lottery channel:', error);
+  }
+}
+
+/** The channel this guild's last lottery ran in, or undefined if none was ever recorded. */
+export function recallLotteryChannel(
+  guildId: string,
+  filePath = lotteryChannelFile(),
+): string | undefined {
+  return readChannels(filePath)[guildId];
+}

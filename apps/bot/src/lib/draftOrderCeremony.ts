@@ -208,6 +208,11 @@ export interface RevealStage {
    */
   clear(clear: { guildId?: string }): Promise<void>;
   /**
+   * Release a refused "start a lottery" press (#253) with a reason the idle screens show once.
+   * Optional (test doubles, older apis) and best-effort — a refusal stands either way.
+   */
+  setupRelease?(release: { guildId?: string; reason?: string }): Promise<void>;
+  /**
    * Push one team's logo bytes to the stage's same-origin cache (#249). Optional and
    * best-effort: only the bot can fetch ESPN-hosted art (league cookies) or flatten stock SVGs
    * (resvg), so it does both and hands the api ready-to-serve raster bytes. A stage without the

@@ -35,7 +35,9 @@ export function configuredMaxTeamBalls(): number {
  * authorized routes (#210): it goes back as `Authorization: Bearer …`, and the backend re-verifies
  * it with Discord rather than trusting anything the page says about who is using it.
  */
-export async function runHandshake(base: string): Promise<{ accessToken: string }> {
+export async function runHandshake(
+  base: string,
+): Promise<{ accessToken: string; guildId?: string }> {
   const clientId = configuredClientId();
   const sdk = new DiscordSDK(clientId);
   await sdk.ready();
@@ -54,5 +56,7 @@ export async function runHandshake(base: string): Promise<{ accessToken: string 
   if (!res.ok) throw new Error(`token exchange failed (${res.status})`);
   const { access_token: accessToken } = (await res.json()) as { access_token: string };
   await sdk.commands.authenticate({ access_token: accessToken });
-  return { accessToken };
+  // Which guild this Activity instance lives in (#253) — the setup doorbell names it, and the
+  // bot then verifies the presser holds Manage Server THERE, so a forged value buys nothing.
+  return { accessToken, ...(sdk.guildId ? { guildId: sdk.guildId } : {}) };
 }
