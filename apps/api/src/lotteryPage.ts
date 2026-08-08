@@ -114,6 +114,36 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   .chute.active { border-color: rgba(245,214,123,.5);
     box-shadow: 0 0 14px rgba(245,214,123,.28), inset 0 0 8px rgba(245,214,123,.18); }
 
+  /* The tube close-up (#258). The chute is 20px wide and clips its contents, so the ball can
+     never be read INSIDE it — once it clears the mouth it is handed to this element, which
+     lives outside the clip and grows to camera size so a team logo (#252) is actually legible.
+     Absolutely positioned on purpose: the drum sits directly above, and animating the chute's
+     own height would reflow the machine column mid-reveal. Sizes are driven by CSS custom
+     properties the client sets per ceremony, so the JS plan stays the single source of timing. */
+  .machine-left { position: relative; }
+  /* Reserve the overhang. The close-up is absolutely positioned, so it contributes no height —
+     and on the phone stack (single column) the drum sits directly below and would be overlapped.
+     Machine mode only: the race hides the chute and has nothing to emerge from. */
+  body:not(.race) .machine-left { padding-bottom: 40px; }
+  #tube-closeup { position: absolute; left: 50%; top: var(--closeup-top, 0px);
+    width: var(--closeup-size, 60px); height: var(--closeup-size, 60px);
+    margin-left: calc(var(--closeup-size, 60px) / -2); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 15px; color: #14181f; letter-spacing: -.3px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.55), 0 0 26px rgba(245,214,123,.22);
+    opacity: 0; transform: scale(.18); transform-origin: 50% 0;
+    pointer-events: none; z-index: 3; }
+  /* A logo fills the ball, so its number needs to survive on top of arbitrary art. */
+  #tube-closeup.logo-face { color: #fff;
+    text-shadow: 0 2px 8px rgba(0,0,0,.9), 0 0 3px rgba(0,0,0,.8); }
+  /* Grow-to-camera, then hold. Duration comes from the client (tubePlan) via --closeup-present;
+     the transform is forwards-filled so the ball simply STAYS at full size for the dwell — no
+     second animation, and a hidden tab that never paints still ends in the right state. */
+  #tube-closeup.present { animation: closeup var(--closeup-present, 260ms)
+    cubic-bezier(.2,.9,.3,1.25) forwards; }
+  @keyframes closeup { from { opacity: 0; transform: scale(.18) }
+    to { opacity: 1; transform: scale(1) } }
+
   /* the race (#235): swaps in for the hopper+chute when the ceremony's visual is 'race'.
      Everything on it is canvas (raceSim.ts); the shell only provides the framed track. */
   .racetrack { position: relative; margin: 10px auto 0; border-radius: 12px;
@@ -133,8 +163,12 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   .pullball { position: absolute; border-radius: 50%;
     background: radial-gradient(circle at 32% 28%, #fff 0%, #f5d67b 35%, #c8912e 100%);
     box-shadow: 0 2px 5px rgba(0,0,0,.5); opacity: 0; pointer-events: none; }
-  #tube-ball { width: 14px; height: 14px; left: calc(50% - 7px); top: -14px; }
-  #tube-ball.transit { animation: tube .4s cubic-bezier(.45,0,.85,.6) forwards; }
+  /* Bigger than #215's 14px and slower (#258): the descent is the first look at the face, and a
+     logo at 14px is a smudge. Duration comes from the client's tubePlan via --tube-ms so the
+     transit and the close-up below it are budgeted together against the reveal gap. */
+  #tube-ball { width: 18px; height: 18px; left: calc(50% - 9px); top: -18px;
+    background-size: cover; background-position: center; }
+  #tube-ball.transit { animation: tube var(--tube-ms, 420ms) cubic-bezier(.4,0,.7,.75) forwards; }
   #drum .now { font-size: 22px; font-weight: 800; text-align: center; color: #f5d67b;
     animation: pulse 0.9s ease-in-out infinite; margin: 8px 0 12px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
@@ -225,8 +259,8 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
   @keyframes agitate { 0%,100% { transform: translate(0,0) } 25% { transform: translate(1px,-1px) }
     50% { transform: translate(-1px,1px) } 75% { transform: translate(1px,1px) } }
-  @keyframes tube { 0% { opacity: 0; transform: translateY(0) } 20% { opacity: 1 }
-    100% { opacity: 1; transform: translateY(46px) } }
+  @keyframes tube { 0% { opacity: 0; transform: translateY(0) } 15% { opacity: 1 }
+    100% { opacity: 1; transform: translateY(50px) } }
   @keyframes drop { 0% { transform: translateY(-220px) scale(.6); opacity: 0 }
     60% { transform: translateY(12px) scale(1.04); opacity: 1 } 80% { transform: translateY(-8px) }
     100% { transform: translateY(0) scale(1) } }
@@ -327,6 +361,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
       <div class="machine-left" id="machine-left">
         <div class="hopper" id="hopper"><canvas id="hopper-canvas"></canvas></div>
         <div class="chute" id="chute"><div class="pullball" id="tube-ball"></div></div>
+        <div id="tube-closeup" aria-hidden="true"></div>
         <div class="racetrack hidden" id="racetrack"><canvas id="race-canvas"></canvas></div>
       </div>
       <div>
