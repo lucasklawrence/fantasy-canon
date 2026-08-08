@@ -110,7 +110,10 @@ export function createPlaybackCursor(
    * so `queue[0]` is the next event and `queue.length` is the depth `scaleDelay` will see.
    */
   function nextDelayMs(): number {
-    if (!running) return 0;
+    // Paused, the head has not fired and resume re-arms it from `bankedMs`, not from its own
+    // delay — so the honest answer about "the next step" is that it is frozen and unknowable
+    // from here. Returning the unbanked delay would hand a planner a runway that does not exist.
+    if (!running || paused) return 0;
     const next = queue[0];
     if (!next) return 0;
     return scaleDelay ? scaleDelay(next.delayMs, queue.length) : next.delayMs;

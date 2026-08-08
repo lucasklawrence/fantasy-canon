@@ -217,8 +217,8 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
      ever shown when exitBudget says the gap affords the beat. */
   .machine-left { position: relative; }
   #tube-hold { position: absolute; left: 50%; top: var(--hold-top, 0px);
-    width: var(--hold-size, 56px); height: var(--hold-size, 56px);
-    margin-left: calc(var(--hold-size, 56px) / -2); border-radius: 50%;
+    width: var(--hold-px); height: var(--hold-px);
+    margin-left: calc(var(--hold-px) / -2); border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     font-weight: 800; font-size: 15px; color: #14181f; letter-spacing: -.3px;
     box-shadow: 0 6px 18px rgba(0,0,0,.55), 0 0 26px rgba(245,214,123,.22);

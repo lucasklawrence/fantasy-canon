@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { catchUpPace, REPLAY_DWELL_MS, REPLAY_MAX_STEP_MS } from '../client/replayTimeline.js';
 import {
   exitBudget,
-  EXTRACT_CAP_MS,
   EXTRACT_MS,
+  EXTRACT_SNAP_MS,
   FINISH_LEAD_MS,
   FLIP_MS,
   TUBE_MIN_MS,
@@ -92,8 +92,13 @@ describe('exitBudget (#265)', () => {
  * discovering it took 1800 is how the drop card gets wiped mid-spring anyway.
  */
 describe('exitBudget re-planned after the extraction (#265)', () => {
-  /** EXTRACT_MS is the happy path; the rest are a tab that was not being painted. */
-  const SPENDS = [EXTRACT_MS, 900, 1400, EXTRACT_CAP_MS];
+  /**
+   * EXTRACT_MS is the happy path; the rest are a tab that was barely being painted. The ceiling is
+   * the sim's own snap, NOT the caller's give-up cap: past the snap the extraction resolves itself,
+   * and if even that never happens the race is lost, `flew` is false, and the caller never
+   * re-plans at all. Testing 1800 here would be asserting over a spend the client cannot hand us.
+   */
+  const SPENDS = [EXTRACT_MS, 900, 1400, EXTRACT_SNAP_MS];
   /**
    * Only gaps whose up-front plan actually runs an extraction ever reach the re-plan — the caller
    * re-plans on `flew`, and it does not extract at all in `skip`. Asserting over the others would
@@ -109,31 +114,47 @@ describe('exitBudget re-planned after the extraction (#265)', () => {
   });
 
   it('never adds anything that pushes the chain past the gap', () => {
-    // The extraction is sunk by now, so the floor is what cannot be given back: what it cost, plus
-    // the landing. Everything the planner still controls has to fit inside the gap or be dropped.
+    // Sunk by now: what the extraction cost, the floor descent the ball must be shown making, and
+    // the landing. Everything above that floor has to fit inside the gap or be given back.
     for (const gap of REACHABLE) {
       for (const spent of SPENDS) {
         const plan = exitBudget(gap, spent);
-        expect(plan.totalMs).toBeLessThanOrEqual(Math.max(gap, spent + FLIP_MS));
+        const floor = spent + TUBE_MIN_MS + FLIP_MS;
+        expect(plan.totalMs).toBeLessThanOrEqual(Math.max(gap, floor));
       }
     }
   });
 
-  it('drops the flourish once a slow extraction has eaten the gap', () => {
-    // A replay dwell is 1800ms and the cap is 1800ms: the descent and the hold are both gone, and
-    // the card lands late but whole rather than being wiped halfway through a spring.
-    const blown = exitBudget(REPLAY_DWELL_MS, EXTRACT_CAP_MS);
-    expect(blown.mode).toBe('skip');
-    expect(blown.transitMs).toBe(0);
+  // The state that made the first attempt at this re-plan wrong: `skip` after a successful
+  // extraction. `settleExtraction` has already deleted the ball from the pile canvas by then, so
+  // skipping the descent does not save the flourish — it makes the ball vanish at the mouth and
+  // leaves the FLIP anchored to a `#tube-ball` that never moved.
+  it('never returns skip once the ball has left the pile', () => {
+    for (const gap of REACHABLE) {
+      for (const spent of SPENDS) {
+        const plan = exitBudget(gap, spent);
+        expect(plan.mode).not.toBe('skip');
+        expect(plan.transitMs).toBeGreaterThanOrEqual(TUBE_MIN_MS);
+      }
+    }
+  });
+
+  it('gives back the hold, but not the descent, once the extraction has eaten the gap', () => {
+    // A replay dwell is 1800ms and the extraction snapped at 1500: there is nothing left to spend,
+    // so the hold goes and the descent drops to its floor. Overrunning by the floor is the correct
+    // trade — the alternative is a ball that disappears.
+    const blown = exitBudget(REPLAY_DWELL_MS, EXTRACT_SNAP_MS);
+    expect(blown.mode).toBe('plain');
+    expect(blown.transitMs).toBe(TUBE_MIN_MS);
     expect(blown.holdMs).toBe(0);
-    expect(blown.totalMs).toBe(EXTRACT_CAP_MS + FLIP_MS); // billed, unlike a skip planned up front
+    expect(blown.totalMs).toBe(EXTRACT_SNAP_MS + TUBE_MIN_MS + FLIP_MS);
   });
 
   it('still affords the hold at live pacing even on the slowest extraction', () => {
     // Live has room to spare; a slow extraction must not cost the viewer the beat the gap can pay
     // for. This is the case that would regress if the re-plan were a blanket downgrade.
     for (const gap of LIVE_DELAYS) {
-      const plan = exitBudget(gap, EXTRACT_CAP_MS);
+      const plan = exitBudget(gap, EXTRACT_SNAP_MS);
       expect(plan.mode).toBe('full');
       expect(plan.totalMs).toBeLessThanOrEqual(gap);
     }

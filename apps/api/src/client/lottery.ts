@@ -360,18 +360,27 @@ function openEnvelope(reveal: LotteryReveal, hue: number | undefined, token: num
  * hands off to live (`playbackMode = null`) — which must not retroactively make the sprint's
  * final compressed reveal envelope-eligible.
  */
+/**
+ * Will this reveal get the envelope? The rule itself lives in `envelopePlan` — this only gathers
+ * the browser-side inputs. Both the queueing and the exit choreography ask it, so "which pick owns
+ * the finale" stays a single decision: #265 first spelled `pick === 1` inline in the choreography,
+ * which quietly disagreed with this predicate for a catch-up or a hidden tab and would have had to
+ * be edited in two files the day the finale pick changes.
+ */
+function willEnvelope(pick: number, mode: PlaybackKind): boolean {
+  const reducedMotion =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return envelopeEligible(pick, mode, document.visibilityState === 'hidden', reducedMotion);
+}
+
 function queueEnvelope(
   reveal: LotteryReveal,
   hue: number | undefined,
   leadMs: number,
   mode: PlaybackKind,
 ): void {
-  const reducedMotion =
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (!envelopeEligible(reveal.pick, mode, document.visibilityState === 'hidden', reducedMotion)) {
-    return;
-  }
+  if (!willEnvelope(reveal.pick, mode)) return;
   const token = ++envelopeToken;
   envelopeTimer = window.setTimeout(() => openEnvelope(reveal, hue, token), leadMs);
 }
@@ -1060,23 +1069,8 @@ function renderWaiting(start: LotteryStart, drawn: { pick: number; team: string 
 
 /** Chute-glow lead before the reveal is due — the drum-roll's "something's coming" cue. */
 const CHUTE_GLOW_LEAD_MS = 1150;
-/**
- * Diameter of the hold ball at full size (#265) — big enough to read a team logo, and stepped with
- * the rest of the machine at #256's wide breakpoint. A JS literal here would keep the hold at
- * phone size on a showfloor monitor, so the ball would change size differently on the way out than
- * it did on the way in — exactly the continuity `--tube-ball-px` exists to protect.
- */
-function holdPx(): number {
-  return cssPx('--hold-px', 56);
-}
 /** The face the hold currently wears, so a late-decoding logo can repaint it (#242's rule). */
 let holdFace: { team: string; hue: number | undefined } | null = null;
-/**
- * Which choreography run owns the ball currently at the mouth. A superseded run wakes from its
- * hold timer AFTER the run that replaced it has staged its own ball, so its cleanup has to be able
- * to tell "retire my hold" from "retire whatever is up there now".
- */
-let holdOwner = 0;
 /** Diameter of the ball sliding the chute — must match `#tube-ball` in the page CSS (#258). */
 function tubeBallPx(): number {
   return cssPx('--tube-ball-px', 18);
@@ -1252,12 +1246,14 @@ async function runExitChoreography(
           new Promise<boolean>((resolve) => setTimeout(() => resolve(false), EXTRACT_CAP_MS)),
         ])
       : false;
-  if (token !== choreoToken) return hideHold(token);
+  if (token !== choreoToken) return hideHold();
   // Re-plan against what the extraction ACTUALLY cost. It is the one phase whose length this side
   // cannot dictate — a throttled tab can spend the whole EXTRACT_CAP_MS in there — and spending a
   // hold out of a budget that was already blown is how the drop card gets wiped mid-spring.
+  // A re-plan never returns `skip`: the ball is already out of the pile, so the descent has to be
+  // rendered whatever the clock says. Only the hold is still on the table.
   const budget = flew ? exitBudget(gapMs, performance.now() - startedAt) : planned;
-  if (flew && budget.transitMs > 0) {
+  if (flew) {
     const tube = byId('tube-ball');
     // The real face, not just the hue (#258) — same helper the drop ball uses, so the pile, the
     // tube and the drop ball are unmistakably one ball.
@@ -1267,13 +1263,14 @@ async function runExitChoreography(
     void tube.offsetWidth; // restart the CSS animation for this transit
     tube.classList.add('transit');
     await new Promise((resolve) => setTimeout(resolve, budget.transitMs));
-    if (token !== choreoToken) return hideHold(token);
-    // Pick #1 gets the envelope (#243), which is chained off this promise and runs 3600ms inside
-    // the same gap — a hold there is 600ms taken straight out of the finale. That pick already has
-    // the better showcase; every other pick gets the hold when the gap affords it.
-    if (budget.mode === 'full' && reveal.pick !== 1) {
-      await presentAtMouth(reveal, num, hue, budget.holdMs, token);
-      if (token !== choreoToken) return hideHold(token);
+    if (token !== choreoToken) return hideHold();
+    // The envelope pick (#243) gets no hold: the envelope is chained off this promise and runs
+    // 3600ms inside the same gap, so a hold there is 600ms taken straight out of the finale, and
+    // that pick already has the better showcase. Asked through the shared predicate, so a reveal
+    // that will NOT actually get an envelope — a catch-up, a hidden tab — keeps its hold.
+    if (budget.mode === 'full' && !willEnvelope(reveal.pick, playbackMode)) {
+      await presentAtMouth(reveal, num, hue, budget.holdMs);
+      if (token !== choreoToken) return hideHold();
     }
   }
   exitInFlight = null;
@@ -1320,19 +1317,19 @@ async function runExitChoreography(
  * the budget said the gap can afford it.
  *
  * Everything is a plain timer and every wait is bounded, so a hidden tab lands in the right end
- * state; the caller's `choreoToken` check after this returns is what retires a superseded hold.
+ * state. Retiring a superseded hold is the caller's job — its `choreoToken` check runs the moment
+ * this returns, with nothing in between that could change the answer.
  */
 async function presentAtMouth(
   reveal: LotteryReveal,
   num: number | null,
   hue: number | undefined,
   holdMs: number,
-  token: number,
 ): Promise<void> {
   const chute = byId('chute');
   const hold = byId('tube-hold');
-  holdOwner = token;
-  hold.style.setProperty('--hold-size', `${holdPx()}px`);
+  // Size comes from `--hold-px` (stepped with the drum at #256's breakpoint) read by the
+  // stylesheet itself, so there is no third copy of the number here to drift.
   hold.style.setProperty('--hold-grow', `${Math.min(260, Math.round(holdMs * 0.45))}ms`);
   hold.style.setProperty('--hold-top', `${chute.offsetTop + chute.offsetHeight - 20}px`);
   hold.style.left = `${chute.offsetLeft + chute.offsetWidth / 2}px`;
@@ -1345,7 +1342,6 @@ async function presentAtMouth(
   void hold.offsetWidth; // restart the grow for this pick
   hold.classList.add('present');
   await new Promise((resolve) => setTimeout(resolve, holdMs));
-  if (token !== choreoToken) hideHold(token);
 }
 
 /** The hold ball's rect while it is on screen, so the FLIP starts from what the viewer sees. */
@@ -1357,15 +1353,16 @@ function holdRect(): DOMRect | null {
 }
 
 /**
- * Retire the hold. Safe at any time — every superseded path calls it on the way out.
+ * Retire the hold. Safe at any time — every superseded path calls it on the way out, and a fresh
+ * reveal clears it in its prologue before anything else can look at it.
  *
- * `owner` makes the call conditional on still owning what is up there: a superseded run's timer
- * fires late, by which point the run that replaced it may have staged its own ball, and an
- * unconditional retire would blank the new pick's hold instead of the stale one. Omit `owner` to
- * clear unconditionally (a fresh reveal, a phase wipe, an abort).
+ * Unconditional on purpose. A superseded run cannot blank a successor's ball by calling this late:
+ * its own hold timer runs at most HOLD_MAX_MS, while a successor needs EXTRACT_MS + TUBE_MIN_MS
+ * before it has a ball to stage — so the stale wake-up always lands first, on an already-cleared
+ * element. An ownership token here would be a second mechanism guarding a race the timings
+ * already rule out.
  */
-function hideHold(owner?: number): undefined {
-  if (owner !== undefined && owner !== holdOwner) return;
+function hideHold(): undefined {
   holdFace = null;
   const hold = document.getElementById('tube-hold');
   if (!hold) return;

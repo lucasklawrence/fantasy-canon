@@ -408,6 +408,26 @@ describe('nextDelayMs (#265 — the gap a step handler can actually read)', () =
     cursor.start();
     expect(cursor.nextDelayMs()).toBe(1000); // the armed head, not the 700 behind it
   });
+
+  // A frozen cursor has no runway to report: `resume` re-arms from the banked remainder, so the
+  // head's own delay would overstate it — and a planner handed that number would budget a
+  // flourish into a gap the resume immediately cuts short.
+  it('reports 0 while paused rather than a delay that will not be armed', () => {
+    const clock = fakeClock();
+    const cursor = createPlaybackCursor(
+      [revealStep(1, 1000), revealStep(2, 700)],
+      () => {},
+      () => {},
+      clock,
+    );
+    cursor.start();
+    clock.advance(800);
+    cursor.pause();
+    expect(cursor.remainingMs()).toBe(200); // banked, and still the right question to ask here
+    expect(cursor.nextDelayMs()).toBe(0);
+    cursor.resume();
+    expect(cursor.nextDelayMs()).toBe(1000);
+  });
 });
 
 describe('onHiddenAction', () => {

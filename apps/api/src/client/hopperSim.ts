@@ -19,7 +19,7 @@ import Matter from 'matter-js';
 
 import { assignBallRanges, ballRadius } from './ballAssignments.js';
 import { buildBallSprite } from './ballSprite.js';
-import { EXTRACT_MS } from './exitBudget.js';
+import { EXTRACT_MS, EXTRACT_SNAP_MS } from './exitBudget.js';
 
 const { Bodies, Body, Composite, Engine, Sleeping } = Matter;
 
@@ -70,10 +70,11 @@ export interface HopperSim {
 const FADE_MS = 450;
 /** Fixed physics step — matter-js recommends a constant delta for stability. */
 const STEP_MS = 1000 / 60;
-// How long the drawn ball takes to swim from the pile to the chute mouth. Owned by `exitBudget`,
-// which plans the whole exit around it (#265) — the two must not drift apart.
-/** Failsafe: an extraction that somehow outlives this snaps to done rather than stall a reveal. */
-const EXTRACT_CAP_MS = 1500;
+// EXTRACT_MS (how long the drawn ball takes to swim from the pile to the chute mouth) and
+// EXTRACT_SNAP_MS (the failsafe below) both live in `exitBudget`, which plans the whole exit
+// around them (#265) and re-plans against what the extraction really cost — they must not drift.
+// Note the caller's give-up timeout is a THIRD number, EXTRACT_CAP_MS, deliberately above the
+// snap so this failsafe always wins while the loop is running.
 
 interface BallMeta {
   num: number;
@@ -270,7 +271,7 @@ export function createHopperSim(
         y: extraction.from.y + (chuteMouth.y - extraction.from.y) * ease,
       });
       Sleeping.set(extraction.body, false);
-      if (t >= 1 || now - extraction.startedAt > EXTRACT_CAP_MS) settleExtraction(true);
+      if (t >= 1 || now - extraction.startedAt > EXTRACT_SNAP_MS) settleExtraction(true);
     }
     Engine.update(engine, STEP_MS);
     draw(now);
