@@ -724,7 +724,12 @@ async function sendBegin(): Promise<void> {
   const accepted = await commissionerPost(
     '/api/lottery/begin',
     { delaySeconds, direction, visual, ballFaces },
-    (status) => (status === 409 ? 'the lobby changed — begin rejected' : 'begin rejected'),
+    // 409 now covers two cases: the lobby moved under the press, or a re-import is still
+    // pending (#250 made those mutually exclusive). Naming both beats asserting the wrong one.
+    (status) =>
+      status === 409
+        ? 'begin rejected — the lobby changed, or a re-import is still running'
+        : 'begin rejected',
   );
   if (!accepted) button.disabled = false;
 }

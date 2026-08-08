@@ -1401,9 +1401,39 @@ describe('performActivityReimport (#219)', () => {
       {
         guildId: 'guild-1',
         stamp: 77,
-        reason: 'this bot has no open lottery for this server — run /canon draftorder setup',
+        reason: 'This bot has no open lottery for this server — run `/canon draftorder setup`.',
       },
     ]);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('names both fixes when the lottery channel cannot be fetched (#250)', async () => {
+    const { context } = createMockContext({ defaultLeagueId: 'league-1' });
+    espnSession();
+    const { stage, released } = releasingReimportStage();
+    // Discord rejects rather than resolving null for Missing Access / Unknown Channel — the
+    // common, PERMANENT cases — but a 5xx rejects the same way, so the message names both.
+    const client = {
+      channels: { fetch: () => Promise.reject(new Error('Missing Access')) },
+    } as unknown as Client;
+
+    await expect(performActivityReimport(client, context, stage)('guild-1')).resolves.toBe(false);
+    expect(released[0]?.reason).toContain('Missing Access');
+    expect(released[0]?.reason).toContain('check the bot can still see it');
+  });
+
+  it('does not claim "no lottery here" once the bag is sealed (#250)', async () => {
+    const { context } = createMockContext({ defaultLeagueId: 'league-1' });
+    espnSession({ state: 'LOTTERY_RUNNING' });
+    const sent: { content?: string }[] = [];
+    const { stage, released } = releasingReimportStage();
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stage)('guild-1'),
+    ).resolves.toBe(false);
+    // The `start` that sealed it replaces the lobby, which clears the press at the source —
+    // releasing here would put "run /canon draftorder setup" on screen mid-draw.
+    expect(released).toHaveLength(0);
     expect(sent).toHaveLength(0);
   });
 

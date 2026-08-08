@@ -404,9 +404,11 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       runReimport(guildId, reimportStamp);
     }
 
-    // Begin (#233): same single-flight discipline. A pending re-import suppresses it outright —
-    // the import's re-arm replaces the bag AND drops the begin request at the source, so sealing
-    // now would commit a bag about to be replaced by one the league hasn't seen re-confirmed.
+    // Begin (#233): same single-flight discipline. The re-import check is now a belt — since
+    // #250 the stage refuses a seal outright while a refetch is pending, so the two flags
+    // cannot both be set by a current api — but an older api (or a frame in flight across a
+    // restart) can still present both, and sealing then would commit a bag about to be replaced
+    // by one the league hasn't seen re-confirmed.
     // On the bot side `runCeremony` flips the session out of GAME_OPEN synchronously, so a frame
     // that arrives after this flight resolves gets a clean refusal rather than a second draw.
     if (

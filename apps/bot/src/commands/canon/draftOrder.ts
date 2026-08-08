@@ -833,21 +833,30 @@ export function performActivityReimport(
 ): (guildId: string | undefined, stamp?: number) => Promise<boolean> {
   return async (guildId, stamp) => {
     if (!guildId) return false;
+    /** Free a press with a reason, keyed to the exact press so a retry survives (#250). */
+    const release = async (reason: string): Promise<void> => {
+      await stage
+        .reimportRelease?.({ guildId, reason, ...(stamp !== undefined ? { stamp } : {}) })
+        .catch((error: unknown) => {
+          console.error('[draftorder] could not release the pending re-import press:', error);
+        });
+    };
+
     const session = getCeremony(guildId);
-    if (!session || session.state !== 'GAME_OPEN' || !session.lobbyChannelId) {
+    if (!session || !session.lobbyChannelId) {
       // No ceremony here to refetch into — most often because this bot restarted and its
       // in-memory sessions are gone while the stage still shows the lobby. Nothing later will
       // ever clear the press, and there is no channel to explain it in, so free it from the
       // Activity: the stage scopes the release to the guild whose lobby is armed.
-      await stage
-        .reimportRelease?.({
-          guildId,
-          ...(stamp !== undefined ? { stamp } : {}),
-          reason: 'this bot has no open lottery for this server — run /canon draftorder setup',
-        })
-        .catch((error: unknown) => {
-          console.error('[draftorder] could not release an unowned re-import press:', error);
-        });
+      await release(
+        'This bot has no open lottery for this server — run `/canon draftorder setup`.',
+      );
+      return false;
+    }
+    if (session.state !== 'GAME_OPEN') {
+      // The bag is already sealed (or the draw is running). Deliberately NOT released with a
+      // "no lottery here" reason — that would be false, and it is also unnecessary: the `start`
+      // that sealed it replaces the lobby on the stage, which clears the press at the source.
       return false;
     }
 
@@ -868,11 +877,7 @@ export function performActivityReimport(
       // Awaited, not fire-and-forget: the stage client bounds every POST with its own timeout,
       // and a refusal is not on the reveal's latency path — so the watcher's single-flight slot
       // is held until the button is genuinely free, and tests need no flush.
-      await stage
-        .reimportRelease?.({ guildId, reason, ...(stamp !== undefined ? { stamp } : {}) })
-        .catch((error: unknown) => {
-          console.error('[draftorder] could not release the pending re-import press:', error);
-        });
+      await release(reason);
     };
     const say = async (line: string): Promise<void> => {
       // Same currency guard as the release: a flight superseded while it was fetching must not
@@ -884,11 +889,15 @@ export function performActivityReimport(
     };
     const refuse = async (reason: string): Promise<false> => {
       console.error(`[draftorder] in-Activity re-import refused: ${reason}`);
-      // Channel line FIRST, button second. Freeing the button invites an immediate retry, and
-      // Discord is the slow half — releasing first would leave a window where the commissioner
-      // is pressing again while this flight still holds the watcher's single-flight slot.
-      await say(`⚠️ **Re-import from ESPN failed** — ${reason}. The bag is unchanged.`);
-      await releasePress(`Re-import failed: ${reason}. The bag is unchanged.`);
+      // Concurrently, not in sequence. Ordering either way costs something: releasing first
+      // frees the button while this flight still holds the watcher's slot, and saying first
+      // means the refusals CAUSED by an unreachable channel wait out a second Discord timeout
+      // before the button comes back. Neither depends on the other, and a retry pressed in
+      // between is queued by the watcher's hand-off rather than lost.
+      await Promise.all([
+        say(`⚠️ **Re-import from ESPN failed** — ${reason}. The bag is unchanged.`),
+        releasePress(`Re-import failed: ${reason}. The bag is unchanged.`),
+      ]);
       return false;
     };
 
@@ -902,8 +911,10 @@ export function performActivityReimport(
         // and no later re-arm is coming to clear the flag, so this one must free it itself.
         return refuse("this lottery wasn't imported from ESPN, so there's no league to refetch");
       }
-      // Two failures with two different fixes, so two different messages: Discord not answering
-      // is worth retrying, a channel the bot genuinely cannot send in is not.
+      // A rejection here is usually PERMANENT (Missing Access, Unknown Channel) and only
+      // sometimes transient (a 5xx or a rate-limit stall), and the two are not reliably
+      // separable from the error alone — so one message that names both fixes, rather than
+      // guessing wrong and sending the commissioner to retry a broken configuration forever.
       let fetchFailed: unknown;
       const channel = await client.channels
         .fetch(session.lobbyChannelId)
@@ -913,7 +924,7 @@ export function performActivityReimport(
         });
       if (fetchFailed !== undefined) {
         return refuse(
-          `the lottery channel couldn't be reached (${describeReimportError(fetchFailed)}) — worth trying again`,
+          `the lottery channel couldn't be reached (${describeReimportError(fetchFailed)}) — check the bot can still see it, then try again`,
         );
       }
       if (!channel?.isSendable()) {

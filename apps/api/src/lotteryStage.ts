@@ -1010,6 +1010,9 @@ export function createLotteryStage(): LotteryStage {
       // "sealing…" — which is also what disables every viewer's begin button until the bot's
       // `start` replaces the lobby or a re-arm invalidates the press.
       beginRequested = request;
+      // Sealing is a commissioner action like any other, so it retires a stale refusal notice
+      // too — otherwise the pill would show "Re-import failed…" for the whole sealing window.
+      clearReimportDenial();
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
     clear(next) {
