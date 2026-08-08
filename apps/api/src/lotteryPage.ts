@@ -84,6 +84,13 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     body:not(.race) .machine { grid-template-columns: 360px 1fr; }
     /* In a narrow side column the heading and the replay button must not fight over one line. */
     body:not(.race) .showfloor > #board .board-head { flex-direction: column; align-items: stretch; }
+    /* Once the stage is gone (the finished board, an abort) the sidebar has nothing to sit beside,
+       and leaving the grid up would strand the board in the narrow first track with hundreds of
+       pixels reserved for nothing. The .hidden class is display:none, so the element is still a
+       grid child — :only-child cannot see that, but :has() can. */
+    body:not(.race) .showfloor:has(> #stage.hidden) { grid-template-columns: minmax(0, 1fr); }
+    body:not(.race) .showfloor:has(> #stage.hidden) > #board { position: static;
+      max-height: none; overflow: visible; }
   }
   /* A second step for a real monitor (#256): a 2560px screen still had ~600px dead either side
      at the first breakpoint. The drum takes most of it — it is the thing worth looking at. */
@@ -158,12 +165,16 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
      resize — the sim's drum geometry, vanes and ball radii are all derived once when it is
      built, so a viewer who resizes mid-session keeps the size they opened at. Inside the
      Activity iframe that is effectively always the final size. */
-  /* Both steps live here, together and in ascending order: they have identical specificity, so
-     source order is what decides between them — split across the sheet, the smaller one silently
-     won at every width. */
-  @media (min-width: 1200px) { body:not(.race) .hopper { width: 320px; height: 320px; } }
-  @media (min-width: 1700px) { body:not(.race) .hopper { width: 400px; height: 400px; } }
-  .hopper { position: relative; width: 260px; height: 260px; margin: 10px auto 0; border-radius: 50%;
+  /* One source of truth for the drum size (#256). It lives on <body> rather than in the .hopper
+     rule because the CLIENT has to read it too: the sim is built from the lobby, while #stage is
+     display:none and the canvas measures 0, so it cannot discover its own size. Both steps sit
+     together and in ascending order — identical specificity means source order decides, and
+     split across the sheet the smaller one silently won at every width. */
+  body { --hopper-px: 260px; }
+  @media (min-width: 1200px) { body:not(.race) { --hopper-px: 320px; } }
+  @media (min-width: 1700px) { body:not(.race) { --hopper-px: 400px; } }
+  .hopper { position: relative; width: var(--hopper-px); height: var(--hopper-px);
+    margin: 10px auto 0; border-radius: 50%;
     border: 3px solid #2b3550; background: radial-gradient(circle at 35% 30%, #1c2338, #10141f 70%);
     overflow: hidden; box-shadow: inset 0 -18px 40px rgba(0,0,0,.5), 0 0 40px rgba(245,214,123,.06); }
   /* The ball pile is a physics sim on this canvas (#211, hopperSim.ts); the pull overlays it. */

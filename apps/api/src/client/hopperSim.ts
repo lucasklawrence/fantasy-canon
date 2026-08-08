@@ -93,12 +93,20 @@ interface BallMeta {
 export function createHopperSim(
   canvas: HTMLCanvasElement,
   getLogo: (team: string) => CanvasImageSource | null = () => null,
+  /**
+   * CSS size of the drum, when the caller knows it and the canvas cannot be measured (#256).
+   * The sim is built lazily from the lobby, where `#stage` is still `display: none` and
+   * `clientWidth` is therefore 0 — the old `|| 260` fallback then baked a 260px backing store
+   * that CSS quietly upscaled at the wide breakpoints, making the bigger drum blurrier rather
+   * than sharper. The caller reads the authoritative size off a custom property instead.
+   */
+  sizePx?: number,
 ): HopperSim {
   const reducedMotion =
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  const cssSize = canvas.clientWidth || 260;
+  const cssSize = sizePx || canvas.clientWidth || 260;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = cssSize * dpr;
   canvas.height = cssSize * dpr;

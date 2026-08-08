@@ -136,11 +136,27 @@ function hopper(): HopperSim {
   // Logo faces (#252) resolve per sprite build: the mode rides `start` (ADR 0008), so the same
   // lookup returns null in numbers mode and during the lobby, keeping the pile numbered there.
   if (!hopperSim) {
-    hopperSim = createHopperSim(byId('hopper-canvas') as HTMLCanvasElement, (team) =>
-      currentStart?.ballFaces === 'logos' ? teamLogo(team) : null,
+    hopperSim = createHopperSim(
+      byId('hopper-canvas') as HTMLCanvasElement,
+      (team) => (currentStart?.ballFaces === 'logos' ? teamLogo(team) : null),
+      drumSizePx(),
     );
   }
   return hopperSim;
+}
+
+/**
+ * The drum's CSS size, read from `--hopper-px` on `<body>` (#256).
+ *
+ * The canvas itself cannot answer this: the sim is built lazily from the lobby, while `#stage`
+ * is still `display: none`, so `clientWidth` is 0. `<body>` is always rendered, so the custom
+ * property resolves at any phase — and because the same property drives the `.hopper` rule, the
+ * breakpoints live in exactly one place instead of being duplicated into a matchMedia ladder.
+ */
+function drumSizePx(): number {
+  const raw = getComputedStyle(document.body).getPropertyValue('--hopper-px');
+  const px = Number.parseFloat(raw);
+  return Number.isFinite(px) && px > 0 ? px : 260;
 }
 
 // The race (#235). Same lazy pattern; only the ceremony's active visual ever instantiates its sim,
