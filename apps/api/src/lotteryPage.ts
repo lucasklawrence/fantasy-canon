@@ -274,6 +274,11 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     .hopper.spinning, .pullball, #drop .dropball, #drop .team, #drop .odds,
     .confetti, #waiting .pulse, #drum .now { animation: none !important; transition: none !important; }
     #drop .dropball.flip { transition: none !important; }
+    /* The close-up (#258) keeps its PURPOSE without its motion: no grow, but the ball still
+       appears at full size and holds, so a reduced-motion viewer can read the logo too. Listed
+       separately from the .pullball rule above because animation:none alone would strand it at
+       the keyframe's starting opacity 0 — visible is the point, moving is not. */
+    #tube-closeup.present { animation: none !important; opacity: 1; transform: scale(1); }
     /* The canvas pile honors this too — hopperSim renders a settled still frame, no loop. */
   }
 </style>

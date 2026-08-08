@@ -35,14 +35,22 @@ describe('tubePlan (#258)', () => {
   });
 
   it('survives degenerate and hostile delays without inverting', () => {
-    // A replay/catch-up compresses pacing hard, and an older api could omit delayMs entirely.
-    for (const delayMs of [0, -1, 1, 250, Number.NaN]) {
-      const plan = tubePlan(Number.isNaN(delayMs) ? 0 : delayMs);
+    // A replay/catch-up compresses pacing hard, and an older api could omit delayMs entirely —
+    // which arrives here as undefined→NaN. Passed straight in, not pre-sanitised by the test.
+    for (const delayMs of [0, -1, 1, 250, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const plan = tubePlan(delayMs);
+      expect(Number.isFinite(plan.transitMs)).toBe(true);
       expect(plan.transitMs).toBeGreaterThan(0);
       expect(plan.presentMs).toBeGreaterThan(0);
       expect(plan.dwellMs).toBeGreaterThan(0);
       expect(plan.totalMs).toBe(plan.transitMs + plan.presentMs + plan.dwellMs);
     }
+  });
+
+  it('treats an unknown pacing as the tightest one, never the loosest', () => {
+    // Guessing generously would let the close-up overrun a 5s gap it turned out to be running in.
+    expect(tubePlan(Number.NaN)).toEqual(tubePlan(5000));
+    expect(tubePlan(0)).toEqual(tubePlan(5000));
   });
 
   it('adds up — totalMs is what the caller actually spends', () => {

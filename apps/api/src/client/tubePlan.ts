@@ -41,7 +41,10 @@ const BUDGET_SHARE = 0.62;
  * longer stare is tedious rather than dramatic.
  */
 export function tubePlan(delayMs: number): TubePlan {
-  const gap = Math.max(1000, delayMs);
+  // An unknown pacing is assumed to be the TIGHTEST supported one, not the loosest: a missing
+  // `delayMs` (an older api, a compressed replay) must never buy the close-up more time than the
+  // gap can afford. NaN/Infinity would otherwise poison every arithmetic step below.
+  const gap = Number.isFinite(delayMs) && delayMs > 0 ? Math.max(1000, delayMs) : 5000;
   // What the post-extraction phases may spend in total. At delay=5s: 5000*0.62 - 1800 = 1300ms.
   const budget = Math.max(300, gap * BUDGET_SHARE - EXTRACT_CAP_MS);
   const transitMs = Math.round(Math.min(760, Math.max(420, budget * 0.45)));

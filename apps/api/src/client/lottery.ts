@@ -196,6 +196,7 @@ function ensureLogos(rows: LotteryOddsRow[]): void {
       raceSim?.reface();
       hopperSim?.reface();
       redressDropBall();
+      redressCloseUp();
     };
     img.onerror = () => logoImages.set(teamId, { url, img: 'failed' });
     // `v` rides the proxy URL so a *changed* logo escapes the hour-long browser/proxy cache the
@@ -313,6 +314,26 @@ function paintBallFace(ball: HTMLElement, team: string, hue: number | undefined)
     ? `center / cover no-repeat url("${logo.src}")${face ? `, ${face}` : ''}`
     : face;
   ball.classList.toggle('logo-face', logo !== null);
+}
+
+/**
+ * The team currently on the close-up (#258), so a logo that decodes mid-hold can still make it
+ * onto the ball the viewer is looking at. Null whenever the close-up is retired.
+ */
+let closeUpFace: { team: string; hue: number | undefined } | null = null;
+
+/**
+ * Re-apply the close-up's face — the sibling of {@link redressDropBall}. A cold load or a
+ * mid-reveal join can still be decoding when the close-up paints, and the whole point of the
+ * beat is the logo, so catching up here matters more than it does for the drop ball.
+ */
+function redressCloseUp(): void {
+  if (!closeUpFace) return;
+  const closeUp = document.getElementById('tube-closeup');
+  if (!closeUp) return;
+  paintBallFace(closeUp, closeUpFace.team, closeUpFace.hue);
+  // The number yields to a logo that has just arrived (same rule as the initial paint).
+  if (closeUp.classList.contains('logo-face')) closeUp.textContent = '';
 }
 
 /** Re-apply the current drop face — called when a logo decodes after the ball was painted. */
@@ -1182,6 +1203,7 @@ async function presentAtMouth(
   closeUp.style.setProperty('--closeup-present', `${plan.presentMs}ms`);
   closeUp.style.setProperty('--closeup-top', `${chute.offsetTop + chute.offsetHeight - 20}px`);
   closeUp.style.left = `${left}px`;
+  closeUpFace = { team: reveal.team, hue };
   paintBallFace(closeUp, reveal.team, hue);
   // The whole point of the close-up is the logo, so the ball number does not sit on top of it —
   // the drop ball leads with `#N` a beat later anyway (#215). Without a logo there is nothing to
@@ -1199,6 +1221,7 @@ async function presentAtMouth(
 
 /** Retire the close-up. Safe to call at any time — a stale choreography clears it on its way out. */
 function hideCloseUp(): void {
+  closeUpFace = null;
   const closeUp = document.getElementById('tube-closeup');
   if (!closeUp) return;
   closeUp.classList.remove('present', 'logo-face');
