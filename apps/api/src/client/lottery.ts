@@ -122,6 +122,11 @@ let railScrolledToPick: number | null = null;
  */
 function keepNewestPickVisible(reveals: LotteryReveal[]): void {
   if (reveals.length === 0) return;
+  // ARRIVAL order, not pick order: the default direction is worst-to-first (#200), where the pick
+  // just drawn is the LOWEST number. Sorting by pick and taking the last would scroll to pick 12
+  // — the oldest reveal — for a whole ceremony. Every transport preserves arrival order (the
+  // stage pushes, the snapshot copies, the WS pushes, replay rebuilds step by step), so the last
+  // entry is the newest; the sorted list is only used to find the ROW it was painted into.
   const newest = reveals[reveals.length - 1].pick;
   if (newest === railScrolledToPick) return;
   const order = [...reveals].sort((a, b) => a.pick - b.pick).findIndex((r) => r.pick === newest);
