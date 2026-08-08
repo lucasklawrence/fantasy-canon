@@ -92,7 +92,7 @@ export interface StageWatcherOptions {
    * false when there is nothing to re-import (wrong guild, sealed bag, a manual `teams:` setup).
    * Omitted ⇒ re-import requests are ignored.
    */
-  reimport?: (guildId: string | undefined) => Promise<boolean>;
+  reimport?: (guildId: string | undefined, stamp?: number) => Promise<boolean>;
   /**
    * Honour an in-Activity "seal the bag & start the draw" request (#233) — run the identical flow
    * as `/canon draftorder begin`. Resolves false when there is nothing to begin (wrong guild, no
@@ -193,6 +193,32 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
   const announcedNames = new Map<string, AnnouncedNames>();
   /** Guilds whose re-import is already running, so one request is honoured exactly once. */
   const reimporting = new Set<string>();
+  /**
+   * The newest refetch stamp each guild's stage has shown us (#250). A press made while an
+   * import is already in flight is skipped by the single-flight guard above and — because the
+   * failing flight's release is scoped to its OWN stamp — nothing else will ever pick it up.
+   * This is how the flight hands off to it on the way out.
+   */
+  const latestReimport = new Map<string, number | undefined>();
+
+  /** One import at a time per guild, chaining straight into a press that arrived meanwhile. */
+  function runReimport(guildId: string, stamp: number): void {
+    const honour = reimport;
+    if (!honour) return;
+    reimporting.add(guildId);
+    void honour(guildId, stamp)
+      .catch((error: unknown) => {
+        // The handler names and releases every refusal it can (#250) and swallows the rest, so
+        // reaching here means something truly unforeseen — logged, and the chain below still
+        // runs so a queued retry is not lost with it.
+        console.error('[draftorder] in-Activity re-import failed:', error);
+      })
+      .finally(() => {
+        reimporting.delete(guildId);
+        const queued = latestReimport.get(guildId);
+        if (queued !== undefined && queued !== stamp) runReimport(guildId, queued);
+      });
+  }
   /** Guilds whose begin is already running — a broadcast storm must not seal a bag twice (#233). */
   const beginning = new Set<string>();
   /** Guilds whose setup is already running — one press, one ESPN import (#253). */
@@ -285,7 +311,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     rows: unknown,
     pending: { teamId: string; balls: number }[],
     pendingNames: { teamId: string; displayName: string }[],
-    reimportRequested: boolean,
+    reimportStamp: number | undefined,
     beginRequest?: StageBeginRequest,
     detail?: StageAdjustmentDetail,
     renamed?: StageRenameDetail,
@@ -373,21 +399,25 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     // The mutating paths. Re-import (#219) first: the api cannot reach ESPN, so a refetch request
     // is ours to honour. Guarded so a broadcast storm or a reconnect snapshot cannot launch it
     // twice; the re-arm that follows a successful import clears the flag at the source.
-    if (reimportRequested && reimport && guildId && !reimporting.has(guildId)) {
-      reimporting.add(guildId);
-      void reimport(guildId)
-        .catch((error: unknown) => {
-          console.error('[draftorder] in-Activity re-import failed:', error);
-        })
-        .finally(() => reimporting.delete(guildId));
+    if (guildId) latestReimport.set(guildId, reimportStamp);
+    if (reimportStamp !== undefined && reimport && guildId && !reimporting.has(guildId)) {
+      runReimport(guildId, reimportStamp);
     }
 
-    // Begin (#233): same single-flight discipline. A pending re-import suppresses it outright —
-    // the import's re-arm replaces the bag AND drops the begin request at the source, so sealing
-    // now would commit a bag about to be replaced by one the league hasn't seen re-confirmed.
+    // Begin (#233): same single-flight discipline. The re-import check is now a belt — since
+    // #250 the stage refuses a seal outright while a refetch is pending, so the two flags
+    // cannot both be set by a current api — but an older api (or a frame in flight across a
+    // restart) can still present both, and sealing then would commit a bag about to be replaced
+    // by one the league hasn't seen re-confirmed.
     // On the bot side `runCeremony` flips the session out of GAME_OPEN synchronously, so a frame
     // that arrives after this flight resolves gets a clean refusal rather than a second draw.
-    if (beginRequest && begin && guildId && !reimportRequested && !beginning.has(guildId)) {
+    if (
+      beginRequest &&
+      begin &&
+      guildId &&
+      reimportStamp === undefined &&
+      !beginning.has(guildId)
+    ) {
       beginning.add(guildId);
       void begin(guildId, beginRequest)
         .catch((error: unknown) => {
@@ -407,6 +437,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       renamed?: unknown;
       renames?: unknown;
       reimportRequested?: unknown;
+      reimportRequestedAt?: unknown;
       beginRequested?: unknown;
       lobby?: unknown;
       snapshot?: unknown;
@@ -423,6 +454,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
         adjustments?: unknown;
         renames?: unknown;
         reimportRequested?: unknown;
+        reimportRequestedAt?: unknown;
         beginRequested?: unknown;
         auditMode?: unknown;
         setupRequested?: unknown;
@@ -451,7 +483,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
         snapshot.lobby?.rows,
         toAdjustments(snapshot.adjustments),
         toRenames(snapshot.renames),
-        snapshot.reimportRequested === true,
+        toReimportStamp(snapshot.reimportRequested, snapshot.reimportRequestedAt),
         toBeginRequest(snapshot.beginRequested),
         undefined,
         undefined,
@@ -475,7 +507,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       lobby.rows,
       toAdjustments(event.adjustments),
       toRenames(event.renames),
-      event.reimportRequested === true,
+      toReimportStamp(event.reimportRequested, event.reimportRequestedAt),
       toBeginRequest(event.beginRequested),
       toDetail(event.adjusted),
       toRenameDetail(event.renamed),
@@ -501,7 +533,16 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     // connect-time snapshots, duplicate audit lines.
     const isCurrent = (): boolean => socket === opened;
     opened.addEventListener('open', () => {
-      if (isCurrent()) attempts = 0;
+      if (!isCurrent()) return;
+      // Say so only when this is a RECOVERY (#250): a healthy boot connect is not news, but
+      // "the watcher is back" is exactly what the operator needs after a silent gap — while it
+      // was down, every in-Activity press (re-import, begin, setup) went unheard.
+      if (attempts > 0) {
+        console.log(
+          `[draftorder] stage watcher reconnected after ${attempts} attempt(s) — in-Activity presses are being heard again`,
+        );
+      }
+      attempts = 0;
     });
     opened.addEventListener('message', (event: { data: unknown }) => {
       if (isCurrent()) handleMessage(event.data);
@@ -523,6 +564,14 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     // may simply not be running.
     const delay = Math.min(BASE_BACKOFF_MS * 2 ** attempts, MAX_BACKOFF_MS);
     attempts += 1;
+    // The gap this leaves is invisible from Discord AND from the Activity — a commissioner's
+    // re-import press just sits there (#250, the live incident). One line per gap, naming the
+    // next retry, is what turns "nothing happened" into a two-second diagnosis in the terminal.
+    // Worded for both callers: a socket that closed and a socket that never opened leave the
+    // watcher equally deaf, and the create-failure path logs its own error just above.
+    console.warn(
+      `[draftorder] stage watcher offline (attempt ${attempts}) — in-Activity presses will not be heard; retrying in ${Math.round(delay / 1000)}s`,
+    );
     reconnectHandle = schedule(() => {
       reconnectHandle = null;
       connect();
@@ -548,6 +597,7 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       announcedNames.clear();
       // Otherwise a guild whose import was in flight at stop() stays blocked after the next start.
       reimporting.clear();
+      latestReimport.clear();
       beginning.clear();
       settingUp.clear();
       if (open) {
@@ -559,6 +609,16 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       }
     },
   };
+}
+
+/**
+ * The pending refetch press as a stamp (#250), or undefined when nothing is pending. An api
+ * from before the stamp existed still says `reimportRequested: true` with no `…At`; `0` keeps
+ * that pending (its release route does not exist either, so nothing is lost by not matching).
+ */
+function toReimportStamp(requested: unknown, at: unknown): number | undefined {
+  if (requested !== true) return undefined;
+  return typeof at === 'number' && Number.isFinite(at) ? at : 0;
 }
 
 /** Guard the `adjusted` detail off an untrusted frame. */

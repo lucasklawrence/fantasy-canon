@@ -233,6 +233,20 @@ export interface LotterySnapshot {
    */
   reimportRequested?: boolean;
   /**
+   * The pending refetch press's stamp (#250) — an opaque identity token, NOT a clock a viewer
+   * should compare against its own: phones and the host machine disagree by minutes. It changes
+   * on every press, which is all a client needs to tell "still the request I've been watching"
+   * from "someone pressed again", and to time its own how-long-has-this-been-pending hint from
+   * when *it* first saw this token.
+   */
+  reimportRequestedAt?: number;
+  /**
+   * Why the last refetch press was refused or failed (#250) — shown once in the lobby so the
+   * presser is never left staring at a silently re-enabled button. Cleared by the next press or
+   * by the re-arm that means the refetch actually landed.
+   */
+  reimportDenied?: string;
+  /**
    * The commissioner pressed "seal the bag" inside the Activity (#233). Present until the bot
    * honours it (its `start` replaces the lobby) or the lobby is re-armed/torn down — the exact
    * lifetime every client's begin button spends disabled.
@@ -341,6 +355,10 @@ export type LotteryEvent =
       renames?: LotteryRename[];
       /** Mirrors {@link LotterySnapshot.reimportRequested}. */
       reimportRequested?: boolean;
+      /** Mirrors {@link LotterySnapshot.reimportRequestedAt} (#250). */
+      reimportRequestedAt?: number;
+      /** Mirrors {@link LotterySnapshot.reimportDenied} (#250). */
+      reimportDenied?: string;
       /** Mirrors {@link LotterySnapshot.beginRequested}. */
       beginRequested?: LotteryBeginRequest;
       /** Mirrors {@link LotterySnapshot.auditMode} (#252). */

@@ -812,136 +812,281 @@ export function postActivityEditLine(
  * Season and league come from the session and the guild's config, so a re-import can never
  * silently retarget a different league than the one `setup` opened.
  */
+/**
+ * An error boiled down to one line fit for two public surfaces (#250): the Activity's status
+ * strip and a channel message. Whitespace is collapsed (a stack trace or a multi-line ESPN body
+ * would wreck both), and the result is short enough that the api's 300-char reason cap never
+ * has to truncate mid-sentence.
+ */
+function describeReimportError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const flat = raw.replace(/\s+/g, ' ').trim();
+  if (!flat) return 'no details';
+  return flat.length > 160 ? `${flat.slice(0, 157)}…` : flat;
+}
+
 export function performActivityReimport(
   client: Client,
   context: BotContext,
   stage: InspectableRevealStage = stageFromEnv(),
-): (guildId: string | undefined) => Promise<boolean> {
-  return async (guildId) => {
+  announce: ReturnType<typeof postActivityEditLine> = postActivityEditLine(client),
+): (guildId: string | undefined, stamp?: number) => Promise<boolean> {
+  return async (guildId, stamp) => {
     if (!guildId) return false;
+    /** Free a press with a reason, keyed to the exact press so a retry survives (#250). */
+    const release = async (reason: string): Promise<void> => {
+      await stage
+        .reimportRelease?.({ guildId, reason, ...(stamp !== undefined ? { stamp } : {}) })
+        .catch((error: unknown) => {
+          console.error('[draftorder] could not release the pending re-import press:', error);
+        });
+    };
+
     const session = getCeremony(guildId);
-    if (!session || session.state !== 'GAME_OPEN' || !session.lobbyChannelId) return false;
-    const { leagueId, season } = session;
-    if (!leagueId || season === undefined) {
-      // A manual `teams:` setup has no ESPN league behind it, so there is nothing to refetch.
-      console.error('[draftorder] re-import requested for a ceremony with no ESPN league');
+    if (!session || !session.lobbyChannelId) {
+      // No ceremony here to refetch into — most often because this bot restarted and its
+      // in-memory sessions are gone while the stage still shows the lobby. Nothing later will
+      // ever clear the press, and there is no channel to explain it in, so free it from the
+      // Activity: the stage scopes the release to the guild whose lobby is armed.
+      await release(
+        'This bot has no open lottery for this server — run `/canon draftorder setup`.',
+      );
       return false;
     }
-    const channel = await client.channels.fetch(session.lobbyChannelId);
-    if (!channel?.isSendable()) return false;
+    if (session.state !== 'GAME_OPEN') {
+      // The bag is already sealed (or the draw is running). Deliberately NOT released with a
+      // "no lottery here" reason — that would be false, and it is also unnecessary: the `start`
+      // that sealed it replaces the lobby on the stage, which clears the press at the source.
+      return false;
+    }
 
-    // Forced refresh, not the cache-first `setup` path: every ESPN-backed setup has already cached
-    // this league/season/view, so a cache read would hand back exactly the roster the commissioner
-    // is asking us to replace and the re-import would silently do nothing.
-    const teams = await resolveEspnTeams(context, leagueId, season, true);
-    // The refetched roster's logo bytes (#254) start fetching now — they need only the roster,
-    // so they overlap the standings round-trip instead of adding to it. Never awaited between
-    // the re-validation below and the roster install, which must stay adjacent. Safe to leave
-    // in flight: the dress never rejects (per-logo failures are swallowed inside the prefetch).
-    const dressing = fetchSessionLogoDress(teams, context);
-    const notes = await applyStandingsWeights(context, leagueId, season, teams, true);
-    const dress = await dressing;
-    // Re-validate after the round-trips above (ESPN, logo prefetch) — a `begin`/`abort`/replacing
-    // `setup` can land while we were fetching, and rebuilding a session that is no longer current
-    // would be a silent clobber of whatever replaced it.
-    const current = getCeremony(guildId);
-    if (current !== session || current.state !== 'GAME_OPEN') return false;
+    /**
+     * Free the press and say why (#250). Two surfaces because they fail independently: the
+     * Activity — where the commissioner is actually looking, and the only one that still works
+     * when the *channel* is what broke — plus a quiet channel line so the refusal is on the
+     * record beside the bag it did not change.
+     *
+     * Guarded twice against freeing something that isn't ours: the session must still be the one
+     * we started from (a replacing `setup` or an abort means the stage's flag belongs to whatever
+     * came after), and the release carries the STAMP of the press being refused — a commissioner
+     * whose retry landed while this import was grinding must not watch it evaporate when this
+     * one fails.
+     */
+    const releasePress = async (reason: string): Promise<void> => {
+      if (getCeremony(guildId) !== session) return;
+      // Awaited, not fire-and-forget: the stage client bounds every POST with its own timeout,
+      // and a refusal is not on the reveal's latency path — so the watcher's single-flight slot
+      // is held until the button is genuinely free, and tests need no flush.
+      await release(reason);
+    };
+    const say = async (line: string): Promise<void> => {
+      // Same currency guard as the release: a flight superseded while it was fetching must not
+      // post its failure into the channel of the ceremony that replaced it.
+      if (getCeremony(guildId) !== session) return;
+      await announce(guildId, line).catch((error: unknown) => {
+        console.error('[draftorder] could not post the re-import line:', error);
+      });
+    };
+    const refuse = async (reason: string): Promise<false> => {
+      console.error(`[draftorder] in-Activity re-import refused: ${reason}`);
+      // Concurrently, not in sequence. Ordering either way costs something: releasing first
+      // frees the button while this flight still holds the watcher's slot, and saying first
+      // means the refusals CAUSED by an unreachable channel wait out a second Discord timeout
+      // before the button comes back. Neither depends on the other, and a retry pressed in
+      // between is queued by the watcher's hand-off rather than lost.
+      await Promise.all([
+        say(`⚠️ **Re-import from ESPN failed** — ${reason}. The bag is unchanged.`),
+        releasePress(`Re-import failed: ${reason}. The bag is unchanged.`),
+      ]);
+      return false;
+    };
 
-    // Validate the refetched roster the way `createCeremony` would, *before* installing it. ESPN
-    // can hand back two teams with the same display name (or a league that outgrew the odds DP
-    // cap), and a session built straight from that would only fail later — at `begin`, or on an
-    // unrelated rename whose uniqueness check trips over it.
-    const refetched = teams.map((team) => ({
-      teamId: team.teamId,
-      displayName: team.name,
-      baseBalls: team.baseBalls,
-      bonusBalls: team.bonusBalls,
-    }));
-    const seenNames = new Set<string>();
-    for (const team of refetched) {
-      const key = (team.displayName ?? team.teamId).toLowerCase();
-      if (seenNames.has(key)) {
-        throw new Error(
-          `ESPN returned two teams called "${team.displayName}" — re-import refused.`,
+    // Every named failure above refuses (releasing the press and saying why); this catches
+    // anything unforeseen so the one outcome #250 exists to prevent — a press that latches
+    // the button with nothing on any surface — stays impossible.
+    try {
+      const { leagueId, season } = session;
+      if (!leagueId || season === undefined) {
+        // A manual `teams:` setup has no ESPN league behind it, so there is nothing to refetch —
+        // and no later re-arm is coming to clear the flag, so this one must free it itself.
+        return refuse("this lottery wasn't imported from ESPN, so there's no league to refetch");
+      }
+      // A rejection here is usually PERMANENT (Missing Access, Unknown Channel) and only
+      // sometimes transient (a 5xx or a rate-limit stall), and the two are not reliably
+      // separable from the error alone — so one message that names both fixes, rather than
+      // guessing wrong and sending the commissioner to retry a broken configuration forever.
+      let fetchFailed: unknown;
+      const channel = await client.channels
+        .fetch(session.lobbyChannelId)
+        .catch((error: unknown) => {
+          fetchFailed = error;
+          return null;
+        });
+      if (fetchFailed !== undefined) {
+        return refuse(
+          `the lottery channel couldn't be reached (${describeReimportError(fetchFailed)}) — check the bot can still see it, then try again`,
         );
       }
-      seenNames.add(key);
-    }
-    computePickOdds(refetched, session.config.baseBallCount);
-
-    // The bag is about to change and its fresh public preview has not posted yet, so `begin` must
-    // not be able to seal it in between — exactly the interlock `miniGameActive` provides for the
-    // reaction round. Without it a commitment could go out for the new bag *before* the preview
-    // that ADR 0006 requires to precede it.
-    session.reimportActive = true;
-    const previous = {
-      teams: session.config.teams,
-      names: session.names,
-      logos: session.logos,
-      logoBytes: session.logoBytes,
-      miniGameBonuses: session.miniGameBonuses,
-    };
-    try {
-      // The whole install is synchronous — nothing may suspend between the first field and the
-      // last, or a reaction round scoring in the gap would bake bonuses into a half-built roster.
-      session.config.teams = refetched;
-      session.names = new Map(teams.map((team) => [team.teamId, team.name]));
-      // Logos travel with the roster they belong to (#242), bytes prefetched above (#254) so
-      // the fresh preview below can wear them.
-      dressSession(session, dress);
-      // A refetched roster invalidates whatever the mini-game awarded against the old one.
-      session.miniGameBonuses = undefined;
-
-      const rows = oddsRows(session);
-      try {
-        await channel.send({
-          content: [
-            `🔄 **${session.title}** — the commissioner re-imported the league from ESPN.`,
-            `${teams.length} teams, ${rows.reduce((sum, row) => sum + row.balls, 0)} balls. Any earlier in-Activity edits were reset.`,
-            ...notes,
-          ].join('\n'),
-          allowedMentions: { parse: [] },
-        });
-        await channelIo(channel).post(await buildPreviewPost(session));
-      } catch (error) {
-        // The card render or the channel send failed, so the new bag has no public preview. Keeping
-        // it would let a later `begin` commit a bag the league never saw — put the old one back.
-        session.config.teams = previous.teams;
-        session.names = previous.names;
-        session.logos = previous.logos;
-        session.logoBytes = previous.logoBytes;
-        session.miniGameBonuses = previous.miniGameBonuses;
-        throw error;
+      if (!channel?.isSendable()) {
+        return refuse("the bot can't post in the lottery channel — check its permissions");
       }
 
-      // Best-effort: the refetch and the public preview have already landed, so a stage that is
-      // down must not turn a completed re-import into a failure. The next `setup`/`begin` re-arms.
-      await stage
-        .lobby({
-          title: session.title,
-          teamCount: session.config.teams.length,
-          totalBalls: rows.reduce((sum, row) => sum + row.balls, 0),
-          rows,
-          guildId,
-          commissionerIds: session.commissionerIds ?? [],
-        })
-        .then(() => {
-          // The refetched roster's logos travel the same push channel as setup's (#249), and
-          // with the same ordering rule: only after the re-arm proved this guild still owns the
-          // stage. Entries record their source URL, so a changed logo replaces cleanly.
-          pushSessionLogos(session, context, stage);
-        })
-        .catch((error: unknown) => {
-          console.error(
-            '[draftorder] re-imported, but could not re-arm the Activity lobby:',
-            error,
+      // Forced refresh, not the cache-first `setup` path: every ESPN-backed setup has already cached
+      // this league/season/view, so a cache read would hand back exactly the roster the commissioner
+      // is asking us to replace and the re-import would silently do nothing.
+      let teams: SetupTeam[];
+      try {
+        teams = await resolveEspnTeams(context, leagueId, season, true);
+      } catch (error) {
+        return refuse(`ESPN wouldn't hand back the league (${describeReimportError(error)})`);
+      }
+      // The refetched roster's logo bytes (#254) start fetching now — they need only the roster,
+      // so they overlap the standings round-trip instead of adding to it. Never awaited between
+      // the re-validation below and the roster install, which must stay adjacent. Safe to leave
+      // in flight: the dress never rejects (per-logo failures are swallowed inside the prefetch).
+      const dressing = fetchSessionLogoDress(teams, context);
+      let notes: string[];
+      try {
+        notes = await applyStandingsWeights(context, leagueId, season, teams, true);
+      } catch (error) {
+        await dressing; // never rejects; awaited so no fetch outlives the refusal unobserved
+        return refuse(
+          `ESPN wouldn't hand back last season's standings (${describeReimportError(error)})`,
+        );
+      }
+      const dress = await dressing;
+      // Re-validate after the round-trips above (ESPN, logo prefetch) — a `begin`/`abort`/replacing
+      // `setup` can land while we were fetching, and rebuilding a session that is no longer current
+      // would be a silent clobber of whatever replaced it.
+      const current = getCeremony(guildId);
+      if (current !== session || current.state !== 'GAME_OPEN') return false;
+
+      // Validate the refetched roster the way `createCeremony` would, *before* installing it. ESPN
+      // can hand back two teams with the same display name (or a league that outgrew the odds DP
+      // cap), and a session built straight from that would only fail later — at `begin`, or on an
+      // unrelated rename whose uniqueness check trips over it.
+      const refetched = teams.map((team) => ({
+        teamId: team.teamId,
+        displayName: team.name,
+        baseBalls: team.baseBalls,
+        bonusBalls: team.bonusBalls,
+      }));
+      const seenNames = new Set<string>();
+      for (const team of refetched) {
+        const key = (team.displayName ?? team.teamId).toLowerCase();
+        if (seenNames.has(key)) {
+          // Refused rather than thrown (#250): the roster ESPN holds is not something a retry will
+          // fix, so the commissioner needs the reason on screen — and the button back.
+          return refuse(`ESPN returned two teams called "${team.displayName ?? ''}"`);
+        }
+        seenNames.add(key);
+      }
+      try {
+        computePickOdds(refetched, session.config.baseBallCount);
+      } catch (error) {
+        return refuse(
+          `the refetched roster can't produce exact odds (${describeReimportError(error)})`,
+        );
+      }
+
+      // The bag is about to change and its fresh public preview has not posted yet, so `begin` must
+      // not be able to seal it in between — exactly the interlock `miniGameActive` provides for the
+      // reaction round. Without it a commitment could go out for the new bag *before* the preview
+      // that ADR 0006 requires to precede it.
+      session.reimportActive = true;
+      const previous = {
+        teams: session.config.teams,
+        names: session.names,
+        logos: session.logos,
+        logoBytes: session.logoBytes,
+        miniGameBonuses: session.miniGameBonuses,
+      };
+      try {
+        // The whole install is synchronous — nothing may suspend between the first field and the
+        // last, or a reaction round scoring in the gap would bake bonuses into a half-built roster.
+        session.config.teams = refetched;
+        session.names = new Map(teams.map((team) => [team.teamId, team.name]));
+        // Logos travel with the roster they belong to (#242), bytes prefetched above (#254) so
+        // the fresh preview below can wear them.
+        dressSession(session, dress);
+        // A refetched roster invalidates whatever the mini-game awarded against the old one.
+        session.miniGameBonuses = undefined;
+
+        const rows = oddsRows(session);
+        try {
+          // ONE send, announcement and card together (#250 review). Two sends could half-succeed:
+          // the "re-imported the league … edits were reset" line would already be in the channel
+          // when the card failed, and the rollback's "The bag is unchanged" would then directly
+          // contradict the line above it — with no way for a reader to tell which was true.
+          const preview = await buildPreviewPost(session);
+          await channelIo(channel).post({
+            ...preview,
+            content: [
+              `🔄 **${session.title}** — the commissioner re-imported the league from ESPN.`,
+              `${teams.length} teams, ${rows.reduce((sum, row) => sum + row.balls, 0)} balls. Any earlier in-Activity edits were reset.`,
+              ...notes,
+              preview.content,
+            ].join('\n'),
+          });
+        } catch (error) {
+          // The card render or the channel send failed, so the new bag has no public preview. Keeping
+          // it would let a later `begin` commit a bag the league never saw — put the old one back.
+          session.config.teams = previous.teams;
+          session.names = previous.names;
+          session.logos = previous.logos;
+          session.logoBytes = previous.logoBytes;
+          session.miniGameBonuses = previous.miniGameBonuses;
+          // Rolled back, so this is a plain refusal — and the button must come back even though
+          // the channel is the surface that just failed (the Activity still gets the reason).
+          return await refuse(
+            `the fresh odds preview couldn't be posted (${describeReimportError(error)})`,
           );
-        });
-    } finally {
-      session.reimportActive = false;
+        }
+
+        // Best-effort: the refetch and the public preview have already landed, so a stage that is
+        // down must not turn a completed re-import into a failure. The next `setup`/`begin` re-arms.
+        await stage
+          .lobby({
+            title: session.title,
+            teamCount: session.config.teams.length,
+            totalBalls: rows.reduce((sum, row) => sum + row.balls, 0),
+            rows,
+            guildId,
+            commissionerIds: session.commissionerIds ?? [],
+          })
+          .then(() => {
+            // The refetched roster's logos travel the same push channel as setup's (#249), and
+            // with the same ordering rule: only after the re-arm proved this guild still owns the
+            // stage. Entries record their source URL, so a changed logo replaces cleanly.
+            pushSessionLogos(session, context, stage);
+          })
+          .catch(async (error: unknown) => {
+            console.error(
+              '[draftorder] re-imported, but could not re-arm the Activity lobby:',
+              error,
+            );
+            // The refetch itself landed — channel has the fresh preview — but the re-arm that
+            // would have cleared the request never happened, so the button would stay disabled
+            // for every commissioner (#250, the reported symptom). Free it and say what happened:
+            // "unchanged" would be a lie here, so this line is worded for the split state.
+            await say(
+              "⚠️ **Re-import landed, but the Activity couldn't be updated** — the odds above are current; " +
+                'the Lottery Machine may still show the old bag until the next change.',
+            );
+            // NOT phrased as a failure: the refetch happened and the channel has the new odds.
+            // The client prints this reason verbatim, so it must be true standing alone.
+            await releasePress(
+              'Re-import landed — the odds card in the channel is current, but this screen may still show the old bag.',
+            );
+          });
+      } finally {
+        session.reimportActive = false;
+      }
+      console.log(`[draftorder] re-imported ${teams.length} teams from ESPN for guild ${guildId}`);
+      return true;
+    } catch (error) {
+      return await refuse(`something went wrong (${describeReimportError(error)})`);
     }
-    console.log(`[draftorder] re-imported ${teams.length} teams from ESPN for guild ${guildId}`);
-    return true;
   };
 }
 

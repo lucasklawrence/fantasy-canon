@@ -430,6 +430,80 @@ let commissioner = false;
 const editsInFlight = new Set<string>();
 /** Server-truth "an ESPN re-import is pending" (#227) — drives the re-import button's state. */
 let reimportPending = false;
+/**
+ * How long a pending re-import may sit before this client says the bot may not be listening
+ * (#250). Generous on purpose: a real refetch is two ESPN round-trips plus a card render plus
+ * the logo prefetch, and calling a slow import "offline" would be worse than saying nothing.
+ */
+const REIMPORT_NO_RESPONSE_MS = 25_000;
+/**
+ * Which press we are watching — the server's stamp, used purely as an identity token (#250).
+ * It is never subtracted from a local `Date.now()`: a phone and the host machine can disagree by
+ * minutes, and a skewed subtraction would either cry "offline" instantly or never at all. The
+ * elapsed measurement is the local timer below, started when THIS client first saw this token —
+ * so a late joiner under-reports the wait, which is the safe direction (it never accuses a bot
+ * that is working).
+ */
+let reimportStamp: number | undefined;
+/** True once the pending press has outlived {@link REIMPORT_NO_RESPONSE_MS} on this client. */
+let reimportStale = false;
+/** Why the last press was refused (#250) — one-shot, cleared by the next press or a re-arm. */
+let reimportDenied: string | undefined;
+/** The one-shot timer that flips {@link reimportStale} without waiting for a broadcast. */
+let reimportStaleTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Track the pending-refetch press across repaints (#250). The stamp is an identity token, so a
+ * re-press (new stamp) restarts the local clock and clears a previous refusal, while repeated
+ * snapshots carrying the same stamp leave the elapsed measurement alone.
+ */
+function trackReimportPress(stamp: number | undefined, denied: string | undefined): void {
+  reimportDenied = denied;
+  if (stamp === undefined) {
+    reimportStamp = undefined;
+    reimportStale = false;
+    if (reimportStaleTimer !== undefined) clearTimeout(reimportStaleTimer);
+    reimportStaleTimer = undefined;
+    return;
+  }
+  if (stamp === reimportStamp) return;
+  reimportStamp = stamp;
+  reimportStale = false;
+  if (reimportStaleTimer !== undefined) clearTimeout(reimportStaleTimer);
+  // Not the #227 anti-pattern: this timer never *infers* that the import finished — only the
+  // broadcast does that. It just stops the page claiming work is in flight when nothing has
+  // answered, and hands the button back so a retry is possible.
+  reimportStaleTimer = setTimeout(() => {
+    reimportStaleTimer = undefined;
+    // Both guards matter: the stamp may have moved on (a retry, or the press being answered),
+    // and the lobby may be gone entirely — leaving the phase clears the tracker, so `currentLobby`
+    // absent means there is no lobby left to paint this onto.
+    if (reimportStamp !== stamp || !currentLobby) return;
+    reimportStale = true;
+    renderLobby(currentLobby);
+    paintLobbyStatus();
+  }, REIMPORT_NO_RESPONSE_MS);
+}
+
+/**
+ * The lobby's status pill. Re-import feedback outranks the resting line (#250): a refusal, or a
+ * press nothing has answered, is the one thing on this screen the commissioner must act on.
+ */
+function paintLobbyStatus(): void {
+  // Printed verbatim: the bot writes a complete sentence because not every release is a failure
+  // — the "import landed but the lobby couldn't be re-armed" path would be a lie under a
+  // hardcoded "failed" prefix (#250 review).
+  if (reimportDenied) setStatus(reimportDenied, 'err');
+  else if (reimportPending && reimportStale) {
+    setStatus('re-import: no response from the bot — is it running?', 'err');
+  } else if (reimportPending) setStatus('re-importing from ESPN…', 'live');
+  else {
+    setStatus(
+      beginPending ? 'sealing the bag — draw starting…' : 'setup complete — draw pending',
+      'live',
+    );
+  }
+}
 /** Server-truth "a seal-and-start is pending" (#233) — same broadcast-driven discipline. */
 let beginPending = false;
 /** Server-truth audit chatter mode (#252) — the select reflects this, never the reverse. */
@@ -622,10 +696,13 @@ async function sendReimport(): Promise<void> {
   button.disabled = true;
   setStatus('re-importing from ESPN…', 'live');
   const accepted = await commissionerPost('/api/lottery/reimport', {}, () => 're-import rejected');
-  // No timer (#227): an accepted request broadcasts `reimportRequested`, and the button tracks
-  // that flag through `renderLobby` until the bot's re-arm clears it — disabled for exactly as
-  // long as an import is genuinely pending. Only a rejected/failed POST re-enables here, since
-  // no broadcast will.
+  // The button tracks the broadcast flag through `renderLobby` (#227), not a timer, so an
+  // accepted request stays disabled for exactly as long as the stage says work is pending —
+  // until the bot's re-arm clears it, it releases the press with a reason, or this client
+  // decides nothing ever answered (#250). Only a rejected/failed POST re-enables here, since
+  // no broadcast will; the pill would otherwise keep claiming an import is running.
+  // Deliberately no repaint here: `commissionerPost` has already put the rejection reason in the
+  // pill, and the resting line would bury the one thing the commissioner needs to read.
   if (!accepted) button.disabled = false;
 }
 
@@ -647,7 +724,12 @@ async function sendBegin(): Promise<void> {
   const accepted = await commissionerPost(
     '/api/lottery/begin',
     { delaySeconds, direction, visual, ballFaces },
-    (status) => (status === 409 ? 'the lobby changed — begin rejected' : 'begin rejected'),
+    // 409 now covers two cases: the lobby moved under the press, or a re-import is still
+    // pending (#250 made those mutually exclusive). Naming both beats asserting the wrong one.
+    (status) =>
+      status === 409
+        ? 'begin rejected — the lobby changed, or a re-import is still running'
+        : 'begin rejected',
   );
   if (!accepted) button.disabled = false;
 }
@@ -799,7 +881,12 @@ function renderLobby(lobby: LotteryLobby): void {
   // see the true state too. The two block each other (#233): a re-import replaces the very bag a
   // seal would commit, and a seal makes a refetch moot.
   const frozen = beginPending || reimportPending;
-  (byId('reimport-btn') as HTMLButtonElement).disabled = frozen;
+  // A press nothing has answered for a while hands back ONLY its own button (#250): the flag is
+  // proof the api heard the press, never proof the BOT did, and the live incident was exactly
+  // that gap — a retry is the honest recovery. The rest of the lobby stays frozen on server
+  // truth, because the bot may simply be slow, and a `begin` recorded while the stage still
+  // holds `reimportRequested` is suppressed watcher-side with nothing to release it.
+  (byId('reimport-btn') as HTMLButtonElement).disabled = frozen && !reimportStale;
   (byId('begin-btn') as HTMLButtonElement).disabled = frozen;
   (byId('begin-delay') as HTMLSelectElement).disabled = beginPending;
   (byId('begin-direction') as HTMLSelectElement).disabled = beginPending;
@@ -1574,6 +1661,10 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
   // Same for the drum-roll in flight (#207): only a mid-reveal snapshot has one; any other phase
   // means whatever beat we knew about has been consumed or discarded.
   livePendingBeat = snapshot.phase === 'revealing' ? (snapshot.pendingBeat ?? null) : null;
+  // The re-import tracker is lobby-scoped (#250). Clearing it here — not only in the lobby
+  // branch — is what stops a pending press's timer firing minutes later over an idle or live
+  // screen and painting a false "no response from the bot" on top of it.
+  if (snapshot.phase !== 'lobby') trackReimportPress(undefined, undefined);
   // A fresh phase repaints from scratch: hide the sections a previous run may have left visible
   // (a re-run start after a finished/aborted ceremony must not show stale board/verify/abort),
   // and re-arm the one-shot celebration.
@@ -1643,19 +1734,21 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       commissionerCheck = null;
       break;
     }
-    case 'lobby':
+    case 'lobby': {
       // Pre-commitment lobby (#198): show odds without the commitment hash.
       reimportPending = snapshot.reimportRequested === true;
       beginPending = snapshot.beginRequested !== undefined;
       auditModeCurrent = snapshot.auditMode === 'seal-only' ? 'seal-only' : 'live';
-      if (snapshot.lobby) renderLobby(snapshot.lobby);
-      setStatus(
-        beginPending ? 'sealing the bag — draw starting…' : 'setup complete — draw pending',
-        'live',
+      trackReimportPress(
+        reimportPending ? (snapshot.reimportRequestedAt ?? 0) : undefined,
+        snapshot.reimportDenied,
       );
+      if (snapshot.lobby) renderLobby(snapshot.lobby);
+      paintLobbyStatus();
       show('waiting', true);
       show('stage', false);
       break;
+    }
     case 'waiting':
       if (snapshot.start) renderWaiting(snapshot.start);
       setStatus('waiting', 'live');
@@ -1734,6 +1827,10 @@ function applyEvent(event: LotteryEvent): void {
         lobby: event.lobby,
         reveals: [],
         ...(event.reimportRequested ? { reimportRequested: true } : {}),
+        ...(event.reimportRequestedAt !== undefined
+          ? { reimportRequestedAt: event.reimportRequestedAt }
+          : {}),
+        ...(event.reimportDenied ? { reimportDenied: event.reimportDenied } : {}),
         ...(event.beginRequested ? { beginRequested: event.beginRequested } : {}),
         ...(event.auditMode ? { auditMode: event.auditMode } : {}),
       });

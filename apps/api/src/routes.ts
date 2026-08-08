@@ -32,6 +32,7 @@ import {
   parseLotteryLobby,
   parseLotteryRename,
   parseLotteryReveal,
+  parseLotteryReimportRelease,
   parseLotterySetupRelease,
   parseLotterySetupRequest,
   parseLotteryStart,
@@ -383,6 +384,15 @@ async function lotteryRoute(
       const parsed = parseLotterySetupRelease(body);
       if ('error' in parsed) return json(400, { error: parsed.error });
       deps.lottery.releaseSetup(parsed.value);
+      return json(200, { ok: true });
+    }
+    case '/api/lottery/reimport-release': {
+      // Bot-keyed refusal of a re-import press (#250): same shape and same reason — a button
+      // whose request the bot dropped must not stay disabled until the next setup. Carries the
+      // stamp of the press it refuses, so a retry recorded meanwhile is not swept up with it.
+      const parsed = parseLotteryReimportRelease(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.releaseReimport(parsed.value);
       return json(200, { ok: true });
     }
     case '/api/lottery/logo-cache': {

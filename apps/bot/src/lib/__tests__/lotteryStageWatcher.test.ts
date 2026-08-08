@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   adjustmentLine,
   BASE_BACKOFF_MS,
@@ -47,7 +47,7 @@ const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 
 /** Harness: records posts, captures scheduled reconnects so a test can run them deterministically. */
 function harness(
   deliver: (attempt: number) => Promise<boolean> = () => Promise.resolve(true),
-  reimport?: (guildId: string | undefined) => Promise<boolean>,
+  reimport?: (guildId: string | undefined, stamp?: number) => Promise<boolean>,
   begin?: (guildId: string | undefined, request: StageBeginRequest) => Promise<boolean>,
   setup?: (request: StageSetupRequest) => Promise<boolean>,
 ) {
@@ -340,6 +340,37 @@ describe('createStageWatcher (#220)', () => {
     expect(h.posts).toHaveLength(0);
   });
 
+  it('says so in the log when the socket drops and when it comes back (#250)', () => {
+    // The gap is invisible from Discord and from the Activity — a commissioner's press just sits
+    // there. One line per drop and one on recovery is what made the live incident diagnosable.
+    const warns: string[] = [];
+    const logs: string[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => {
+      warns.push(a.join(' '));
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+      logs.push(a.join(' '));
+    });
+    try {
+      const h = harness();
+      h.watcher.start();
+      h.latest().open();
+      // A clean first connect is not news.
+      expect(logs.filter((l) => l.includes('reconnected'))).toHaveLength(0);
+
+      h.latest().drop();
+      expect(warns.some((w) => w.includes('stage watcher offline'))).toBe(true);
+      expect(warns.some((w) => w.includes('will not be heard'))).toBe(true);
+
+      h.runReconnect();
+      h.latest().open();
+      expect(logs.some((l) => l.includes('stage watcher reconnected'))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
   it('posts a line for a rename, independently of the ball edits (#219)', async () => {
     const h = harness();
     h.watcher.start();
@@ -424,6 +455,47 @@ describe('createStageWatcher (#220)', () => {
     await flush();
     await h.send(flagged);
     expect(calls).toEqual(['g1', 'g1']);
+  });
+
+  it('picks up a retry pressed while an import was already in flight (#250)', async () => {
+    // The client hands the button back after a long silence, so a second press can land while
+    // the first import is still running. The single-flight guard skips it, and the first
+    // attempt's release is scoped to its own stamp — so without this hand-off nothing would
+    // ever honour the retry, which is the same "accepted, then nothing happened" the issue is
+    // about.
+    const calls: (number | undefined)[] = [];
+    const releases: (() => void)[] = [];
+    const h = harness(undefined, (_guildId, stamp) => {
+      calls.push(stamp);
+      return new Promise<boolean>((resolve) => {
+        releases.push(() => resolve(false));
+      });
+    });
+    h.watcher.start();
+    h.latest().open();
+
+    const press = (at: number): unknown => ({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      reimportRequested: true,
+      reimportRequestedAt: at,
+    });
+    await h.send(press(100));
+    expect(calls).toEqual([100]);
+
+    // The retry, recorded while the first import is still grinding: skipped for now…
+    await h.send(press(101));
+    expect(calls).toEqual([100]);
+
+    // …and picked up the moment the first flight settles, without a further broadcast.
+    releases[0]();
+    await flush();
+    expect(calls).toEqual([100, 101]);
+
+    // The second flight finishing with nothing newer queued must not loop.
+    releases[1]();
+    await flush();
+    expect(calls).toEqual([100, 101]);
   });
 
   it('ignores a re-import request when no handler is wired', async () => {
