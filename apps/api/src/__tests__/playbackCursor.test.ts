@@ -12,6 +12,7 @@ import {
   createPlaybackCursor,
   onHiddenAction,
   type PlaybackClock,
+  type PlaybackCursor,
 } from '../client/playbackCursor.js';
 import type { PendingStep } from '../client/replayTimeline.js';
 
@@ -335,6 +336,77 @@ describe('scaleDelay (#207 catch-up hurry)', () => {
     cursor.resume();
     clock.advance(200);
     expect(played).toEqual([1]);
+  });
+});
+
+describe('nextDelayMs (#265 — the gap a step handler can actually read)', () => {
+  /**
+   * Every reading here is taken from INSIDE `onStep`, because that is the only place the client
+   * ever asks: the exit planner needs to know how long this reveal has before the next event
+   * supersedes it, and it is running as that reveal's handler.
+   */
+  function readFromInsideSteps(steps: PendingStep[], scale?: (d: number, depth: number) => number) {
+    const clock = fakeClock();
+    const next: number[] = [];
+    const remaining: number[] = [];
+    const firedAt: number[] = [];
+    const cursor: PlaybackCursor = createPlaybackCursor(
+      steps,
+      () => {
+        firedAt.push(clock.now());
+        next.push(cursor.nextDelayMs());
+        remaining.push(cursor.remainingMs());
+      },
+      () => {},
+      clock,
+      scale,
+    );
+    cursor.start();
+    clock.advance(100_000);
+    return { next, remaining, firedAt };
+  }
+
+  // The regression that made this method necessary: `arm` nulls the timer handle before it
+  // dispatches, so `remainingMs()` short-circuits to 0 for the whole duration of a step. An
+  // earlier revision of the exit planner read it there, took the 0 as "unknown", and silently
+  // budgeted every replay against the LIVE pacing — a dead branch under passing tests.
+  it('answers from inside a step, where remainingMs() structurally cannot', () => {
+    const { next, remaining } = readFromInsideSteps([
+      revealStep(1, 1000),
+      revealStep(2, 700),
+      revealStep(3, 400),
+    ]);
+    expect(remaining).toEqual([0, 0, 0]);
+    expect(next).toEqual([700, 400, 0]);
+  });
+
+  // The value has to be the one `schedule` is about to arm — scale included — or the planner is
+  // budgeting against a cadence the cursor is not actually playing.
+  it('reports the scaled delay, and it matches the gap that then really elapses', () => {
+    const { next, firedAt } = readFromInsideSteps(
+      [revealStep(1, 1000), revealStep(2, 1000), revealStep(3, 1000)],
+      (d, depth) => (depth > 1 ? d * 0.35 : d), // catchUpPace's sprint shape
+    );
+    const realGaps = firedAt.slice(1).map((at, i) => at - firedAt[i]);
+    expect(next.slice(0, -1)).toEqual(realGaps);
+    expect(next).toEqual([350, 1000, 0]);
+  });
+
+  // Pinning the wrinkle rather than leaving it to be rediscovered: this is a reading FOR step
+  // handlers. `schedule` deliberately leaves the head in the queue until its timer fires, so
+  // outside a handler the head has not been shifted and this reads the armed step itself.
+  // Callers outside a step want `remainingMs`.
+  it('is a step-handler reading — outside one the head has not been shifted yet', () => {
+    const clock = fakeClock();
+    const cursor = createPlaybackCursor(
+      [revealStep(1, 1000), revealStep(2, 700)],
+      () => {},
+      () => {},
+      clock,
+    );
+    expect(cursor.nextDelayMs()).toBe(0); // not running yet
+    cursor.start();
+    expect(cursor.nextDelayMs()).toBe(1000); // the armed head, not the 700 behind it
   });
 });
 

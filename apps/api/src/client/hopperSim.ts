@@ -19,6 +19,7 @@ import Matter from 'matter-js';
 
 import { assignBallRanges, ballRadius } from './ballAssignments.js';
 import { buildBallSprite } from './ballSprite.js';
+import { EXTRACT_MS } from './exitBudget.js';
 
 const { Bodies, Body, Composite, Engine, Sleeping } = Matter;
 
@@ -69,8 +70,8 @@ export interface HopperSim {
 const FADE_MS = 450;
 /** Fixed physics step — matter-js recommends a constant delta for stability. */
 const STEP_MS = 1000 / 60;
-/** How long the drawn ball takes to swim from the pile to the chute mouth. */
-const EXTRACT_MS = 620;
+// How long the drawn ball takes to swim from the pile to the chute mouth. Owned by `exitBudget`,
+// which plans the whole exit around it (#265) — the two must not drift apart.
 /** Failsafe: an extraction that somehow outlives this snaps to done rather than stall a reveal. */
 const EXTRACT_CAP_MS = 1500;
 
