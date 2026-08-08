@@ -53,7 +53,6 @@ import {
   type CatchUpContext,
 } from './replayTimeline.js';
 import { configuredMaxTeamBalls, runHandshake } from './sdk.js';
-import { EXTRACT_CAP_MS, MIN_GAP_MS, tubePlan, type TubePlan } from './tubePlan.js';
 import { apiPath, isDiscordActivity, proxyBase, wsUrl } from './transport.js';
 
 function byId(id: string): HTMLElement {
@@ -196,7 +195,6 @@ function ensureLogos(rows: LotteryOddsRow[]): void {
       raceSim?.reface();
       hopperSim?.reface();
       redressDropBall();
-      redressCloseUp();
     };
     img.onerror = () => logoImages.set(teamId, { url, img: 'failed' });
     // `v` rides the proxy URL so a *changed* logo escapes the hour-long browser/proxy cache the
@@ -304,8 +302,9 @@ function applyDropFace(ball: HTMLElement, team: string, hue: number | undefined)
 
 /**
  * Paint a ball element with a team's face — the logo when we have one, the hue gradient
- * underneath it either way (#258). Shared by the drop ball and the tube close-up so the ball the
- * league watches leave the tube is unmistakably the one that lands.
+ * underneath it either way. Shared by the drop ball and the tube ball (#258): the ball sliding
+ * down the chute used to wear a bare hue gradient, so in logo mode (#252) the ball the pile
+ * released visibly changed identity on its way to the one that lands.
  */
 function paintBallFace(ball: HTMLElement, team: string, hue: number | undefined): void {
   const logo = teamLogo(team);
@@ -314,26 +313,6 @@ function paintBallFace(ball: HTMLElement, team: string, hue: number | undefined)
     ? `center / cover no-repeat url("${logo.src}")${face ? `, ${face}` : ''}`
     : face;
   ball.classList.toggle('logo-face', logo !== null);
-}
-
-/**
- * The team currently on the close-up (#258), so a logo that decodes mid-hold can still make it
- * onto the ball the viewer is looking at. Null whenever the close-up is retired.
- */
-let closeUpFace: { team: string; hue: number | undefined } | null = null;
-
-/**
- * Re-apply the close-up's face — the sibling of {@link redressDropBall}. A cold load or a
- * mid-reveal join can still be decoding when the close-up paints, and the whole point of the
- * beat is the logo, so catching up here matters more than it does for the drop ball.
- */
-function redressCloseUp(): void {
-  if (!closeUpFace) return;
-  const closeUp = document.getElementById('tube-closeup');
-  if (!closeUp) return;
-  paintBallFace(closeUp, closeUpFace.team, closeUpFace.hue);
-  // The number yields to a logo that has just arrived (same rule as the initial paint).
-  if (closeUp.classList.contains('logo-face')) closeUp.textContent = '';
 }
 
 /** Re-apply the current drop face — called when a logo decodes after the ball was painted. */
@@ -992,23 +971,10 @@ function renderWaiting(start: LotteryStart, drawn: { pick: number; team: string 
 
 /** Chute-glow lead before the reveal is due — the drum-roll's "something's coming" cue. */
 const CHUTE_GLOW_LEAD_MS = 1150;
-/**
- * Diameter of the close-up ball at full size (#258) — big enough to read a team logo. Written
- * into `--closeup-size` at run time, so the CSS fallback exists only for a stylesheet loaded
- * without the client and must match this number.
- */
-const CLOSEUP_PX = 56;
-
-/**
- * Where the drop ball's FLIP starts: the ball's centre in viewport coordinates and its diameter.
- * A point rather than a rect because the two sources disagree about where inside their box the
- * ball actually is — it rests near the bottom of the 46px chute, but fills the close-up.
- */
-interface FlipAnchor {
-  cx: number;
-  cy: number;
-  size: number;
-}
+/** Tube descent duration; a fixed timer rather than animationend so it settles even when hidden. */
+const TUBE_MS = 420;
+/** Diameter of the ball sliding the chute — must match `#tube-ball` in the page CSS (#258). */
+const TUBE_BALL_PX = 18;
 let chuteTimer: ReturnType<typeof setTimeout> | null = null;
 /** Beat pick the glow is armed for — poll repaints of the same beat must not restart it. */
 let armedPick: number | null = null;
@@ -1054,9 +1020,8 @@ function resetChute(): void {
   exitInFlight = null;
   resetGlow();
   const tube = byId('tube-ball');
-  tube.classList.remove('transit', 'logo-face');
+  tube.classList.remove('transit');
   tube.style.background = '';
-  hideCloseUp();
 }
 
 /** Swap a node for a bare clone — the only way to retrigger its CSS animations. */
@@ -1071,21 +1036,22 @@ function replaceNode(id: string): HTMLElement {
  * FLIP handoff: the drop ball starts at the chute exit (where the pulled ball just arrived) and
  * springs to its resting spot — the pull and the reveal read as one continuous motion.
  */
-function flipFromChute(ball: HTMLElement, from: FlipAnchor): void {
+function flipFromChute(ball: HTMLElement, from: DOMRect): void {
   // The clone carries the previous reveal's flip/fall classes — strip them so the start
   // transform below is applied instantly, by intent rather than by insertion semantics.
   ball.classList.remove('flip', 'fall');
   const to = ball.getBoundingClientRect();
-  if (!to.width || !from.size) {
+  if (!to.width || !from.width) {
     ball.classList.add('fall'); // measurement failed — fall back to the plain drop-in
     return;
   }
-  const dx = from.cx - (to.left + to.width / 2);
-  const dy = from.cy - (to.top + to.height / 2);
-  // Scale from the ACTUAL start size (#258): the handoff used to be a fixed .14, tuned for the
-  // 14px tube ball inside the 20px chute. The close-up hands over a 56px ball, and a hardcoded
-  // scale would make it snap smaller before growing.
-  const scale = Math.min(1, Math.max(0.1, from.size / to.width));
+  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+  // Both numbers follow the tube ball's size (#258): it is 18px now, and it parks with its
+  // centre 11px above the chute's bottom edge (top -18 + translateY(44), inside a 45px clip).
+  // They were 14px-and-7px constants; leaving them would spring the drop ball from the wrong
+  // spot, which is exactly the discontinuity the FLIP exists to avoid.
+  const dy = from.bottom - 11 - (to.top + to.height / 2);
+  const scale = to.width > 0 ? Math.min(1, TUBE_BALL_PX / to.width) : 0.18;
   ball.style.transform = `translate(${dx}px, ${dy}px) scale(${scale.toFixed(3)})`;
   // Double rAF: the start transform must paint before the transition begins.
   requestAnimationFrame(() => {
@@ -1152,41 +1118,27 @@ async function runExitChoreography(
     num !== null
       ? await Promise.race([
           hopper().extractBall(num),
-          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), EXTRACT_CAP_MS)),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1800)),
         ])
       : false;
-  if (token !== choreoToken) return hideCloseUp();
-  const plan = tubePlan(revealGapMs());
-  // The chute mouth is where the FLIP starts unless a close-up replaces it. `anchor` is passed
-  // explicitly rather than derived from the rect: the 14px tube ball rests near the BOTTOM of the
-  // 46px chute, while the close-up ball fills its own rect — one rule cannot describe both.
-  const chuteRect = byId('chute').getBoundingClientRect();
-  let anchor: FlipAnchor = {
-    cx: chuteRect.left + chuteRect.width / 2,
-    cy: chuteRect.bottom - 7,
-    size: chuteRect.width,
-  };
+  if (token !== choreoToken) return;
   if (flew) {
     const tube = byId('tube-ball');
-    // The tube ball wears the real face now (#258) — it used to be a bare hue gradient, so in
-    // logo mode the "same ball" the pile released changed identity on its way down.
+    // The real face, not just the hue (#258) — same helper the drop ball uses, so the pile, the
+    // tube and the drop ball are unmistakably one ball.
     paintBallFace(tube, reveal.team, hue);
-    tube.style.setProperty('--tube-ms', `${plan.transitMs}ms`);
     tube.classList.remove('transit');
     void tube.offsetWidth; // restart the CSS animation for this transit
     tube.classList.add('transit');
-    await new Promise((resolve) => setTimeout(resolve, plan.transitMs));
-    if (token !== choreoToken) return hideCloseUp();
-    if (closeUpEligible(reveal.pick)) {
-      anchor = await presentAtMouth(reveal, num, hue, plan, token, anchor);
-      if (token !== choreoToken) return hideCloseUp();
-    }
+    await new Promise((resolve) => setTimeout(resolve, TUBE_MS));
+    if (token !== choreoToken) return;
   }
   exitInFlight = null;
+  // Measure the chute exit BEFORE tearing the transit down — the FLIP starts where the tube ends.
+  const chuteRect = byId('chute').getBoundingClientRect();
   const tube = byId('tube-ball');
-  tube.classList.remove('transit');
+  tube.classList.remove('transit', 'logo-face');
   tube.style.background = '';
-  tube.classList.remove('logo-face');
   byId('chute').classList.remove('active');
   show('drop', true);
   const ball = replaceNode('drop-pick');
@@ -1195,89 +1147,7 @@ async function runExitChoreography(
   applyDropFace(ball, reveal.team, num !== null ? hue : undefined);
   replaceNode('drop-team').textContent = reveal.team;
   replaceNode('drop-odds').textContent = oddsText;
-  flipFromChute(ball, anchor);
-  // Only now — the FLIP has measured its start, so hiding the close-up cannot make the big ball
-  // vanish before the drop ball has taken its place.
-  hideCloseUp();
-}
-
-/**
- * Which reveals get the close-up. Everything except pick #1, which belongs to the envelope
- * (#243) — the issue's own framing: the close-up is the per-pick moment, the envelope is the
- * finale. Skipping it there also removes the two places the extra ~1s hurt most: pick #1 is the
- * LAST reveal in worst-to-first, where the finish lands a fixed 1800ms later and would supersede
- * the drop card, and it is the reveal whose envelope is queued behind this choreography.
- */
-function closeUpEligible(pick: number): boolean {
-  return pick !== 1;
-}
-
-/**
- * The gap this reveal actually has before the next event supersedes it — NOT the ceremony's
- * delay. Replay and catch-up compress reveals to `replayWindowMs`, and on every path the finish
- * follows the final reveal by a fixed `REPLAY_DWELL_MS`. The close-up is budgeted against
- * whichever is tighter, because overrunning either one costs the viewer a drop card.
- */
-function revealGapMs(): number {
-  const cadence = playbackMode !== null ? replayWindowMs : (currentStart?.delayMs ?? 0);
-  const known = Number.isFinite(cadence) && cadence > 0 ? cadence : MIN_GAP_MS;
-  return Math.min(known, MIN_GAP_MS);
-}
-
-/**
- * The close-up (#258): the ball clears the chute's clip, grows to camera size wearing its team's
- * face, and holds. Returns the rect the FLIP should start from — its own, so the drop ball grows
- * out of the ball the league is looking at rather than snapping back to the 20px tube first.
- *
- * Falls back to the chute rect if anything is unmeasurable, and every wait is a plain timer, so a
- * hidden tab (where animations never paint) still lands in the correct end state.
- */
-async function presentAtMouth(
-  reveal: LotteryReveal,
-  num: number | null,
-  hue: number | undefined,
-  plan: TubePlan,
-  token: number,
-  fallback: FlipAnchor,
-): Promise<FlipAnchor> {
-  const chute = byId('chute');
-  const closeUp = byId('tube-closeup');
-  const left = chute.offsetLeft + chute.offsetWidth / 2;
-  // Overlapping the mouth, not hanging off it: `transform-origin: 50% 0` grows the ball downward
-  // from this point, and starting it *inside* the chute's last few pixels both reads as emerging
-  // and keeps the ball within the machine panel instead of spilling onto the page behind it.
-  closeUp.style.setProperty('--closeup-size', `${CLOSEUP_PX}px`);
-  closeUp.style.setProperty('--closeup-present', `${plan.presentMs}ms`);
-  closeUp.style.setProperty('--closeup-top', `${chute.offsetTop + chute.offsetHeight - 20}px`);
-  closeUp.style.left = `${left}px`;
-  closeUpFace = { team: reveal.team, hue };
-  paintBallFace(closeUp, reveal.team, hue);
-  // The whole point of the close-up is the logo, so the ball number does not sit on top of it —
-  // the drop ball leads with `#N` a beat later anyway (#215). Without a logo there is nothing to
-  // obscure and the number is the only identity the ball has, so it shows.
-  const hasLogo = closeUp.classList.contains('logo-face');
-  closeUp.textContent = !hasLogo && num !== null ? `#${num}` : '';
-  closeUp.classList.remove('present');
-  void closeUp.offsetWidth; // restart the grow for this pick
-  closeUp.classList.add('present');
-  await new Promise((resolve) => setTimeout(resolve, plan.presentMs + plan.dwellMs));
-  if (token !== choreoToken) return fallback;
-  const rect = closeUp.getBoundingClientRect();
-  // The ball fills its own rect, so its centre IS the anchor — unlike the chute, where the ball
-  // rests near the bottom of a 46px tube.
-  return rect.width > 0
-    ? { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, size: rect.width }
-    : fallback;
-}
-
-/** Retire the close-up. Safe to call at any time — a stale choreography clears it on its way out. */
-function hideCloseUp(): undefined {
-  closeUpFace = null;
-  const closeUp = document.getElementById('tube-closeup');
-  if (!closeUp) return;
-  closeUp.classList.remove('present', 'logo-face');
-  closeUp.style.background = '';
-  closeUp.textContent = '';
+  flipFromChute(ball, chuteRect);
 }
 
 function renderDrop(reveal: LotteryReveal): void {
