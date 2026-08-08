@@ -297,6 +297,16 @@ let lastDropFace: { team: string; hue: number | undefined } | null = null;
  */
 function applyDropFace(ball: HTMLElement, team: string, hue: number | undefined): void {
   lastDropFace = { team, hue };
+  paintBallFace(ball, team, hue);
+}
+
+/**
+ * Paint a ball element with a team's face — the logo when we have one, the hue gradient
+ * underneath it either way. Shared by the drop ball and the tube ball (#258): the ball sliding
+ * down the chute used to wear a bare hue gradient, so in logo mode (#252) the ball the pile
+ * released visibly changed identity on its way to the one that lands.
+ */
+function paintBallFace(ball: HTMLElement, team: string, hue: number | undefined): void {
   const logo = teamLogo(team);
   const face = hue !== undefined ? ballFace(hue) : '';
   ball.style.background = logo
@@ -963,6 +973,8 @@ function renderWaiting(start: LotteryStart, drawn: { pick: number; team: string 
 const CHUTE_GLOW_LEAD_MS = 1150;
 /** Tube descent duration; a fixed timer rather than animationend so it settles even when hidden. */
 const TUBE_MS = 420;
+/** Diameter of the ball sliding the chute — must match `#tube-ball` in the page CSS (#258). */
+const TUBE_BALL_PX = 18;
 let chuteTimer: ReturnType<typeof setTimeout> | null = null;
 /** Beat pick the glow is armed for — poll repaints of the same beat must not restart it. */
 let armedPick: number | null = null;
@@ -1020,22 +1032,31 @@ function replaceNode(id: string): HTMLElement {
   return fresh;
 }
 
+/** Where the drop ball's FLIP starts: the tube ball's centre, in viewport coordinates (#258). */
+interface FlipAnchor {
+  cx: number;
+  cy: number;
+}
+
 /**
  * FLIP handoff: the drop ball starts at the chute exit (where the pulled ball just arrived) and
  * springs to its resting spot — the pull and the reveal read as one continuous motion.
  */
-function flipFromChute(ball: HTMLElement, from: DOMRect): void {
+function flipFromChute(ball: HTMLElement, from: FlipAnchor): void {
   // The clone carries the previous reveal's flip/fall classes — strip them so the start
   // transform below is applied instantly, by intent rather than by insertion semantics.
   ball.classList.remove('flip', 'fall');
   const to = ball.getBoundingClientRect();
-  if (!to.width || !from.width) {
+  if (!to.width || !Number.isFinite(from.cx) || !Number.isFinite(from.cy)) {
     ball.classList.add('fall'); // measurement failed — fall back to the plain drop-in
     return;
   }
-  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
-  const dy = from.bottom - 7 - (to.top + to.height / 2);
-  ball.style.transform = `translate(${dx}px, ${dy}px) scale(.14)`;
+  const dx = from.cx - (to.left + to.width / 2);
+  const dy = from.cy - (to.top + to.height / 2);
+  // Scale follows the tube ball's real diameter (#258) rather than the old hardcoded `.14`,
+  // which was tuned when that ball was 14px.
+  const scale = Math.min(1, TUBE_BALL_PX / to.width);
+  ball.style.transform = `translate(${dx}px, ${dy}px) scale(${scale.toFixed(3)})`;
   // Double rAF: the start transform must paint before the transition begins.
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
@@ -1107,7 +1128,9 @@ async function runExitChoreography(
   if (token !== choreoToken) return;
   if (flew) {
     const tube = byId('tube-ball');
-    if (hue !== undefined) tube.style.background = ballFace(hue);
+    // The real face, not just the hue (#258) — same helper the drop ball uses, so the pile, the
+    // tube and the drop ball are unmistakably one ball.
+    paintBallFace(tube, reveal.team, hue);
     tube.classList.remove('transit');
     void tube.offsetWidth; // restart the CSS animation for this transit
     tube.classList.add('transit');
@@ -1115,10 +1138,17 @@ async function runExitChoreography(
     if (token !== choreoToken) return;
   }
   exitInFlight = null;
-  // Measure the chute exit BEFORE tearing the transit down — the FLIP starts where the tube ends.
-  const chuteRect = byId('chute').getBoundingClientRect();
   const tube = byId('tube-ball');
-  tube.classList.remove('transit');
+  // Measure BEFORE tearing the transit down, and measure the BALL, not the chute: while
+  // `transit` is applied the ball's own rect is exactly where it parked, so the FLIP needs no
+  // constant tracking the keyframe's end or the ball's diameter — the two numbers this PR had
+  // to correct once already. A ball that never flew is still sitting above the mouth at opacity
+  // 0, so there the chute is the honest anchor.
+  const fromRect = flew ? tube.getBoundingClientRect() : byId('chute').getBoundingClientRect();
+  const fromAnchor: FlipAnchor = flew
+    ? { cx: fromRect.left + fromRect.width / 2, cy: fromRect.top + fromRect.height / 2 }
+    : { cx: fromRect.left + fromRect.width / 2, cy: fromRect.bottom - TUBE_BALL_PX / 2 };
+  tube.classList.remove('transit', 'logo-face');
   tube.style.background = '';
   byId('chute').classList.remove('active');
   show('drop', true);
@@ -1128,7 +1158,7 @@ async function runExitChoreography(
   applyDropFace(ball, reveal.team, num !== null ? hue : undefined);
   replaceNode('drop-team').textContent = reveal.team;
   replaceNode('drop-odds').textContent = oddsText;
-  flipFromChute(ball, chuteRect);
+  flipFromChute(ball, fromAnchor);
 }
 
 function renderDrop(reveal: LotteryReveal): void {

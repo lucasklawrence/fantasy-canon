@@ -133,7 +133,13 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   .pullball { position: absolute; border-radius: 50%;
     background: radial-gradient(circle at 32% 28%, #fff 0%, #f5d67b 35%, #c8912e 100%);
     box-shadow: 0 2px 5px rgba(0,0,0,.5); opacity: 0; pointer-events: none; }
-  #tube-ball { width: 14px; height: 14px; left: calc(50% - 7px); top: -14px; }
+  /* 18px, not 14 (#258): the descent is the first sight of the drawn team's face, and a logo at
+     14px is a smudge. The size is the only thing that changed — the transit keeps its original
+     duration, because the exit chain (extraction + transit + the drop ball's own .62s flip)
+     already fits its gap with barely 140ms to spare. Giving the ball real screen time means
+     re-planning that whole chain, which is its own piece of work. */
+  #tube-ball { width: 18px; height: 18px; left: calc(50% - 9px); top: -18px;
+    background-size: cover; background-position: center; }
   #tube-ball.transit { animation: tube .4s cubic-bezier(.45,0,.85,.6) forwards; }
   #drum .now { font-size: 22px; font-weight: 800; text-align: center; color: #f5d67b;
     animation: pulse 0.9s ease-in-out infinite; margin: 8px 0 12px; }
@@ -225,8 +231,10 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
   @keyframes agitate { 0%,100% { transform: translate(0,0) } 25% { transform: translate(1px,-1px) }
     50% { transform: translate(-1px,1px) } 75% { transform: translate(1px,1px) } }
+  /* Ends at 44px, not 46: the chute's padding box is 45px tall and clips, so the taller 18px
+     ball (#258) must stop with its bottom inside that or the mouth shears it. */
   @keyframes tube { 0% { opacity: 0; transform: translateY(0) } 20% { opacity: 1 }
-    100% { opacity: 1; transform: translateY(46px) } }
+    100% { opacity: 1; transform: translateY(44px) } }
   @keyframes drop { 0% { transform: translateY(-220px) scale(.6); opacity: 0 }
     60% { transform: translateY(12px) scale(1.04); opacity: 1 } 80% { transform: translateY(-8px) }
     100% { transform: translateY(0) scale(1) } }
