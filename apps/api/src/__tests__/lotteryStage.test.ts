@@ -605,6 +605,30 @@ describe('rename + re-import — the rest of the in-Activity field edits (#219)'
     expect(events).toHaveLength(1);
   });
 
+  it('a release only frees the press it names, so a retry survives it (#250)', () => {
+    const stage = createLotteryStage();
+    stage.lobby(IN_G1);
+    stage.requestReimport();
+    const first = stage.snapshot().reimportRequestedAt as number;
+
+    // The client hands the button back after a long silence, so a retry can be recorded while
+    // the bot is still grinding on the first press.
+    stage.releaseReimport({ guildId: 'g1', stamp: first, reason: 'first attempt failed' });
+    stage.requestReimport();
+    const retry = stage.snapshot().reimportRequestedAt as number;
+
+    // …and the first attempt's late failure must not sweep the retry away with it.
+    stage.releaseReimport({ guildId: 'g1', stamp: first, reason: 'first attempt failed, late' });
+    expect(stage.snapshot().reimportRequested).toBe(true);
+    expect(stage.snapshot().reimportRequestedAt).toBe(retry);
+    expect(stage.snapshot().reimportDenied).toBeUndefined();
+
+    // A release naming the current press still works — and an unstamped one (an older bot)
+    // keeps the pre-#250 "free whatever is pending" behaviour.
+    stage.releaseReimport({ guildId: 'g1', reason: 'no stamp' });
+    expect(stage.snapshot().reimportRequested).toBeUndefined();
+  });
+
   it('a re-arm means the refetch landed, so it clears a stale refusal notice (#250)', () => {
     const stage = createLotteryStage();
     stage.lobby(IN_G1);

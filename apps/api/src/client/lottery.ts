@@ -475,9 +475,12 @@ function trackReimportPress(stamp: number | undefined, denied: string | undefine
   // answered, and hands the button back so a retry is possible.
   reimportStaleTimer = setTimeout(() => {
     reimportStaleTimer = undefined;
-    if (reimportStamp !== stamp) return;
+    // Both guards matter: the stamp may have moved on (a retry, or the press being answered),
+    // and the lobby may be gone entirely — leaving the phase clears the tracker, so `currentLobby`
+    // absent means there is no lobby left to paint this onto.
+    if (reimportStamp !== stamp || !currentLobby) return;
     reimportStale = true;
-    if (currentLobby) renderLobby(currentLobby);
+    renderLobby(currentLobby);
     paintLobbyStatus();
   }, REIMPORT_NO_RESPONSE_MS);
 }
@@ -695,10 +698,9 @@ async function sendReimport(): Promise<void> {
   // until the bot's re-arm clears it, it releases the press with a reason, or this client
   // decides nothing ever answered (#250). Only a rejected/failed POST re-enables here, since
   // no broadcast will; the pill would otherwise keep claiming an import is running.
-  if (!accepted) {
-    button.disabled = false;
-    paintLobbyStatus();
-  }
+  // Deliberately no repaint here: `commissionerPost` has already put the rejection reason in the
+  // pill, and the resting line would bury the one thing the commissioner needs to read.
+  if (!accepted) button.disabled = false;
 }
 
 /**
@@ -1651,6 +1653,10 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
   // Same for the drum-roll in flight (#207): only a mid-reveal snapshot has one; any other phase
   // means whatever beat we knew about has been consumed or discarded.
   livePendingBeat = snapshot.phase === 'revealing' ? (snapshot.pendingBeat ?? null) : null;
+  // The re-import tracker is lobby-scoped (#250). Clearing it here — not only in the lobby
+  // branch — is what stops a pending press's timer firing minutes later over an idle or live
+  // screen and painting a false "no response from the bot" on top of it.
+  if (snapshot.phase !== 'lobby') trackReimportPress(undefined, undefined);
   // A fresh phase repaints from scratch: hide the sections a previous run may have left visible
   // (a re-run start after a finished/aborted ceremony must not show stale board/verify/abort),
   // and re-arm the one-shot celebration.

@@ -170,7 +170,7 @@ export interface LotteryStage {
    * stays locked out until the next `setup`. `reason` rides the next broadcast once as
    * {@link LotterySnapshot.reimportDenied}. Guild-scoped, and never touches the bag.
    */
-  releaseReimport(release: { guildId?: string; reason?: string }): void;
+  releaseReimport(release: { guildId?: string; stamp?: number; reason?: string }): void;
   /**
    * Is this Discord user id allowed to {@link LotteryStage.adjust}? False whenever no lobby is
    * armed, so a stale token can never edit a committed or finished run.
@@ -536,6 +536,26 @@ export function parseLotterySetupRelease(
   };
 }
 
+/**
+ * Guard for `POST /api/lottery/reimport-release` (#250). Same shape as the setup release plus
+ * the stamp of the press being freed — omitted (an older bot) means "free whatever is pending".
+ */
+export function parseLotteryReimportRelease(
+  body: string,
+): Parsed<{ guildId?: string; stamp?: number; reason?: string }> {
+  const parsed = parseLotterySetupRelease(body);
+  if ('error' in parsed) return parsed;
+  const raw = parseJson(body);
+  if ('error' in raw) return raw;
+  const stamp = raw.value.stamp;
+  return {
+    value: {
+      ...parsed.value,
+      ...(typeof stamp === 'number' && Number.isFinite(stamp) ? { stamp } : {}),
+    },
+  };
+}
+
 /** Guard for `POST /api/lottery/audit-mode` (#252) — a two-word closed vocabulary. */
 export function parseLotteryAuditMode(body: string): Parsed<{ mode: LotteryAuditMode }> {
   const parsed = parseJson(body);
@@ -654,6 +674,12 @@ export function createLotteryStage(): LotteryStage {
   let reimportRequested: number | undefined;
   /** Why the last refetch press was refused (#250) — one-shot lobby feedback, like setupDenied. */
   let reimportDenied: string | undefined;
+  /**
+   * Source of {@link reimportRequested}'s stamps. Clock-seeded so stamps survive a restart as
+   * plausible timestamps, but incremented rather than re-read so two presses in the same
+   * millisecond can never collide — the whole value of the stamp is that it is unique per press.
+   */
+  let reimportSeq = Date.now();
   /** The commissioner asked to seal the bag and start the draw; only the bot can (#233). */
   let beginRequested: LotteryBeginRequest | undefined;
   /**
@@ -928,7 +954,7 @@ export function createLotteryStage(): LotteryStage {
       // releases the press with a reason (#250). A re-press is deliberately allowed while one is
       // pending — the flag is not proof the bot ever heard it, and retry is the honest recovery
       // when it didn't. The new stamp tells every client this is a fresh attempt.
-      reimportRequested = Date.now();
+      reimportRequested = ++reimportSeq;
       reimportDenied = undefined;
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
@@ -939,6 +965,11 @@ export function createLotteryStage(): LotteryStage {
       // it would only risk dropping pending edits, and the reason has to survive to say why.
       if (reimportRequested === undefined) return;
       if (release.guildId !== undefined && lobby?.guildId !== release.guildId) return;
+      // Stamp-scoped: a release frees the press it was ISSUED for, nothing later. The client
+      // hands the button back once a press has gone unanswered for a while, so a retry can be
+      // recorded while the bot is still grinding on the first one — and that retry must survive
+      // the first one's failure, or the commissioner watches an accepted press evaporate.
+      if (release.stamp !== undefined && release.stamp !== reimportRequested) return;
       reimportRequested = undefined;
       reimportDenied = release.reason;
       if (lobby) emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });

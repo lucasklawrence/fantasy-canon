@@ -47,7 +47,7 @@ const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 
 /** Harness: records posts, captures scheduled reconnects so a test can run them deterministically. */
 function harness(
   deliver: (attempt: number) => Promise<boolean> = () => Promise.resolve(true),
-  reimport?: (guildId: string | undefined) => Promise<boolean>,
+  reimport?: (guildId: string | undefined, stamp?: number) => Promise<boolean>,
   begin?: (guildId: string | undefined, request: StageBeginRequest) => Promise<boolean>,
   setup?: (request: StageSetupRequest) => Promise<boolean>,
 ) {
@@ -359,7 +359,7 @@ describe('createStageWatcher (#220)', () => {
       expect(logs.filter((l) => l.includes('reconnected'))).toHaveLength(0);
 
       h.latest().drop();
-      expect(warns.some((w) => w.includes('stage watcher disconnected'))).toBe(true);
+      expect(warns.some((w) => w.includes('stage watcher offline'))).toBe(true);
       expect(warns.some((w) => w.includes('will not be heard'))).toBe(true);
 
       h.runReconnect();
@@ -455,6 +455,47 @@ describe('createStageWatcher (#220)', () => {
     await flush();
     await h.send(flagged);
     expect(calls).toEqual(['g1', 'g1']);
+  });
+
+  it('picks up a retry pressed while an import was already in flight (#250)', async () => {
+    // The client hands the button back after a long silence, so a second press can land while
+    // the first import is still running. The single-flight guard skips it, and the first
+    // attempt's release is scoped to its own stamp — so without this hand-off nothing would
+    // ever honour the retry, which is the same "accepted, then nothing happened" the issue is
+    // about.
+    const calls: (number | undefined)[] = [];
+    const releases: (() => void)[] = [];
+    const h = harness(undefined, (_guildId, stamp) => {
+      calls.push(stamp);
+      return new Promise<boolean>((resolve) => {
+        releases.push(() => resolve(false));
+      });
+    });
+    h.watcher.start();
+    h.latest().open();
+
+    const press = (at: number): unknown => ({
+      type: 'lottery-lobby',
+      lobby: { guildId: 'g1', rows: [] },
+      reimportRequested: true,
+      reimportRequestedAt: at,
+    });
+    await h.send(press(100));
+    expect(calls).toEqual([100]);
+
+    // The retry, recorded while the first import is still grinding: skipped for now…
+    await h.send(press(101));
+    expect(calls).toEqual([100]);
+
+    // …and picked up the moment the first flight settles, without a further broadcast.
+    releases[0]();
+    await flush();
+    expect(calls).toEqual([100, 101]);
+
+    // The second flight finishing with nothing newer queued must not loop.
+    releases[1]();
+    await flush();
+    expect(calls).toEqual([100, 101]);
   });
 
   it('ignores a re-import request when no handler is wired', async () => {
