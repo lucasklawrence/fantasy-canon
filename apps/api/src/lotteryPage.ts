@@ -97,14 +97,19 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
        full-width pill. */
     body:not(.race) .showfloor:not(:has(> #stage.hidden)) > #board .board-head {
       flex-direction: column; align-items: stretch; }
-    /* The rail exists to sit BESIDE something. With either partner missing — the stage gone at
-       the finished board, or the board not yet shown during the opening drum roll — the grid
-       collapses so nothing reserves a track for an element that is display:none. (.hidden is
-       display:none, so the element is still a grid child; :only-child cannot see that, :has can.) */
-    body:not(.race) .showfloor:has(> #stage.hidden),
-    body:not(.race) .showfloor:has(> #board.hidden) { grid-template-columns: minmax(0, 1fr); }
+    /* Once the stage is gone (the finished board, an abort) the rail has nothing to sit beside,
+       so the grid collapses and the board becomes an ordinary card — including the 980px reading
+       measure, for the same reason the lobby keeps one: a 12-row order stretched across 1520px
+       puts a team's name a screen away from its own odds. (.hidden is display:none, so the
+       element is still a grid child; :only-child cannot see that, :has can.)
+
+       Deliberately NOT done for a hidden BOARD. Collapsing then would make the stage ~356px
+       wider during the opening drum roll and snap it back the instant the first pick lands —
+       a lurch at the showcase moment, which is worse than a reserved track nobody looks at. */
+    body:not(.race) .showfloor:has(> #stage.hidden) { grid-template-columns: minmax(0, 1fr); }
     body:not(.race) .showfloor:has(> #stage.hidden) > #board { position: static;
-      max-height: none; overflow: visible; }
+      max-height: none; overflow: visible;
+      max-width: 980px; margin-left: auto; margin-right: auto; }
     /* The hopper column widens with the drum below. */
     body:not(.race) .machine { grid-template-columns: 360px 1fr; }
   }
@@ -180,16 +185,20 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
      display:none and the canvas measures 0, so it cannot discover its own size. Both steps sit
      together and in ascending order — identical specificity means source order decides, and
      split across the sheet the smaller one silently won at every width. */
-  body { --hopper-px: 260px; --tube-ball-px: 18px; --chute-px: 20px; }
+  /* --hopper-px is the CANVAS size, not the drum's border box. The client feeds it straight to
+     hopperSim as the scene size, and the canvas fills the padding box — 3px of border on each
+     side smaller than the element — so .hopper adds the border back rather than the sim being
+     handed a value 6px too large for what it actually draws into. */
+  body { --hopper-px: 254px; --tube-ball-px: 18px; --chute-px: 20px; }
   /* One step, at the same breakpoint the layout uses. The chute and its ball scale WITH the drum
      (#256 review): the pile's ball radius is packing-fit to the canvas (#211), so growing only
      the drum would make the ball that leaves the pile visibly shrink as it enters the tube —
      the same identity break #258 just closed at the other end of the handoff. */
   @media (min-width: 1500px) {
-    body:not(.race) { --hopper-px: 340px; --tube-ball-px: 23px; --chute-px: 26px; }
+    body:not(.race) { --hopper-px: 334px; --tube-ball-px: 23px; --chute-px: 26px; }
   }
-  .hopper { position: relative; width: var(--hopper-px); height: var(--hopper-px);
-    margin: 10px auto 0; border-radius: 50%;
+  .hopper { position: relative; width: calc(var(--hopper-px) + 6px);
+    height: calc(var(--hopper-px) + 6px); margin: 10px auto 0; border-radius: 50%;
     border: 3px solid #2b3550; background: radial-gradient(circle at 35% 30%, #1c2338, #10141f 70%);
     overflow: hidden; box-shadow: inset 0 -18px 40px rgba(0,0,0,.5), 0 0 40px rgba(245,214,123,.06); }
   /* The ball pile is a physics sim on this canvas (#211, hopperSim.ts); the pull overlays it. */
@@ -324,6 +333,10 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     50% { transform: translate(-1px,1px) } 75% { transform: translate(1px,1px) } }
   /* Ends at 44px, not 46: the chute's padding box is 45px tall and clips, so the taller 18px
      ball (#258) must stop with its bottom inside that or the mouth shears it. */
+  /* Size-independent by construction: the ball starts at top:-1em-of-itself, so translating a
+     fixed 44px always lands its BOTTOM edge at 44 — inside the 45px clip whether the ball is the
+     base 18px or the wide-screen 23px (#256). Only the travel distance would need revisiting if
+     the chute's own height ever changed. */
   @keyframes tube { 0% { opacity: 0; transform: translateY(0) } 20% { opacity: 1 }
     100% { opacity: 1; transform: translateY(44px) } }
   @keyframes drop { 0% { transform: translateY(-220px) scale(.6); opacity: 0 }

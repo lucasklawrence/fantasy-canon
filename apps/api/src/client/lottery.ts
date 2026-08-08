@@ -97,16 +97,46 @@ function renderBoard(reveals: LotteryReveal[]): void {
   keepNewestPickVisible(reveals);
 }
 
-/** Scroll the board rail to the row for the most recent reveal, when the rail can scroll. */
+/** Newest pick the rail has been scrolled to, so a repaint of unchanged data leaves it alone. */
+let railScrolledToPick: number | null = null;
+
+/**
+ * Keep the row for the pick just drawn inside the wide-screen rail (#256).
+ *
+ * Three things this deliberately does NOT do, each of which it did in its first version:
+ * - **No `scrollIntoView`.** That walks every scrollable ancestor, and the document is one — with
+ *   a sticky rail taller than the viewport it scrolled the PAGE, dragging the hopper and the
+ *   landing ball out of view at the exact moment of the reveal. The scroll is computed and
+ *   applied to the rail alone.
+ * - **No scrolling on an unchanged repaint.** `renderBoard` also runs on the 2s poll fallback, so
+ *   re-scrolling every paint meant a viewer reading an earlier pick was yanked back every two
+ *   seconds. It moves only when the newest pick actually changes.
+ * - **No measuring before the stage exists.** On the late-join path `renderBoard` runs while
+ *   `#stage` is still hidden, where the rail is uncapped and unscrollable — the one case this was
+ *   written for. Deferring past the current render pass lets the stage appear first.
+ *
+ * The deferral is a timer, not `requestAnimationFrame`: rAF does not run in a hidden tab (#207's
+ * lesson), so a backgrounded viewer would come back to an unscrolled rail and a queued callback
+ * holding a stale row index. Timers still fire there, clamped — the same reason every wait in
+ * the exit choreography is a timer (#215).
+ */
 function keepNewestPickVisible(reveals: LotteryReveal[]): void {
-  const board = document.getElementById('board');
-  // Only the wide-screen rail scrolls; stacked below the stage the whole list is on the page.
-  if (!board || reveals.length === 0 || board.scrollHeight <= board.clientHeight + 1) return;
-  // `reveals` accumulates in arrival order, so the last entry is the pick just drawn; the rows
-  // are painted sorted by pick, which is where it has to be found.
+  if (reveals.length === 0) return;
   const newest = reveals[reveals.length - 1].pick;
-  const row = [...reveals].sort((a, b) => a.pick - b.pick).findIndex((r) => r.pick === newest);
-  board.querySelectorAll('#board-list li')[row]?.scrollIntoView({ block: 'nearest' });
+  if (newest === railScrolledToPick) return;
+  const order = [...reveals].sort((a, b) => a.pick - b.pick).findIndex((r) => r.pick === newest);
+  setTimeout(() => {
+    const board = document.getElementById('board');
+    if (!board || board.scrollHeight <= board.clientHeight + 1) return; // not a scrolling rail
+    const row = board.querySelectorAll('#board-list li')[order] as HTMLElement | undefined;
+    if (!row) return;
+    railScrolledToPick = newest;
+    // Manual, and clamped: bring the row just inside the rail's own box, nothing else moves.
+    const top = row.offsetTop - board.clientHeight + row.offsetHeight + 8;
+    const bottom = row.offsetTop - 8;
+    if (board.scrollTop < top) board.scrollTop = Math.min(top, board.scrollHeight);
+    else if (board.scrollTop > bottom) board.scrollTop = Math.max(0, bottom);
+  }, 0);
 }
 
 /**
