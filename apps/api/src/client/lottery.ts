@@ -53,6 +53,8 @@ import {
   type CatchUpContext,
 } from './replayTimeline.js';
 import { configuredMaxTeamBalls, runHandshake } from './sdk.js';
+// EXTRACT_CAP_MS is the extraction race cap — the sim's rAF loop never resolves in a hidden tab
+// (#215). It lives with the planner, which has to know the worst case it may re-plan around (#265).
 import { exitBudget, EXTRACT_CAP_MS, FINISH_LEAD_MS, FLIP_MS } from './exitBudget.js';
 import { apiPath, isDiscordActivity, proxyBase, wsUrl } from './transport.js';
 
@@ -1058,8 +1060,6 @@ function renderWaiting(start: LotteryStart, drawn: { pick: number; team: string 
 
 /** Chute-glow lead before the reveal is due — the drum-roll's "something's coming" cue. */
 const CHUTE_GLOW_LEAD_MS = 1150;
-// Extraction race cap — the sim's rAF loop never resolves in a hidden tab (#215). Owned by
-// `exitBudget`, which has to know the worst case it may have to re-plan around (#265).
 /**
  * Diameter of the hold ball at full size (#265) — big enough to read a team logo, and stepped with
  * the rest of the machine at #256's wide breakpoint. A JS literal here would keep the hold at

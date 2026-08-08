@@ -385,6 +385,11 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     .hopper.spinning, .pullball, #drop .dropball, #drop .team, #drop .odds,
     .confetti, #waiting .pulse, #drum .now { animation: none !important; transition: none !important; }
     #drop .dropball.flip { transition: none !important; }
+    /* The hold is currently unreachable under reduced motion — extractBall resolves false, so the
+       choreography never flies and presentAtMouth is never called — but the sheet should not
+       depend on a guard in another module. If it ever does render, it appears at full size with
+       no grow rather than animating. */
+    #tube-hold.present { animation: none !important; opacity: 1; transform: scale(1); }
     /* The backdrop stays — it is atmosphere, not motion — but it stops drifting (#256). */
     .ambient span { animation: none !important; }
     /* The canvas pile honors this too — hopperSim renders a settled still frame, no loop. */
