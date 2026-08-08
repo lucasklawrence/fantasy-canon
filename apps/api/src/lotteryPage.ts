@@ -24,6 +24,32 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: radial-gradient(1200px 700px at 50% -10%, #1a2036 0%, #0c0e16 60%, #08090f 100%);
     color: #e7e9ee; min-height: 100vh; }
+  /* Ambient backdrop (#256): the margins a capped column leaves over are also the atmosphere
+     opportunity, so a few very soft, very slow lottery-hue blobs drift behind everything.
+     CSS-only on purpose — no rAF and no canvas, so it adds no third animation loop beside the
+     hopper and race sims, the compositor owns it, and the browser throttles it for free when
+     the tab is hidden. Kept deliberately dim: it must never compete with the reveal.
+     Fixed positioning + z-index -1 + pointer-events:none = it can neither scroll-jank nor
+     intercept a click (the #202 confetti lesson). */
+  .ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+  .ambient span { position: absolute; border-radius: 50%; filter: blur(70px); opacity: .2; }
+  .ambient span:nth-child(1) { width: 46vmin; height: 46vmin; left: -10vmin; top: 8vh;
+    background: #f5d67b; animation: drift1 46s ease-in-out infinite alternate; }
+  .ambient span:nth-child(2) { width: 40vmin; height: 40vmin; right: -8vmin; top: 30vh;
+    background: #4b7bd1; animation: drift2 58s ease-in-out infinite alternate; }
+  .ambient span:nth-child(3) { width: 34vmin; height: 34vmin; left: 18vw; bottom: -10vmin;
+    background: #8b5cf6; opacity: .15; animation: drift3 64s ease-in-out infinite alternate; }
+  @keyframes drift1 { from { transform: translate3d(0,0,0) } to { transform: translate3d(6vw,-6vh,0) } }
+  @keyframes drift2 { from { transform: translate3d(0,0,0) } to { transform: translate3d(-5vw,7vh,0) } }
+  @keyframes drift3 { from { transform: translate3d(0,0,0) } to { transform: translate3d(4vw,-5vh,0) } }
+  /* The backdrop exists to dress margins a phone does not have, and three large blurred layers
+     are real GPU work in a mobile webview — so the small screen gets one cheaper blob, not three.
+     (This is also the only place the ambient touches mobile at all.) */
+  @media (max-width: 760px) {
+    .ambient span { filter: blur(48px); opacity: .16; }
+    .ambient span:nth-child(2), .ambient span:nth-child(3) { display: none; }
+  }
+
   header { padding: 14px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   header h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: .4px; color: #f5d67b; }
   .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: #1b2130; color: #9aa4bd; }
@@ -40,6 +66,32 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   .pill.err { background: #3a1620; color: #f87171; }
   .commit { margin-left: auto; font-size: 11px; color: #5c657d; font-family: ui-monospace, monospace; }
   main { max-width: 980px; margin: 0 auto; padding: 8px 20px 60px; }
+
+  /* Use the width (#256). On a desktop Activity window the capped column left the sides empty,
+     which is dead space in something meant to be a spectacle. The fix is CONTENT, not a wider
+     column: past 1200px the running board moves out of the scroll and sits beside the stage, so
+     the order-so-far is visible during the reveal instead of below the fold.
+     Machine mode only — race already spends its width on the track (#239), and a third column
+     would take it straight back. Below the breakpoint everything stacks exactly as before. */
+  @media (min-width: 1200px) {
+    body:not(.race) main { max-width: 1360px; }
+    body:not(.race) .showfloor { display: grid; grid-template-columns: minmax(0, 1fr) 340px;
+      gap: 16px; align-items: start; }
+    /* The stage owns the scroll; the board rides along beside it. */
+    body:not(.race) .showfloor > #board { position: sticky; top: 12px; margin-top: 16px;
+      max-height: calc(100vh - 40px); overflow: auto; }
+    /* A wider hopper column to match the bigger drum below. */
+    body:not(.race) .machine { grid-template-columns: 360px 1fr; }
+    /* In a narrow side column the heading and the replay button must not fight over one line. */
+    body:not(.race) .showfloor > #board .board-head { flex-direction: column; align-items: stretch; }
+  }
+  /* A second step for a real monitor (#256): a 2560px screen still had ~600px dead either side
+     at the first breakpoint. The drum takes most of it — it is the thing worth looking at. */
+  @media (min-width: 1700px) {
+    body:not(.race) main { max-width: 1680px; }
+    body:not(.race) .showfloor { grid-template-columns: minmax(0, 1fr) 400px; }
+    body:not(.race) .machine { grid-template-columns: 440px 1fr; }
+  }
   .hidden { display: none !important; }
   section.card { background: rgba(20,24,33,.85); border: 1px solid #232a3d; border-radius: 16px;
     padding: 20px 22px; margin-top: 16px; }
@@ -100,6 +152,17 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   /* the machine */
   .machine { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
   @media (max-width: 760px) { .machine { grid-template-columns: 1fr; } }
+  /* The drum grows on a wide screen (#256): hopperSim reads clientWidth at construction and its
+     packing-fit sizing (#211) scales the balls to match, so a bigger circle means bigger, more
+     readable numbers and logos for free. Deliberately a media-query step rather than a live
+     resize — the sim's drum geometry, vanes and ball radii are all derived once when it is
+     built, so a viewer who resizes mid-session keeps the size they opened at. Inside the
+     Activity iframe that is effectively always the final size. */
+  /* Both steps live here, together and in ascending order: they have identical specificity, so
+     source order is what decides between them — split across the sheet, the smaller one silently
+     won at every width. */
+  @media (min-width: 1200px) { body:not(.race) .hopper { width: 320px; height: 320px; } }
+  @media (min-width: 1700px) { body:not(.race) .hopper { width: 400px; height: 400px; } }
   .hopper { position: relative; width: 260px; height: 260px; margin: 10px auto 0; border-radius: 50%;
     border: 3px solid #2b3550; background: radial-gradient(circle at 35% 30%, #1c2338, #10141f 70%);
     overflow: hidden; box-shadow: inset 0 -18px 40px rgba(0,0,0,.5), 0 0 40px rgba(245,214,123,.06); }
@@ -248,11 +311,14 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     .hopper.spinning, .pullball, #drop .dropball, #drop .team, #drop .odds,
     .confetti, #waiting .pulse, #drum .now { animation: none !important; transition: none !important; }
     #drop .dropball.flip { transition: none !important; }
+    /* The backdrop stays — it is atmosphere, not motion — but it stops drifting (#256). */
+    .ambient span { animation: none !important; }
     /* The canvas pile honors this too — hopperSim renders a settled still frame, no loop. */
   }
 </style>
 </head>
 <body>
+<div class="ambient" aria-hidden="true"><span></span><span></span><span></span></div>
 <header>
   <h1 id="title">The Lottery Machine</h1>
   <span id="status" class="pill">connecting…</span>
@@ -330,6 +396,9 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     </div>
   </section>
 
+  <!-- The stage and the running board are one unit (#256): stacked on a phone, side by side on
+       a wide desktop so the order-so-far stays on screen through the reveal. -->
+  <div class="showfloor">
   <section class="card hidden" id="stage">
     <div class="machine">
       <div class="machine-left" id="machine-left">
@@ -359,6 +428,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     </div>
     <ol id="board-list"></ol>
   </section>
+  </div>
 
   <section class="card hidden" id="verify">
     <h2>Verify it yourself</h2>
