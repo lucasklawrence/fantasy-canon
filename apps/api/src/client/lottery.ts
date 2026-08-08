@@ -89,6 +89,59 @@ function renderBoard(reveals: LotteryReveal[]): void {
     sorted.map((r) => ({ pick: r.pick, team: r.team, reveal: r })),
     sorted.length > 0,
   );
+  // The wide-screen rail (#256) caps its height and scrolls. The list is sorted by pick, so in
+  // 'first-to-last' order the newest reveal is the LAST row — past ~10 picks it lands below the
+  // fold of a rail that nothing ever scrolls, and the team just drawn is the one team the side
+  // board fails to show. Worst-to-first is unaffected (newest sorts to the top), but keeping the
+  // newest row in view is right either way.
+  keepNewestPickVisible(reveals);
+}
+
+/** Newest pick the rail has been scrolled to, so a repaint of unchanged data leaves it alone. */
+let railScrolledToPick: number | null = null;
+
+/**
+ * Keep the row for the pick just drawn inside the wide-screen rail (#256).
+ *
+ * Three things this deliberately does NOT do, each of which it did in its first version:
+ * - **No `scrollIntoView`.** That walks every scrollable ancestor, and the document is one — with
+ *   a sticky rail taller than the viewport it scrolled the PAGE, dragging the hopper and the
+ *   landing ball out of view at the exact moment of the reveal. The scroll is computed and
+ *   applied to the rail alone.
+ * - **No scrolling on an unchanged repaint.** `renderBoard` also runs on the 2s poll fallback, so
+ *   re-scrolling every paint meant a viewer reading an earlier pick was yanked back every two
+ *   seconds. It moves only when the newest pick actually changes.
+ * - **No measuring before the stage exists.** On the late-join path `renderBoard` runs while
+ *   `#stage` is still hidden, where the rail is uncapped and unscrollable — the one case this was
+ *   written for. Deferring past the current render pass lets the stage appear first.
+ *
+ * The deferral is a timer, not `requestAnimationFrame`: rAF does not run in a hidden tab (#207's
+ * lesson), so a backgrounded viewer would come back to an unscrolled rail and a queued callback
+ * holding a stale row index. Timers still fire there, clamped — the same reason every wait in
+ * the exit choreography is a timer (#215).
+ */
+function keepNewestPickVisible(reveals: LotteryReveal[]): void {
+  if (reveals.length === 0) return;
+  // ARRIVAL order, not pick order: the default direction is worst-to-first (#200), where the pick
+  // just drawn is the LOWEST number. Sorting by pick and taking the last would scroll to pick 12
+  // — the oldest reveal — for a whole ceremony. Every transport preserves arrival order (the
+  // stage pushes, the snapshot copies, the WS pushes, replay rebuilds step by step), so the last
+  // entry is the newest; the sorted list is only used to find the ROW it was painted into.
+  const newest = reveals[reveals.length - 1].pick;
+  if (newest === railScrolledToPick) return;
+  const order = [...reveals].sort((a, b) => a.pick - b.pick).findIndex((r) => r.pick === newest);
+  setTimeout(() => {
+    const board = document.getElementById('board');
+    if (!board || board.scrollHeight <= board.clientHeight + 1) return; // not a scrolling rail
+    const row = board.querySelectorAll('#board-list li')[order] as HTMLElement | undefined;
+    if (!row) return;
+    railScrolledToPick = newest;
+    // Manual, and clamped: bring the row just inside the rail's own box, nothing else moves.
+    const top = row.offsetTop - board.clientHeight + row.offsetHeight + 8;
+    const bottom = row.offsetTop - 8;
+    if (board.scrollTop < top) board.scrollTop = Math.min(top, board.scrollHeight);
+    else if (board.scrollTop > bottom) board.scrollTop = Math.max(0, bottom);
+  }, 0);
 }
 
 /**
@@ -136,11 +189,35 @@ function hopper(): HopperSim {
   // Logo faces (#252) resolve per sprite build: the mode rides `start` (ADR 0008), so the same
   // lookup returns null in numbers mode and during the lobby, keeping the pile numbered there.
   if (!hopperSim) {
-    hopperSim = createHopperSim(byId('hopper-canvas') as HTMLCanvasElement, (team) =>
-      currentStart?.ballFaces === 'logos' ? teamLogo(team) : null,
+    hopperSim = createHopperSim(
+      byId('hopper-canvas') as HTMLCanvasElement,
+      (team) => (currentStart?.ballFaces === 'logos' ? teamLogo(team) : null),
+      drumSizePx(),
     );
   }
   return hopperSim;
+}
+
+/**
+ * The drum's CSS size, read from `--hopper-px` on `<body>` (#256).
+ *
+ * The canvas itself cannot answer this: the sim is built lazily from the lobby, while `#stage`
+ * is still `display: none`, so `clientWidth` is 0. `<body>` is always rendered, so the custom
+ * property resolves at any phase — and because the same property drives the `.hopper` rule, the
+ * breakpoints live in exactly one place instead of being duplicated into a matchMedia ladder.
+ */
+function drumSizePx(): number {
+  return cssPx('--hopper-px', 260);
+}
+
+/**
+ * Read a pixel-valued custom property off `<body>` (#256). `<body>` rather than the element that
+ * uses it, because the elements that care live inside `#stage`, which is `display: none` for the
+ * whole lobby — and these values have to be readable exactly then.
+ */
+function cssPx(prop: string, fallback: number): number {
+  const px = Number.parseFloat(getComputedStyle(document.body).getPropertyValue(prop));
+  return Number.isFinite(px) && px > 0 ? px : fallback;
 }
 
 // The race (#235). Same lazy pattern; only the ceremony's active visual ever instantiates its sim,
@@ -974,7 +1051,9 @@ const CHUTE_GLOW_LEAD_MS = 1150;
 /** Tube descent duration; a fixed timer rather than animationend so it settles even when hidden. */
 const TUBE_MS = 420;
 /** Diameter of the ball sliding the chute — must match `#tube-ball` in the page CSS (#258). */
-const TUBE_BALL_PX = 18;
+function tubeBallPx(): number {
+  return cssPx('--tube-ball-px', 18);
+}
 let chuteTimer: ReturnType<typeof setTimeout> | null = null;
 /** Beat pick the glow is armed for — poll repaints of the same beat must not restart it. */
 let armedPick: number | null = null;
@@ -1055,7 +1134,7 @@ function flipFromChute(ball: HTMLElement, from: FlipAnchor): void {
   const dy = from.cy - (to.top + to.height / 2);
   // Scale follows the tube ball's real diameter (#258) rather than the old hardcoded `.14`,
   // which was tuned when that ball was 14px.
-  const scale = Math.min(1, TUBE_BALL_PX / to.width);
+  const scale = Math.min(1, tubeBallPx() / to.width);
   ball.style.transform = `translate(${dx}px, ${dy}px) scale(${scale.toFixed(3)})`;
   // Double rAF: the start transform must paint before the transition begins.
   requestAnimationFrame(() => {
@@ -1147,7 +1226,7 @@ async function runExitChoreography(
   const fromRect = flew ? tube.getBoundingClientRect() : byId('chute').getBoundingClientRect();
   const fromAnchor: FlipAnchor = flew
     ? { cx: fromRect.left + fromRect.width / 2, cy: fromRect.top + fromRect.height / 2 }
-    : { cx: fromRect.left + fromRect.width / 2, cy: fromRect.bottom - TUBE_BALL_PX / 2 };
+    : { cx: fromRect.left + fromRect.width / 2, cy: fromRect.bottom - tubeBallPx() / 2 };
   tube.classList.remove('transit', 'logo-face');
   tube.style.background = '';
   byId('chute').classList.remove('active');
