@@ -89,6 +89,24 @@ function renderBoard(reveals: LotteryReveal[]): void {
     sorted.map((r) => ({ pick: r.pick, team: r.team, reveal: r })),
     sorted.length > 0,
   );
+  // The wide-screen rail (#256) caps its height and scrolls. The list is sorted by pick, so in
+  // 'first-to-last' order the newest reveal is the LAST row — past ~10 picks it lands below the
+  // fold of a rail that nothing ever scrolls, and the team just drawn is the one team the side
+  // board fails to show. Worst-to-first is unaffected (newest sorts to the top), but keeping the
+  // newest row in view is right either way.
+  keepNewestPickVisible(reveals);
+}
+
+/** Scroll the board rail to the row for the most recent reveal, when the rail can scroll. */
+function keepNewestPickVisible(reveals: LotteryReveal[]): void {
+  const board = document.getElementById('board');
+  // Only the wide-screen rail scrolls; stacked below the stage the whole list is on the page.
+  if (!board || reveals.length === 0 || board.scrollHeight <= board.clientHeight + 1) return;
+  // `reveals` accumulates in arrival order, so the last entry is the pick just drawn; the rows
+  // are painted sorted by pick, which is where it has to be found.
+  const newest = reveals[reveals.length - 1].pick;
+  const row = [...reveals].sort((a, b) => a.pick - b.pick).findIndex((r) => r.pick === newest);
+  board.querySelectorAll('#board-list li')[row]?.scrollIntoView({ block: 'nearest' });
 }
 
 /**
@@ -154,9 +172,17 @@ function hopper(): HopperSim {
  * breakpoints live in exactly one place instead of being duplicated into a matchMedia ladder.
  */
 function drumSizePx(): number {
-  const raw = getComputedStyle(document.body).getPropertyValue('--hopper-px');
-  const px = Number.parseFloat(raw);
-  return Number.isFinite(px) && px > 0 ? px : 260;
+  return cssPx('--hopper-px', 260);
+}
+
+/**
+ * Read a pixel-valued custom property off `<body>` (#256). `<body>` rather than the element that
+ * uses it, because the elements that care live inside `#stage`, which is `display: none` for the
+ * whole lobby — and these values have to be readable exactly then.
+ */
+function cssPx(prop: string, fallback: number): number {
+  const px = Number.parseFloat(getComputedStyle(document.body).getPropertyValue(prop));
+  return Number.isFinite(px) && px > 0 ? px : fallback;
 }
 
 // The race (#235). Same lazy pattern; only the ceremony's active visual ever instantiates its sim,
@@ -990,7 +1016,9 @@ const CHUTE_GLOW_LEAD_MS = 1150;
 /** Tube descent duration; a fixed timer rather than animationend so it settles even when hidden. */
 const TUBE_MS = 420;
 /** Diameter of the ball sliding the chute — must match `#tube-ball` in the page CSS (#258). */
-const TUBE_BALL_PX = 18;
+function tubeBallPx(): number {
+  return cssPx('--tube-ball-px', 18);
+}
 let chuteTimer: ReturnType<typeof setTimeout> | null = null;
 /** Beat pick the glow is armed for — poll repaints of the same beat must not restart it. */
 let armedPick: number | null = null;
@@ -1071,7 +1099,7 @@ function flipFromChute(ball: HTMLElement, from: FlipAnchor): void {
   const dy = from.cy - (to.top + to.height / 2);
   // Scale follows the tube ball's real diameter (#258) rather than the old hardcoded `.14`,
   // which was tuned when that ball was 14px.
-  const scale = Math.min(1, TUBE_BALL_PX / to.width);
+  const scale = Math.min(1, tubeBallPx() / to.width);
   ball.style.transform = `translate(${dx}px, ${dy}px) scale(${scale.toFixed(3)})`;
   // Double rAF: the start transform must paint before the transition begins.
   requestAnimationFrame(() => {
@@ -1163,7 +1191,7 @@ async function runExitChoreography(
   const fromRect = flew ? tube.getBoundingClientRect() : byId('chute').getBoundingClientRect();
   const fromAnchor: FlipAnchor = flew
     ? { cx: fromRect.left + fromRect.width / 2, cy: fromRect.top + fromRect.height / 2 }
-    : { cx: fromRect.left + fromRect.width / 2, cy: fromRect.bottom - TUBE_BALL_PX / 2 };
+    : { cx: fromRect.left + fromRect.width / 2, cy: fromRect.bottom - tubeBallPx() / 2 };
   tube.classList.remove('transit', 'logo-face');
   tube.style.background = '';
   byId('chute').classList.remove('active');

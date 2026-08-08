@@ -69,36 +69,46 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
 
   /* Use the width (#256). On a desktop Activity window the capped column left the sides empty,
      which is dead space in something meant to be a spectacle. The fix is CONTENT, not a wider
-     column: past 1200px the running board moves out of the scroll and sits beside the stage, so
-     the order-so-far is visible during the reveal instead of below the fold.
-     Machine mode only — race already spends its width on the track (#239), and a third column
-     would take it straight back. Below the breakpoint everything stacks exactly as before. */
-  @media (min-width: 1200px) {
-    body:not(.race) main { max-width: 1360px; }
+     column: the running board moves out of the scroll and sits beside the stage, so the
+     order-so-far is visible during the reveal instead of below the fold.
+
+     ONE breakpoint, and a high one. The rail costs the reveal column 340px + a gap, so opening
+     it at 1200px made the stage NARROWER than the 980px centred layout it replaced — the
+     spectacle got worse as the window got bigger, which is the opposite of the ask. 1500px is
+     where there is genuinely room for both.
+
+     Machine mode only: race already spends its width on the track (#239), and a third column
+     would take it straight back. Below the breakpoint nothing here applies at all. */
+  @media (min-width: 1500px) {
+    /* Only the showfloor widens. The main element carries every other card too, and stretching a 5-column
+       odds table (plus the #252 commissioner panel) across 1600px puts a team's name a screen
+       away from its own numbers — so those keep the reading measure they were designed at. */
+    body:not(.race) main { max-width: 1560px; }
+    body:not(.race) main > section.card { max-width: 980px; margin-left: auto; margin-right: auto; }
     body:not(.race) .showfloor { display: grid; grid-template-columns: minmax(0, 1fr) 340px;
       gap: 16px; align-items: start; }
+    /* Inside the grid the stage is the wide item and must NOT keep the 980 measure above. */
+    body:not(.race) .showfloor > section.card { max-width: none; margin-left: 0; margin-right: 0; }
     /* The stage owns the scroll; the board rides along beside it. */
     body:not(.race) .showfloor > #board { position: sticky; top: 12px; margin-top: 16px;
       max-height: calc(100vh - 40px); overflow: auto; }
-    /* A wider hopper column to match the bigger drum below. */
-    body:not(.race) .machine { grid-template-columns: 360px 1fr; }
-    /* In a narrow side column the heading and the replay button must not fight over one line. */
-    body:not(.race) .showfloor > #board .board-head { flex-direction: column; align-items: stretch; }
-    /* Once the stage is gone (the finished board, an abort) the sidebar has nothing to sit beside,
-       and leaving the grid up would strand the board in the narrow first track with hundreds of
-       pixels reserved for nothing. The .hidden class is display:none, so the element is still a
-       grid child — :only-child cannot see that, but :has() can. */
-    body:not(.race) .showfloor:has(> #stage.hidden) { grid-template-columns: minmax(0, 1fr); }
+    /* In the narrow rail the heading and the replay button cannot share a line. Scoped to the
+       rail: on the finished screen (grid collapsed below) the button must not become a
+       full-width pill. */
+    body:not(.race) .showfloor:not(:has(> #stage.hidden)) > #board .board-head {
+      flex-direction: column; align-items: stretch; }
+    /* The rail exists to sit BESIDE something. With either partner missing — the stage gone at
+       the finished board, or the board not yet shown during the opening drum roll — the grid
+       collapses so nothing reserves a track for an element that is display:none. (.hidden is
+       display:none, so the element is still a grid child; :only-child cannot see that, :has can.) */
+    body:not(.race) .showfloor:has(> #stage.hidden),
+    body:not(.race) .showfloor:has(> #board.hidden) { grid-template-columns: minmax(0, 1fr); }
     body:not(.race) .showfloor:has(> #stage.hidden) > #board { position: static;
       max-height: none; overflow: visible; }
+    /* The hopper column widens with the drum below. */
+    body:not(.race) .machine { grid-template-columns: 360px 1fr; }
   }
-  /* A second step for a real monitor (#256): a 2560px screen still had ~600px dead either side
-     at the first breakpoint. The drum takes most of it — it is the thing worth looking at. */
-  @media (min-width: 1700px) {
-    body:not(.race) main { max-width: 1680px; }
-    body:not(.race) .showfloor { grid-template-columns: minmax(0, 1fr) 400px; }
-    body:not(.race) .machine { grid-template-columns: 440px 1fr; }
-  }
+
   .hidden { display: none !important; }
   section.card { background: rgba(20,24,33,.85); border: 1px solid #232a3d; border-radius: 16px;
     padding: 20px 22px; margin-top: 16px; }
@@ -170,9 +180,14 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
      display:none and the canvas measures 0, so it cannot discover its own size. Both steps sit
      together and in ascending order — identical specificity means source order decides, and
      split across the sheet the smaller one silently won at every width. */
-  body { --hopper-px: 260px; }
-  @media (min-width: 1200px) { body:not(.race) { --hopper-px: 320px; } }
-  @media (min-width: 1700px) { body:not(.race) { --hopper-px: 400px; } }
+  body { --hopper-px: 260px; --tube-ball-px: 18px; --chute-px: 20px; }
+  /* One step, at the same breakpoint the layout uses. The chute and its ball scale WITH the drum
+     (#256 review): the pile's ball radius is packing-fit to the canvas (#211), so growing only
+     the drum would make the ball that leaves the pile visibly shrink as it enters the tube —
+     the same identity break #258 just closed at the other end of the handoff. */
+  @media (min-width: 1500px) {
+    body:not(.race) { --hopper-px: 340px; --tube-ball-px: 23px; --chute-px: 26px; }
+  }
   .hopper { position: relative; width: var(--hopper-px); height: var(--hopper-px);
     margin: 10px auto 0; border-radius: 50%;
     border: 3px solid #2b3550; background: radial-gradient(circle at 35% 30%, #1c2338, #10141f 70%);
@@ -181,7 +196,8 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   #hopper-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   .hopper.spinning { animation: agitate .22s linear infinite; }
   /* The chute is a clear tube: the pulled ball is visible sliding down inside it. */
-  .chute { position: relative; width: 20px; height: 46px; margin: -4px auto 0; overflow: hidden;
+  .chute { position: relative; width: var(--chute-px); height: 46px; margin: -4px auto 0;
+    overflow: hidden;
     background: linear-gradient(180deg, rgba(43,53,80,.28), rgba(43,53,80,.55));
     border: 1px solid #2b3550; border-top: none; border-radius: 0 0 10px 10px;
     transition: box-shadow .3s, border-color .3s; }
@@ -212,7 +228,8 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
      duration, because the exit chain (extraction + transit + the drop ball's own .62s flip)
      already fits its gap with barely 140ms to spare. Giving the ball real screen time means
      re-planning that whole chain, which is its own piece of work. */
-  #tube-ball { width: 18px; height: 18px; left: calc(50% - 9px); top: -18px;
+  #tube-ball { width: var(--tube-ball-px); height: var(--tube-ball-px);
+    left: calc(50% - var(--tube-ball-px) / 2); top: calc(var(--tube-ball-px) * -1);
     background-size: cover; background-position: center; }
   #tube-ball.transit { animation: tube .4s cubic-bezier(.45,0,.85,.6) forwards; }
   #drum .now { font-size: 22px; font-weight: 800; text-align: center; color: #f5d67b;
