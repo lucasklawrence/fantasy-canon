@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   adjustmentLine,
   BASE_BACKOFF_MS,
@@ -338,6 +338,37 @@ describe('createStageWatcher (#220)', () => {
     stale.send(EDIT());
     await flush();
     expect(h.posts).toHaveLength(0);
+  });
+
+  it('says so in the log when the socket drops and when it comes back (#250)', () => {
+    // The gap is invisible from Discord and from the Activity — a commissioner's press just sits
+    // there. One line per drop and one on recovery is what made the live incident diagnosable.
+    const warns: string[] = [];
+    const logs: string[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => {
+      warns.push(a.join(' '));
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+      logs.push(a.join(' '));
+    });
+    try {
+      const h = harness();
+      h.watcher.start();
+      h.latest().open();
+      // A clean first connect is not news.
+      expect(logs.filter((l) => l.includes('reconnected'))).toHaveLength(0);
+
+      h.latest().drop();
+      expect(warns.some((w) => w.includes('stage watcher disconnected'))).toBe(true);
+      expect(warns.some((w) => w.includes('will not be heard'))).toBe(true);
+
+      h.runReconnect();
+      h.latest().open();
+      expect(logs.some((l) => l.includes('stage watcher reconnected'))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
 
   it('posts a line for a rename, independently of the ball edits (#219)', async () => {

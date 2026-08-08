@@ -377,6 +377,9 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
       reimporting.add(guildId);
       void reimport(guildId)
         .catch((error: unknown) => {
+          // The handler releases the press itself on every refusal it can name (#250); this is
+          // the backstop for a throw it never anticipated, which would otherwise leave the
+          // button disabled with nothing on any surface saying why.
           console.error('[draftorder] in-Activity re-import failed:', error);
         })
         .finally(() => reimporting.delete(guildId));
@@ -501,7 +504,16 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     // connect-time snapshots, duplicate audit lines.
     const isCurrent = (): boolean => socket === opened;
     opened.addEventListener('open', () => {
-      if (isCurrent()) attempts = 0;
+      if (!isCurrent()) return;
+      // Say so only when this is a RECOVERY (#250): a healthy boot connect is not news, but
+      // "the watcher is back" is exactly what the operator needs after a silent gap — while it
+      // was down, every in-Activity press (re-import, begin, setup) went unheard.
+      if (attempts > 0) {
+        console.log(
+          `[draftorder] stage watcher reconnected after ${attempts} attempt(s) — in-Activity presses are being heard again`,
+        );
+      }
+      attempts = 0;
     });
     opened.addEventListener('message', (event: { data: unknown }) => {
       if (isCurrent()) handleMessage(event.data);
@@ -523,6 +535,12 @@ export function createStageWatcher(options: StageWatcherOptions): StageWatcher {
     // may simply not be running.
     const delay = Math.min(BASE_BACKOFF_MS * 2 ** attempts, MAX_BACKOFF_MS);
     attempts += 1;
+    // The gap this leaves is invisible from Discord AND from the Activity — a commissioner's
+    // re-import press just sits there (#250, the live incident). One line per drop, naming the
+    // next retry, is what turns "nothing happened" into a two-second diagnosis in the terminal.
+    console.warn(
+      `[draftorder] stage watcher disconnected (attempt ${attempts}) — in-Activity presses will not be heard; retrying in ${Math.round(delay / 1000)}s`,
+    );
     reconnectHandle = schedule(() => {
       reconnectHandle = null;
       connect();

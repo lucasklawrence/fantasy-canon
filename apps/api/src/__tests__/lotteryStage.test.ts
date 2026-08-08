@@ -45,6 +45,9 @@ const EDITABLE: LotteryLobbyRequest = {
   ],
 };
 
+/** The same editable lobby, stamped with the guild that owns it — what a real `setup` arms. */
+const IN_G1: LotteryLobbyRequest = { ...EDITABLE, guildId: 'g1' };
+
 const START: LotteryStart = {
   title: '2026 Draft Lottery',
   commitment: 'hash',
@@ -556,6 +559,61 @@ describe('rename + re-import — the rest of the in-Activity field edits (#219)'
     stage.clear({});
     expect(stage.snapshot().renames).toBeUndefined();
     expect(stage.snapshot().reimportRequested).toBeUndefined();
+  });
+
+  it('stamps every press so a client can tell a retry from the one it is watching (#250)', () => {
+    const stage = createLotteryStage();
+    stage.lobby(IN_G1);
+    stage.requestReimport();
+    const first = stage.snapshot().reimportRequestedAt;
+    expect(typeof first).toBe('number');
+
+    // A re-press while one is pending is deliberately allowed — the flag is not proof the bot
+    // ever heard it, so retry is the honest recovery — and it must read as a NEW attempt.
+    stage.releaseReimport({ guildId: 'g1', reason: 'ESPN was down' });
+    stage.requestReimport();
+    expect(stage.snapshot().reimportRequestedAt).not.toBe(undefined);
+    // Pressing again also wipes the previous refusal notice.
+    expect(stage.snapshot().reimportDenied).toBeUndefined();
+  });
+
+  it('release frees the button, carries the reason once, and never touches the bag (#250)', () => {
+    const stage = createLotteryStage();
+    stage.lobby(IN_G1);
+    stage.adjust({ teamId: 't-a', balls: 7 });
+    stage.requestReimport();
+    const events: LotteryEvent[] = [];
+    stage.subscribe((e) => events.push(e));
+
+    // Guild-scoped like clear(): another guild's release is a no-op.
+    stage.releaseReimport({ guildId: 'other', reason: 'nope' });
+    expect(stage.snapshot().reimportRequested).toBe(true);
+    expect(events).toHaveLength(0);
+
+    stage.releaseReimport({ guildId: 'g1', reason: 'ESPN wouldn’t answer' });
+    expect(stage.snapshot().reimportRequested).toBeUndefined();
+    expect(stage.snapshot().reimportRequestedAt).toBeUndefined();
+    expect(stage.snapshot().reimportDenied).toBe('ESPN wouldn’t answer');
+    // Deliberately NOT a re-arm: the refetch never happened, so the pending edit still stands.
+    expect(stage.snapshot().adjustments).toEqual([{ teamId: 't-a', balls: 7 }]);
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('lottery-lobby');
+
+    // Nothing pending ⇒ nothing to free; a duplicate release must not wipe the reason.
+    stage.releaseReimport({ guildId: 'g1', reason: 'second thoughts' });
+    expect(stage.snapshot().reimportDenied).toBe('ESPN wouldn’t answer');
+    expect(events).toHaveLength(1);
+  });
+
+  it('a re-arm means the refetch landed, so it clears a stale refusal notice (#250)', () => {
+    const stage = createLotteryStage();
+    stage.lobby(IN_G1);
+    stage.requestReimport();
+    stage.releaseReimport({ guildId: 'g1', reason: 'ESPN was down' });
+    expect(stage.snapshot().reimportDenied).toBe('ESPN was down');
+
+    stage.lobby(IN_G1);
+    expect(stage.snapshot().reimportDenied).toBeUndefined();
   });
 });
 

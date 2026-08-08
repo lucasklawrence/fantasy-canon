@@ -1141,6 +1141,34 @@ describe('performActivityReimport (#219)', () => {
     } as unknown as Client;
   }
 
+  /** A stage that records the re-import releases the bot fires (#250). */
+  function releasingReimportStage(): {
+    stage: InspectableRevealStage;
+    released: { guildId?: string; reason?: string }[];
+    arms: number;
+  } {
+    const released: { guildId?: string; reason?: string }[] = [];
+    const counter = { arms: 0 };
+    const stage: InspectableRevealStage = {
+      ...stageHolding(),
+      lobby: () => {
+        counter.arms += 1;
+        return Promise.resolve();
+      },
+      reimportRelease: (release) => {
+        released.push(release);
+        return Promise.resolve();
+      },
+    };
+    return {
+      stage,
+      released,
+      get arms() {
+        return counter.arms;
+      },
+    };
+  }
+
   /** A session as `setup` leaves it for an ESPN-backed ceremony. */
   function espnSession(over: Partial<CeremonySession> = {}) {
     const session = createCeremony(
@@ -1222,10 +1250,15 @@ describe('performActivityReimport (#219)', () => {
     });
     const session = espnSession();
     const sent: { content?: string }[] = [];
+    const { stage, released } = releasingReimportStage();
 
+    // Refused, not thrown (#250): a roster ESPN won't fix on retry has to reach the commissioner
+    // as a reason, with the button freed — a throw left it latched until the next setup.
     await expect(
-      performActivityReimport(reimportClient(sent), context, stageHolding())('guild-1'),
-    ).rejects.toThrow('two teams called');
+      performActivityReimport(reimportClient(sent), context, stage)('guild-1'),
+    ).resolves.toBe(false);
+    expect(released[0]?.reason).toContain('two teams called');
+    expect(sent[0]?.content).toContain('Re-import from ESPN failed');
     // The session still holds what setup froze.
     expect(session.names.get('a')).toBe('Stale Alpha');
     expect(session.config.teams).toHaveLength(2);
@@ -1321,24 +1354,92 @@ describe('performActivityReimport (#219)', () => {
       },
     } as unknown as Client;
 
-    await expect(
-      performActivityReimport(client, context, stageHolding())('guild-1'),
-    ).rejects.toThrow('channel send failed');
+    const { stage, released } = releasingReimportStage();
+    await expect(performActivityReimport(client, context, stage)('guild-1')).resolves.toBe(false);
     // Keeping the refetched bag would let a later `begin` commit teams the league never saw.
     expect(session.names.get('a')).toBe('Stale Alpha');
     expect(session.config.teams).toHaveLength(2);
     expect(session.reimportActive).toBe(false);
+    // The channel is the surface that just failed, so the Activity is the one that must speak.
+    expect(released[0]?.reason).toContain('channel send failed');
   });
 
-  it('refuses a ceremony with no ESPN league behind it', async () => {
+  it('refuses a ceremony with no ESPN league behind it, and says why (#250)', async () => {
     const { context } = createMockContext({ defaultLeagueId: 'league-1' });
     // A manual `teams:` setup never records a leagueId — there is nothing to refetch.
     espnSession({ leagueId: undefined });
     const sent: { content?: string }[] = [];
+    const { stage, released } = releasingReimportStage();
     await expect(
-      performActivityReimport(reimportClient(sent), context, stageHolding())('guild-1'),
+      performActivityReimport(reimportClient(sent), context, stage)('guild-1'),
     ).resolves.toBe(false);
-    expect(sent).toHaveLength(0);
+    // Nothing else will ever clear this press: no re-arm is coming for a bag that never changes.
+    expect(released).toHaveLength(1);
+    expect(released[0].guildId).toBe('guild-1');
+    expect(released[0].reason).toContain('ESPN');
+    expect(sent[0]?.content).toContain('Re-import from ESPN failed');
+    expect(sent[0]?.content).toContain('The bag is unchanged');
+  });
+
+  it('releases the press and names the reason when ESPN is down (#250)', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchThrows: ['mTeam'],
+    });
+    espnSession();
+    const sent: { content?: string }[] = [];
+    const { stage, released } = releasingReimportStage();
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stage)('guild-1'),
+    ).resolves.toBe(false);
+
+    // Both surfaces, because they fail independently — the Activity is where the presser is
+    // looking, the channel line is the record beside the bag that did not change.
+    expect(released).toHaveLength(1);
+    expect(released[0].guildId).toBe('guild-1');
+    expect(released[0].reason).toContain('ESPN');
+    expect(sent[0]?.content).toContain('Re-import from ESPN failed');
+  });
+
+  it('a successful re-import releases nothing — the re-arm clears the press (#250)', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    espnSession();
+    const sent: { content?: string }[] = [];
+    const { stage, released } = releasingReimportStage();
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stage)('guild-1'),
+    ).resolves.toBe(true);
+
+    expect(released).toHaveLength(0);
+    expect(sent.some((p) => p.content?.includes('failed'))).toBe(false);
+  });
+
+  it('frees the press when the import landed but the lobby re-arm did not (#250)', async () => {
+    const { context } = createMockContext({
+      defaultLeagueId: 'league-1',
+      fetchPayloads: { mTeam: FOUR_TEAMS },
+    });
+    const session = espnSession();
+    const sent: { content?: string }[] = [];
+    const { stage, released } = releasingReimportStage();
+    // The refetch and its public preview land; only the re-arm — the thing that would have
+    // cleared `reimportRequested` — fails. That is the reported symptom's exact shape.
+    stage.lobby = () => Promise.reject(new Error('stage 503'));
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stage)('guild-1'),
+    ).resolves.toBe(true);
+
+    // The new roster IS installed, so the line must not claim the bag is unchanged.
+    expect(session.config.teams).toHaveLength(4);
+    expect(released).toHaveLength(1);
+    expect(sent.some((p) => p.content?.includes('The bag is unchanged'))).toBe(false);
+    expect(sent.some((p) => p.content?.includes("couldn't be updated"))).toBe(true);
   });
 
   it('refuses once the bag is sealed, for another guild, or with no lobby channel', async () => {

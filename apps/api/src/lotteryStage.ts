@@ -164,6 +164,14 @@ export interface LotteryStage {
    */
   releaseSetup(release: { guildId?: string; reason?: string }): void;
   /**
+   * Bot-keyed release of a refetch press it cannot honour, or that failed (#250). Same rule as
+   * {@link LotteryStage.releaseSetup}, applied to the re-import button: the flag's lifetime is
+   * the disabled-button lifetime, so a press the bot drops must be freed or every commissioner
+   * stays locked out until the next `setup`. `reason` rides the next broadcast once as
+   * {@link LotterySnapshot.reimportDenied}. Guild-scoped, and never touches the bag.
+   */
+  releaseReimport(release: { guildId?: string; reason?: string }): void;
+  /**
    * Is this Discord user id allowed to {@link LotteryStage.adjust}? False whenever no lobby is
    * armed, so a stale token can never edit a committed or finished run.
    */
@@ -508,7 +516,11 @@ export function parseLotterySetupRequest(
   return { value: { guildId: r.guildId, season: r.season } };
 }
 
-/** Guard for `POST /api/lottery/setup-release` (#253) — bot-keyed, guild scope + optional reason. */
+/**
+ * Guard for the bot-keyed release routes — `POST /api/lottery/setup-release` (#253) and
+ * `/api/lottery/reimport-release` (#250). Both carry the same thing: which guild's press to free
+ * and, optionally, why. The reason is echoed to every viewer, so it is length-capped here.
+ */
 export function parseLotterySetupRelease(
   body: string,
 ): Parsed<{ guildId?: string; reason?: string }> {
@@ -634,8 +646,14 @@ export function createLotteryStage(): LotteryStage {
   let adjustments = new Map<string, number>();
   /** Pending display-name fixes, teamId → new name, drained alongside the ball edits (#219). */
   let renames = new Map<string, string>();
-  /** The commissioner asked for an ESPN refetch; only the bot can honour it (#219). */
-  let reimportRequested = false;
+  /**
+   * The commissioner asked for an ESPN refetch; only the bot can honour it (#219). The value is
+   * the press's stamp — an opaque identity token that changes on every press (#250), so a client
+   * can tell a re-press from the one it is already watching. Absent ⇒ nothing pending.
+   */
+  let reimportRequested: number | undefined;
+  /** Why the last refetch press was refused (#250) — one-shot lobby feedback, like setupDenied. */
+  let reimportDenied: string | undefined;
   /** The commissioner asked to seal the bag and start the draw; only the bot can (#233). */
   let beginRequested: LotteryBeginRequest | undefined;
   /**
@@ -675,6 +693,8 @@ export function createLotteryStage(): LotteryStage {
     adjustments?: LotteryAdjustment[];
     renames?: LotteryRename[];
     reimportRequested?: boolean;
+    reimportRequestedAt?: number;
+    reimportDenied?: string;
     beginRequested?: LotteryBeginRequest;
     auditMode?: LotteryAuditMode;
   } {
@@ -685,7 +705,11 @@ export function createLotteryStage(): LotteryStage {
       ...(renames.size > 0
         ? { renames: [...renames].map(([teamId, displayName]) => ({ teamId, displayName })) }
         : {}),
-      ...(reimportRequested ? { reimportRequested: true } : {}),
+      // Boolean stays on the wire for older clients; the stamp rides beside it (#250).
+      ...(reimportRequested !== undefined
+        ? { reimportRequested: true, reimportRequestedAt: reimportRequested }
+        : {}),
+      ...(reimportDenied ? { reimportDenied } : {}),
       ...(beginRequested ? { beginRequested } : {}),
       ...(auditMode !== 'live' ? { auditMode } : {}),
     };
@@ -701,7 +725,8 @@ export function createLotteryStage(): LotteryStage {
     commissionerIds = [];
     adjustments = new Map();
     renames = new Map();
-    reimportRequested = false;
+    reimportRequested = undefined;
+    reimportDenied = undefined;
     beginRequested = undefined;
     auditMode = 'live';
   }
@@ -779,8 +804,11 @@ export function createLotteryStage(): LotteryStage {
       // has either been honoured or is moot. A pending begin dies with it too: the bag the
       // commissioner pressed the button against is not the bag now on screen (ADR 0006 — any
       // change after the press must be re-confirmed against a fresh public preview).
-      reimportRequested = false;
+      reimportRequested = undefined;
       beginRequested = undefined;
+      // A re-arm is the refetch actually landing, so a refusal notice from an earlier attempt is
+      // stale — same rule the setup doorbell's denial follows one line down (#250).
+      reimportDenied = undefined;
       // An arm is also how the bot ANSWERS a setup doorbell (#253) — and any lingering denial
       // notice is stale the moment a real lobby is on screen.
       setupRequested = undefined;
@@ -895,10 +923,26 @@ export function createLotteryStage(): LotteryStage {
     },
     requestReimport() {
       if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
-      // Only a flag: this process has no ESPN league config and no cookies, so the refetch is the
-      // bot's to perform. It clears when the bot re-arms the lobby with what it fetched.
-      reimportRequested = true;
+      // Only a stamp: this process has no ESPN league config and no cookies, so the refetch is
+      // the bot's to perform. It clears when the bot re-arms the lobby with what it fetched, or
+      // releases the press with a reason (#250). A re-press is deliberately allowed while one is
+      // pending — the flag is not proof the bot ever heard it, and retry is the honest recovery
+      // when it didn't. The new stamp tells every client this is a fresh attempt.
+      reimportRequested = Date.now();
+      reimportDenied = undefined;
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
+    },
+    releaseReimport(release) {
+      // Bot-keyed release of a refetch it cannot honour or that failed (#250) — the #236 rule
+      // again: a press that goes nowhere must never leave every commissioner's button disabled
+      // until the next setup. Deliberately NOT a re-arm: the bag is unchanged, so republishing
+      // it would only risk dropping pending edits, and the reason has to survive to say why.
+      if (reimportRequested === undefined) return;
+      if (release.guildId !== undefined && lobby?.guildId !== release.guildId) return;
+      reimportRequested = undefined;
+      reimportDenied = release.reason;
+      if (lobby) emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
+      else emit({ type: 'lottery-state', snapshot: buildSnapshot() });
     },
     requestBegin(request) {
       // A pending begin freezes the whole lobby (adjust/rename/re-import/begin all 409): the bot

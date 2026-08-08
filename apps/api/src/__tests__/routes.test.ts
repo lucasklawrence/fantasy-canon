@@ -533,6 +533,47 @@ describe('commissioner lobby edits (#210)', () => {
     expect(state.lobby?.totalBalls).toBe(3);
   });
 
+  it('the bot releases a re-import press behind the stage key, with the reason (#250)', async () => {
+    const d = deps(hub(), { stageKey: 'sekrit' });
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d, {
+      'x-stage-key': 'sekrit',
+    });
+    await routeRequest(
+      'POST',
+      '/api/lottery/adjust',
+      JSON.stringify({ teamId: 't-a', balls: 5 }),
+      d,
+      asCommissioner,
+    );
+    expect(
+      (await routeRequest('POST', '/api/lottery/reimport', '', d, asCommissioner)).status,
+    ).toBe(200);
+
+    const release = JSON.stringify({ guildId: 'g-a', reason: 'ESPN would not answer' });
+    // Commissioner bearers cannot release — only the bot, which is the only thing that knows
+    // whether the import actually happened.
+    expect(
+      (await routeRequest('POST', '/api/lottery/reimport-release', release, d, asCommissioner))
+        .status,
+    ).toBe(401);
+    expect(
+      (
+        await routeRequest('POST', '/api/lottery/reimport-release', release, d, {
+          'x-stage-key': 'sekrit',
+        })
+      ).status,
+    ).toBe(200);
+
+    const after = JSON.parse(
+      (await routeRequest('GET', '/api/lottery/state', '', d)).body,
+    ) as LotterySnapshot;
+    expect(after.reimportRequested).toBeUndefined();
+    expect(after.reimportDenied).toBe('ESPN would not answer');
+    // The release is not a re-arm: the commissioner's pending edit survives an import that
+    // never happened.
+    expect(after.adjustments).toEqual([{ teamId: 't-a', balls: 5 }]);
+  });
+
   it('401s/403s rename and reimport exactly like adjust', async () => {
     const d = deps(hub());
     await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);

@@ -385,6 +385,14 @@ async function lotteryRoute(
       deps.lottery.releaseSetup(parsed.value);
       return json(200, { ok: true });
     }
+    case '/api/lottery/reimport-release': {
+      // Bot-keyed refusal of a re-import press (#250): same shape and same reason — a button
+      // whose request the bot dropped must not stay disabled until the next setup.
+      const parsed = parseLotterySetupRelease(body);
+      if ('error' in parsed) return json(400, { error: parsed.error });
+      deps.lottery.releaseReimport(parsed.value);
+      return json(200, { ok: true });
+    }
     case '/api/lottery/logo-cache': {
       // Bot-pushed logo bytes (#249). Raster only — the bot rasterizes SVG before pushing, and
       // this gate makes sure nothing scriptable can be laundered into the same-origin cache.
