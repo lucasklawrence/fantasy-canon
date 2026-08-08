@@ -53,7 +53,7 @@ import {
   type CatchUpContext,
 } from './replayTimeline.js';
 import { configuredMaxTeamBalls, runHandshake } from './sdk.js';
-import { tubePlan, type TubePlan } from './tubePlan.js';
+import { EXTRACT_CAP_MS, MIN_GAP_MS, tubePlan, type TubePlan } from './tubePlan.js';
 import { apiPath, isDiscordActivity, proxyBase, wsUrl } from './transport.js';
 
 function byId(id: string): HTMLElement {
@@ -992,8 +992,23 @@ function renderWaiting(start: LotteryStart, drawn: { pick: number; team: string 
 
 /** Chute-glow lead before the reveal is due — the drum-roll's "something's coming" cue. */
 const CHUTE_GLOW_LEAD_MS = 1150;
-/** Diameter of the close-up ball at full size (#258) — big enough to read a team logo. */
+/**
+ * Diameter of the close-up ball at full size (#258) — big enough to read a team logo. Written
+ * into `--closeup-size` at run time, so the CSS fallback exists only for a stylesheet loaded
+ * without the client and must match this number.
+ */
 const CLOSEUP_PX = 56;
+
+/**
+ * Where the drop ball's FLIP starts: the ball's centre in viewport coordinates and its diameter.
+ * A point rather than a rect because the two sources disagree about where inside their box the
+ * ball actually is — it rests near the bottom of the 46px chute, but fills the close-up.
+ */
+interface FlipAnchor {
+  cx: number;
+  cy: number;
+  size: number;
+}
 let chuteTimer: ReturnType<typeof setTimeout> | null = null;
 /** Beat pick the glow is armed for — poll repaints of the same beat must not restart it. */
 let armedPick: number | null = null;
@@ -1056,21 +1071,21 @@ function replaceNode(id: string): HTMLElement {
  * FLIP handoff: the drop ball starts at the chute exit (where the pulled ball just arrived) and
  * springs to its resting spot — the pull and the reveal read as one continuous motion.
  */
-function flipFromChute(ball: HTMLElement, from: DOMRect): void {
+function flipFromChute(ball: HTMLElement, from: FlipAnchor): void {
   // The clone carries the previous reveal's flip/fall classes — strip them so the start
   // transform below is applied instantly, by intent rather than by insertion semantics.
   ball.classList.remove('flip', 'fall');
   const to = ball.getBoundingClientRect();
-  if (!to.width || !from.width) {
+  if (!to.width || !from.size) {
     ball.classList.add('fall'); // measurement failed — fall back to the plain drop-in
     return;
   }
-  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
-  const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+  const dx = from.cx - (to.left + to.width / 2);
+  const dy = from.cy - (to.top + to.height / 2);
   // Scale from the ACTUAL start size (#258): the handoff used to be a fixed .14, tuned for the
-  // 14px tube ball inside the 20px chute. Now the FLIP can start from the 60px close-up, and a
-  // hardcoded scale would make the ball snap smaller before growing.
-  const scale = Math.min(1, Math.max(0.1, from.width / to.width));
+  // 14px tube ball inside the 20px chute. The close-up hands over a 56px ball, and a hardcoded
+  // scale would make it snap smaller before growing.
+  const scale = Math.min(1, Math.max(0.1, from.size / to.width));
   ball.style.transform = `translate(${dx}px, ${dy}px) scale(${scale.toFixed(3)})`;
   // Double rAF: the start transform must paint before the transition begins.
   requestAnimationFrame(() => {
@@ -1137,14 +1152,20 @@ async function runExitChoreography(
     num !== null
       ? await Promise.race([
           hopper().extractBall(num),
-          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1800)),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), EXTRACT_CAP_MS)),
         ])
       : false;
-  if (token !== choreoToken) return;
-  const plan = tubePlan(currentStart?.delayMs ?? 0);
-  // Where the FLIP starts. The chute mouth by default; the close-up's own rect once it has one,
-  // so the big ball shrinks into the drop ball instead of jumping back to a 20px tube first.
-  let fromRect = byId('chute').getBoundingClientRect();
+  if (token !== choreoToken) return hideCloseUp();
+  const plan = tubePlan(revealGapMs());
+  // The chute mouth is where the FLIP starts unless a close-up replaces it. `anchor` is passed
+  // explicitly rather than derived from the rect: the 14px tube ball rests near the BOTTOM of the
+  // 46px chute, while the close-up ball fills its own rect — one rule cannot describe both.
+  const chuteRect = byId('chute').getBoundingClientRect();
+  let anchor: FlipAnchor = {
+    cx: chuteRect.left + chuteRect.width / 2,
+    cy: chuteRect.bottom - 7,
+    size: chuteRect.width,
+  };
   if (flew) {
     const tube = byId('tube-ball');
     // The tube ball wears the real face now (#258) — it used to be a bare hue gradient, so in
@@ -1155,9 +1176,11 @@ async function runExitChoreography(
     void tube.offsetWidth; // restart the CSS animation for this transit
     tube.classList.add('transit');
     await new Promise((resolve) => setTimeout(resolve, plan.transitMs));
-    if (token !== choreoToken) return;
-    fromRect = await presentAtMouth(reveal, num, hue, plan, token);
-    if (token !== choreoToken) return;
+    if (token !== choreoToken) return hideCloseUp();
+    if (closeUpEligible(reveal.pick)) {
+      anchor = await presentAtMouth(reveal, num, hue, plan, token, anchor);
+      if (token !== choreoToken) return hideCloseUp();
+    }
   }
   exitInFlight = null;
   const tube = byId('tube-ball');
@@ -1172,10 +1195,33 @@ async function runExitChoreography(
   applyDropFace(ball, reveal.team, num !== null ? hue : undefined);
   replaceNode('drop-team').textContent = reveal.team;
   replaceNode('drop-odds').textContent = oddsText;
-  flipFromChute(ball, fromRect);
+  flipFromChute(ball, anchor);
   // Only now — the FLIP has measured its start, so hiding the close-up cannot make the big ball
   // vanish before the drop ball has taken its place.
   hideCloseUp();
+}
+
+/**
+ * Which reveals get the close-up. Everything except pick #1, which belongs to the envelope
+ * (#243) — the issue's own framing: the close-up is the per-pick moment, the envelope is the
+ * finale. Skipping it there also removes the two places the extra ~1s hurt most: pick #1 is the
+ * LAST reveal in worst-to-first, where the finish lands a fixed 1800ms later and would supersede
+ * the drop card, and it is the reveal whose envelope is queued behind this choreography.
+ */
+function closeUpEligible(pick: number): boolean {
+  return pick !== 1;
+}
+
+/**
+ * The gap this reveal actually has before the next event supersedes it — NOT the ceremony's
+ * delay. Replay and catch-up compress reveals to `replayWindowMs`, and on every path the finish
+ * follows the final reveal by a fixed `REPLAY_DWELL_MS`. The close-up is budgeted against
+ * whichever is tighter, because overrunning either one costs the viewer a drop card.
+ */
+function revealGapMs(): number {
+  const cadence = playbackMode !== null ? replayWindowMs : (currentStart?.delayMs ?? 0);
+  const known = Number.isFinite(cadence) && cadence > 0 ? cadence : MIN_GAP_MS;
+  return Math.min(known, MIN_GAP_MS);
 }
 
 /**
@@ -1192,7 +1238,8 @@ async function presentAtMouth(
   hue: number | undefined,
   plan: TubePlan,
   token: number,
-): Promise<DOMRect> {
+  fallback: FlipAnchor,
+): Promise<FlipAnchor> {
   const chute = byId('chute');
   const closeUp = byId('tube-closeup');
   const left = chute.offsetLeft + chute.offsetWidth / 2;
@@ -1214,13 +1261,17 @@ async function presentAtMouth(
   void closeUp.offsetWidth; // restart the grow for this pick
   closeUp.classList.add('present');
   await new Promise((resolve) => setTimeout(resolve, plan.presentMs + plan.dwellMs));
-  if (token !== choreoToken) return chute.getBoundingClientRect();
+  if (token !== choreoToken) return fallback;
   const rect = closeUp.getBoundingClientRect();
-  return rect.width > 0 ? rect : chute.getBoundingClientRect();
+  // The ball fills its own rect, so its centre IS the anchor — unlike the chute, where the ball
+  // rests near the bottom of a 46px tube.
+  return rect.width > 0
+    ? { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, size: rect.width }
+    : fallback;
 }
 
 /** Retire the close-up. Safe to call at any time — a stale choreography clears it on its way out. */
-function hideCloseUp(): void {
+function hideCloseUp(): undefined {
   closeUpFace = null;
   const closeUp = document.getElementById('tube-closeup');
   if (!closeUp) return;

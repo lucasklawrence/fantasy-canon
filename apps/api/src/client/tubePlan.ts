@@ -5,14 +5,28 @@
  *
  * The exit (#215) sends the drawn ball down the chute in 420ms at 14px — fine for a numbered
  * ball, illegible for a team logo (#252). This plan buys the ball a beat of screen time at the
- * tube mouth, sized to the ceremony's own pacing: a 5-second ceremony gets a glance, a 30-second
- * one gets a real look. Everything the whole choreography can spend is accounted for here so the
- * one hard constraint stays checkable — it must finish comfortably inside the *shortest* gap
- * between reveals, or back-to-back picks would overlap.
+ * tube mouth.
+ *
+ * **The gap that matters is not the reveal delay.** A 30-second ceremony does not give the
+ * choreography 30 seconds: the client compresses reveals to `replayStepMs` (≤2500ms) on the
+ * replay/catch-up paths, and on EVERY path the `finish` lands only `REPLAY_DWELL_MS` (1800ms)
+ * after the final reveal — which tears the stage down and supersedes anything still in flight.
+ * So the caller passes the tightest gap actually in play, and this plan sizes itself to fit
+ * inside it with the typical extraction and a safety margin already deducted.
  */
 
-/** Extraction race cap in {@link runExitChoreography} — the sim may never resolve in a hidden tab. */
+/** Extraction race cap in `runExitChoreography` — the sim may never resolve in a hidden tab. */
 export const EXTRACT_CAP_MS = 1800;
+
+/**
+ * What the extraction usually costs (hopperSim's own `EXTRACT_MS`). Budgeting against the 1800ms
+ * *cap* would starve the close-up on every normal reveal, and a hidden tab — the only case that
+ * reaches the cap — has no animation to overrun anyway.
+ */
+export const EXTRACT_TYPICAL_MS = 620;
+
+/** Slack kept clear of the gap so a slow frame cannot turn a fit into an overrun. */
+const SAFETY_MS = 180;
 
 export interface TubePlan {
   /** Chute descent. Longer than #215's 420ms so the face is readable in transit. */
@@ -25,32 +39,24 @@ export interface TubePlan {
   totalMs: number;
 }
 
-/** Never exceed this share of the reveal gap, extraction included — the overlap guard. */
-const BUDGET_SHARE = 0.62;
-
 /**
- * Plan the close-up for a ceremony pacing reveals `delayMs` apart.
+ * Plan the close-up for a reveal whose next event lands `gapMs` from now.
  *
- * Scaled rather than fixed because the delay spans 5s→30s (#233's closed vocabulary): one
- * duration either rushes the slow ceremonies or overruns the fast ones. The result is clamped
- * on both ends — a floor so there is always *some* beat, and a budget ceiling computed against
- * the worst-case extraction so even `delay=5` leaves the drop ball its own screen time.
- *
- * In practice that means `delay=5` is the only pinched case (≈1.3s of close-up, 1.9s of
- * headroom); every longer pacing saturates the per-phase caps at ≈2.0s, because past a point a
- * longer stare is tedious rather than dramatic.
+ * Clamped on both ends: a floor so there is always *some* beat, and a ceiling that keeps
+ * `EXTRACT_TYPICAL_MS + totalMs + SAFETY_MS` inside `gapMs`. An unknown or hostile gap is
+ * treated as the tightest supported one — guessing generously would overrun a gap that turned
+ * out to be short, which costs the viewer a drop card.
  */
-export function tubePlan(delayMs: number): TubePlan {
-  // An unknown pacing is assumed to be the TIGHTEST supported one, not the loosest: a missing
-  // `delayMs` (an older api, a compressed replay) must never buy the close-up more time than the
-  // gap can afford. NaN/Infinity would otherwise poison every arithmetic step below.
-  const gap = Number.isFinite(delayMs) && delayMs > 0 ? Math.max(1000, delayMs) : 5000;
-  // What the post-extraction phases may spend in total. At delay=5s: 5000*0.62 - 1800 = 1300ms.
-  const budget = Math.max(300, gap * BUDGET_SHARE - EXTRACT_CAP_MS);
-  const transitMs = Math.round(Math.min(760, Math.max(420, budget * 0.45)));
-  const presentMs = Math.round(Math.min(320, Math.max(180, budget * 0.2)));
-  // The dwell absorbs whatever is left, so a long ceremony spends its extra time standing still
-  // at full size rather than crawling through the tube.
-  const dwellMs = Math.round(Math.min(900, Math.max(200, budget - transitMs - presentMs)));
+export function tubePlan(gapMs: number): TubePlan {
+  const gap = Number.isFinite(gapMs) && gapMs > 0 ? gapMs : MIN_GAP_MS;
+  // Never below the #215 baseline (420ms transit) — this plan may shorten the close-up, but it
+  // must not make the exit itself worse than it was before the feature existed.
+  const budget = Math.max(420, gap - EXTRACT_TYPICAL_MS - SAFETY_MS);
+  const transitMs = Math.round(Math.min(560, Math.max(420, budget * 0.45)));
+  const presentMs = Math.round(Math.min(260, Math.max(140, budget * 0.2)));
+  const dwellMs = Math.round(Math.min(520, Math.max(120, budget - transitMs - presentMs)));
   return { transitMs, presentMs, dwellMs, totalMs: transitMs + presentMs + dwellMs };
 }
+
+/** The tightest gap the ceremony ever presents: the finish's fixed lead after the last reveal. */
+export const MIN_GAP_MS = 1800;

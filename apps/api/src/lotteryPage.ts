@@ -126,16 +126,13 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
      Machine mode only: the race hides the chute and has nothing to emerge from. */
   body:not(.race) .machine-left { padding-bottom: 40px; }
   #tube-closeup { position: absolute; left: 50%; top: var(--closeup-top, 0px);
-    width: var(--closeup-size, 60px); height: var(--closeup-size, 60px);
-    margin-left: calc(var(--closeup-size, 60px) / -2); border-radius: 50%;
+    width: var(--closeup-size, 56px); height: var(--closeup-size, 56px);
+    margin-left: calc(var(--closeup-size, 56px) / -2); border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     font-weight: 800; font-size: 15px; color: #14181f; letter-spacing: -.3px;
     box-shadow: 0 6px 18px rgba(0,0,0,.55), 0 0 26px rgba(245,214,123,.22);
     opacity: 0; transform: scale(.18); transform-origin: 50% 0;
     pointer-events: none; z-index: 3; }
-  /* A logo fills the ball, so its number needs to survive on top of arbitrary art. */
-  #tube-closeup.logo-face { color: #fff;
-    text-shadow: 0 2px 8px rgba(0,0,0,.9), 0 0 3px rgba(0,0,0,.8); }
   /* Grow-to-camera, then hold. Duration comes from the client (tubePlan) via --closeup-present;
      the transform is forwards-filled so the ball simply STAYS at full size for the dwell — no
      second animation, and a hidden tab that never paints still ends in the right state. */
@@ -259,8 +256,10 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
   @keyframes agitate { 0%,100% { transform: translate(0,0) } 25% { transform: translate(1px,-1px) }
     50% { transform: translate(-1px,1px) } 75% { transform: translate(1px,1px) } }
+  /* Ends at 44px, not 46/50: the chute's padding box is 45px tall and clips, so an 18px ball
+     starting at top:-18 must stop with its bottom at or under 45 or the mouth shears it (#258). */
   @keyframes tube { 0% { opacity: 0; transform: translateY(0) } 15% { opacity: 1 }
-    100% { opacity: 1; transform: translateY(50px) } }
+    100% { opacity: 1; transform: translateY(44px) } }
   @keyframes drop { 0% { transform: translateY(-220px) scale(.6); opacity: 0 }
     60% { transform: translateY(12px) scale(1.04); opacity: 1 } 80% { transform: translateY(-8px) }
     100% { transform: translateY(0) scale(1) } }
@@ -274,11 +273,9 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     .hopper.spinning, .pullball, #drop .dropball, #drop .team, #drop .odds,
     .confetti, #waiting .pulse, #drum .now { animation: none !important; transition: none !important; }
     #drop .dropball.flip { transition: none !important; }
-    /* The close-up (#258) keeps its PURPOSE without its motion: no grow, but the ball still
-       appears at full size and holds, so a reduced-motion viewer can read the logo too. Listed
-       separately from the .pullball rule above because animation:none alone would strand it at
-       the keyframe's starting opacity 0 — visible is the point, moving is not. */
-    #tube-closeup.present { animation: none !important; opacity: 1; transform: scale(1); }
+    /* No rule for the close-up: hopperSim.extractBall short-circuits under reduced motion, so
+       the exit choreography never reaches it and the drop ball — which is larger still, and
+       wears the same logo — is what a reduced-motion viewer reads the team off. */
     /* The canvas pile honors this too — hopperSim renders a settled still frame, no loop. */
   }
 </style>

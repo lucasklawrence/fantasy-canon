@@ -1,61 +1,61 @@
 import { describe, expect, it } from 'vitest';
 
-import { EXTRACT_CAP_MS, tubePlan } from '../client/tubePlan.js';
+import { EXTRACT_TYPICAL_MS, MIN_GAP_MS, tubePlan, type TubePlan } from '../client/tubePlan.js';
 
-/** The reveal delays the begin request accepts (#233's closed vocabulary), in ms. */
-const DELAYS = [5000, 10000, 20000, 30000];
+/**
+ * Every gap the client can actually hand the planner: the fixed finish lead (the tightest, and
+ * the one that used to eat the final pick's drop card), the compressed replay cadence, and the
+ * live reveal delays from #233's closed vocabulary.
+ */
+const GAPS = [MIN_GAP_MS, 2500, 5000, 10000, 20000, 30000];
+
+/** What the whole choreography costs on a normal (non-hidden) reveal. */
+const spend = (plan: TubePlan): number => plan.totalMs + EXTRACT_TYPICAL_MS;
 
 describe('tubePlan (#258)', () => {
-  it('always leaves the drop ball room inside the reveal gap', () => {
-    // The hard constraint: extraction (worst case) plus the whole close-up must finish well
-    // before the next beat, or back-to-back picks overlap and the drop ball is never seen.
-    for (const delayMs of DELAYS) {
-      const plan = tubePlan(delayMs);
-      expect(plan.totalMs + EXTRACT_CAP_MS).toBeLessThan(delayMs * 0.7);
+  it('always finishes before the next event supersedes the reveal', () => {
+    // The regression this guards: the close-up grew the post-extraction tail past the fixed
+    // 1800ms finish lead, so the last pick's drop card was torn down mid-grow.
+    for (const gapMs of GAPS) {
+      expect(spend(tubePlan(gapMs))).toBeLessThan(gapMs);
     }
   });
 
-  it('gives the fastest pacing a real beat and slower pacings a longer one', () => {
-    const fast = tubePlan(5000);
-    const slow = tubePlan(30000);
-    // Even the pinched case is long enough to register as a hold, not a flicker.
-    expect(fast.dwellMs).toBeGreaterThanOrEqual(200);
-    expect(slow.dwellMs).toBeGreaterThan(fast.dwellMs);
-    // …and the transit is slower than #215's fixed 420ms in every case, since that is the
-    // window the face is first legible in.
-    expect(fast.transitMs).toBeGreaterThanOrEqual(420);
+  it('leaves slack even at the tightest gap, so a slow frame cannot turn a fit into an overrun', () => {
+    expect(spend(tubePlan(MIN_GAP_MS))).toBeLessThanOrEqual(MIN_GAP_MS - 150);
   });
 
-  it('saturates rather than growing without bound — a long stare is tedious, not dramatic', () => {
-    expect(tubePlan(30000)).toEqual(tubePlan(10000));
-    const capped = tubePlan(30000);
-    expect(capped.transitMs).toBeLessThanOrEqual(760);
-    expect(capped.presentMs).toBeLessThanOrEqual(320);
-    expect(capped.dwellMs).toBeLessThanOrEqual(900);
-  });
-
-  it('survives degenerate and hostile delays without inverting', () => {
-    // A replay/catch-up compresses pacing hard, and an older api could omit delayMs entirely —
-    // which arrives here as undefined→NaN. Passed straight in, not pre-sanitised by the test.
-    for (const delayMs of [0, -1, 1, 250, Number.NaN, Number.POSITIVE_INFINITY]) {
-      const plan = tubePlan(delayMs);
-      expect(Number.isFinite(plan.transitMs)).toBe(true);
-      expect(plan.transitMs).toBeGreaterThan(0);
-      expect(plan.presentMs).toBeGreaterThan(0);
-      expect(plan.dwellMs).toBeGreaterThan(0);
-      expect(plan.totalMs).toBe(plan.transitMs + plan.presentMs + plan.dwellMs);
+  it('never makes the exit worse than the #215 baseline it replaces', () => {
+    // 420ms was the old fixed transit; the close-up may be brief, but the descent must not be
+    // shorter than it was before the feature existed.
+    for (const gapMs of GAPS) {
+      expect(tubePlan(gapMs).transitMs).toBeGreaterThanOrEqual(420);
+      expect(tubePlan(gapMs).dwellMs).toBeGreaterThan(0);
     }
   });
 
-  it('treats an unknown pacing as the tightest one, never the loosest', () => {
-    // Guessing generously would let the close-up overrun a 5s gap it turned out to be running in.
-    expect(tubePlan(Number.NaN)).toEqual(tubePlan(5000));
-    expect(tubePlan(0)).toEqual(tubePlan(5000));
+  it('gives a roomier gap a longer hold, then saturates', () => {
+    const tight = tubePlan(MIN_GAP_MS);
+    const roomy = tubePlan(5000);
+    expect(roomy.dwellMs).toBeGreaterThan(tight.dwellMs);
+    // Past a point a longer stare is tedious, not dramatic — and the gap stops being the binding
+    // constraint anyway, because the finish lead caps it.
+    expect(tubePlan(30000)).toEqual(tubePlan(5000));
+  });
+
+  it('treats an unknown or hostile gap as the tightest one, never the loosest', () => {
+    // Guessing generously would overrun a gap that turned out to be short.
+    for (const gapMs of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
+      const plan = tubePlan(gapMs);
+      expect(Number.isFinite(plan.totalMs)).toBe(true);
+      expect(spend(plan)).toBeLessThan(MIN_GAP_MS);
+    }
+    expect(tubePlan(Number.NaN)).toEqual(tubePlan(MIN_GAP_MS));
   });
 
   it('adds up — totalMs is what the caller actually spends', () => {
-    for (const delayMs of DELAYS) {
-      const plan = tubePlan(delayMs);
+    for (const gapMs of GAPS) {
+      const plan = tubePlan(gapMs);
       expect(plan.totalMs).toBe(plan.transitMs + plan.presentMs + plan.dwellMs);
     }
   });
