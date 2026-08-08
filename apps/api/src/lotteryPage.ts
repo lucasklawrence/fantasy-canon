@@ -210,6 +210,29 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     background: linear-gradient(180deg, rgba(43,53,80,.28), rgba(43,53,80,.55));
     border: 1px solid #2b3550; border-top: none; border-radius: 0 0 10px 10px;
     transition: box-shadow .3s, border-color .3s; }
+  /* The hold (#265). The chute is ~20px wide and clips, so the ball can never be READ inside it;
+     once it clears the mouth it is handed to this, which lives outside the clip and grows to
+     camera size. Absolutely positioned so the drum above it never reflows mid-reveal, and only
+     ever shown when exitBudget says the gap affords the beat. */
+  .machine-left { position: relative; }
+  #tube-hold { position: absolute; left: 50%; top: var(--hold-top, 0px);
+    width: var(--hold-size, 56px); height: var(--hold-size, 56px);
+    margin-left: calc(var(--hold-size, 56px) / -2); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 15px; color: #14181f; letter-spacing: -.3px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.55), 0 0 26px rgba(245,214,123,.22);
+    opacity: 0; transform: scale(.18); transform-origin: 50% 0;
+    pointer-events: none; z-index: 3; }
+  /* Grow, then hold: forwards-filled so the ball simply STAYS at full size for the rest of the
+     beat — no second animation, and a hidden tab still ends in the right state. */
+  #tube-hold.present { animation: holdgrow var(--hold-grow, 240ms)
+    cubic-bezier(.2,.9,.3,1.25) forwards; }
+  @keyframes holdgrow { from { opacity: 0; transform: scale(.18) }
+    to { opacity: 1; transform: scale(1) } }
+  /* Reserve the overhang: the hold is absolutely positioned so it adds no height, and on the
+     phone stack the drum panel is followed directly by the reveal column. */
+  body:not(.race) .machine-left { padding-bottom: 40px; }
+
   .chute.active { border-color: rgba(245,214,123,.5);
     box-shadow: 0 0 14px rgba(245,214,123,.28), inset 0 0 8px rgba(245,214,123,.18); }
 
@@ -445,6 +468,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
       <div class="machine-left" id="machine-left">
         <div class="hopper" id="hopper"><canvas id="hopper-canvas"></canvas></div>
         <div class="chute" id="chute"><div class="pullball" id="tube-ball"></div></div>
+        <div id="tube-hold" aria-hidden="true"></div>
         <div class="racetrack hidden" id="racetrack"><canvas id="race-canvas"></canvas></div>
       </div>
       <div>
