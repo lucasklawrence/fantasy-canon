@@ -201,8 +201,20 @@ stage — deferred, not dropped.
 > discards every pending edit" consequence above only ever applied to an import that _succeeded_.
 > The bot releases on every refusal it can name (no ESPN league behind the ceremony, an
 > unreachable channel, an ESPN failure, a roster that cannot produce exact odds, a preview that
-> would not post) and also when the import landed but the re-arm did not — the one case where the
-> channel line must not claim the bag is unchanged.
+> would not post, a press for a guild this bot holds no ceremony for) and also when the import
+> landed but the re-arm did not — the one case where the channel line must not claim the bag is
+> unchanged. Reasons are therefore complete sentences: the client prints them verbatim rather
+> than under a "failed" prefix that the landed-but-not-re-armed case would make a lie.
+>
+> **The two request flags are now mutually exclusive.** `requestBegin` refuses while a refetch is
+> pending, where before a seal pressed in that window was recorded and merely held back
+> watcher-side — so freeing the failed refetch un-gated it and the draw started unattended,
+> seconds after the failure message. Refusing the press is the honest answer: the commissioner
+> re-presses once they can see which bag they are sealing. `releaseReimport` also clears any
+> `beginRequested` as a belt, so a draw can never start as a side effect of a failure. A refusal
+> notice is likewise one-shot — any later edit, rename, level-all, audit-mode change or re-arm
+> clears it, or it would sit at the top of the client's status precedence masking the feedback
+> for everything the commissioner did next.
 >
 > The remaining gap is the one the live incident actually hit: a press the **bot never heard**,
 > because its stage watcher was disconnected. Nothing bot-side can release that, so two cheap

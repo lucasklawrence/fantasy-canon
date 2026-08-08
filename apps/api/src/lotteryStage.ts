@@ -757,6 +757,15 @@ export function createLotteryStage(): LotteryStage {
     auditMode = 'live';
   }
 
+  /**
+   * A refusal notice is one-shot (#250): it answers the press that produced it, and the moment
+   * the commissioner does anything else it is stale. Without this it sits at the top of the
+   * client's status precedence and masks the feedback for every later edit, rename and seal.
+   */
+  function clearReimportDenial(): void {
+    reimportDenied = undefined;
+  }
+
   function buildSnapshot(): LotterySnapshot {
     return {
       phase,
@@ -874,6 +883,7 @@ export function createLotteryStage(): LotteryStage {
         ...(lobby.guildId ? { guildId: lobby.guildId } : {}),
       };
       adjustments = pending;
+      clearReimportDenial();
       lobby = { ...lobby, rows, totalBalls: rows.reduce((sum, row) => sum + row.balls, 0) };
       // Same event the bot's re-arm emits — every connected client already repaints the odds table
       // wholesale from it, so live viewers see the new bag without a new client branch. `adjusted`
@@ -900,6 +910,7 @@ export function createLotteryStage(): LotteryStage {
         ...(lobby.guildId ? { guildId: lobby.guildId } : {}),
       };
       adjustments = pending;
+      clearReimportDenial();
       lobby = { ...lobby, rows, totalBalls: rows.reduce((sum, row) => sum + row.balls, 0) };
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), adjustedAll: detail });
     },
@@ -919,6 +930,7 @@ export function createLotteryStage(): LotteryStage {
         ...(lobby.guildId ? { guildId: lobby.guildId } : {}),
       };
       renames = new Map(renames).set(next.teamId, next.displayName);
+      clearReimportDenial();
       const rows = applyRenames(lobby.rows, renames);
       lobby = { ...lobby, rows };
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments(), renamed: detail });
@@ -926,6 +938,7 @@ export function createLotteryStage(): LotteryStage {
     setAuditMode(mode) {
       if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
       auditMode = mode;
+      clearReimportDenial();
       emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
     },
     requestSetup(request) {
@@ -972,6 +985,10 @@ export function createLotteryStage(): LotteryStage {
       if (release.stamp !== undefined && release.stamp !== reimportRequested) return;
       reimportRequested = undefined;
       reimportDenied = release.reason;
+      // Belt over the `requestBegin` gate above: if a seal ever coexists with a pending refetch
+      // (an older client, a race across a restart), freeing the refetch must not be what lets it
+      // fire — a draw must never start as a side effect of a failure message.
+      beginRequested = undefined;
       if (lobby) emit({ type: 'lottery-lobby', lobby, ...pendingAdjustments() });
       else emit({ type: 'lottery-state', snapshot: buildSnapshot() });
     },
@@ -980,7 +997,15 @@ export function createLotteryStage(): LotteryStage {
       // is about to drain the pending set and commit, and a write landing after that read would
       // put a bag on screen the commitment doesn't bind. The freeze lifts when the bot's `start`
       // replaces the lobby or a re-arm voids the press — never silently.
-      if (phase !== 'lobby' || !lobby || beginRequested) throw new StageNotEditableError();
+      //
+      // The reverse gate (#250) is what keeps the two request flags mutually exclusive: a seal
+      // pressed while a refetch is pending used to be *recorded* and then held back watcher-side,
+      // so releasing the failed refetch un-gated it and the draw started unattended, seconds
+      // after "⚠️ Re-import from ESPN failed". Refusing the press outright is the honest answer —
+      // the commissioner re-presses once they can see which bag they are sealing.
+      if (phase !== 'lobby' || !lobby || beginRequested || reimportRequested !== undefined) {
+        throw new StageNotEditableError();
+      }
       // Only a request: the bot is the sole committer (ADR 0006), so all this does is broadcast
       // "sealing…" — which is also what disables every viewer's begin button until the bot's
       // `start` replaces the lobby or a re-arm invalidates the press.

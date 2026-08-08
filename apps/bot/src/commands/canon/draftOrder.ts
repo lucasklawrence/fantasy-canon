@@ -834,7 +834,22 @@ export function performActivityReimport(
   return async (guildId, stamp) => {
     if (!guildId) return false;
     const session = getCeremony(guildId);
-    if (!session || session.state !== 'GAME_OPEN' || !session.lobbyChannelId) return false;
+    if (!session || session.state !== 'GAME_OPEN' || !session.lobbyChannelId) {
+      // No ceremony here to refetch into — most often because this bot restarted and its
+      // in-memory sessions are gone while the stage still shows the lobby. Nothing later will
+      // ever clear the press, and there is no channel to explain it in, so free it from the
+      // Activity: the stage scopes the release to the guild whose lobby is armed.
+      await stage
+        .reimportRelease?.({
+          guildId,
+          ...(stamp !== undefined ? { stamp } : {}),
+          reason: 'this bot has no open lottery for this server — run /canon draftorder setup',
+        })
+        .catch((error: unknown) => {
+          console.error('[draftorder] could not release an unowned re-import press:', error);
+        });
+      return false;
+    }
 
     /**
      * Free the press and say why (#250). Two surfaces because they fail independently: the
@@ -860,14 +875,20 @@ export function performActivityReimport(
         });
     };
     const say = async (line: string): Promise<void> => {
+      // Same currency guard as the release: a flight superseded while it was fetching must not
+      // post its failure into the channel of the ceremony that replaced it.
+      if (getCeremony(guildId) !== session) return;
       await announce(guildId, line).catch((error: unknown) => {
         console.error('[draftorder] could not post the re-import line:', error);
       });
     };
     const refuse = async (reason: string): Promise<false> => {
       console.error(`[draftorder] in-Activity re-import refused: ${reason}`);
-      await releasePress(reason);
+      // Channel line FIRST, button second. Freeing the button invites an immediate retry, and
+      // Discord is the slow half — releasing first would leave a window where the commissioner
+      // is pressing again while this flight still holds the watcher's single-flight slot.
       await say(`⚠️ **Re-import from ESPN failed** — ${reason}. The bag is unchanged.`);
+      await releasePress(`Re-import failed: ${reason}. The bag is unchanged.`);
       return false;
     };
 
@@ -881,7 +902,20 @@ export function performActivityReimport(
         // and no later re-arm is coming to clear the flag, so this one must free it itself.
         return refuse("this lottery wasn't imported from ESPN, so there's no league to refetch");
       }
-      const channel = await client.channels.fetch(session.lobbyChannelId).catch(() => null);
+      // Two failures with two different fixes, so two different messages: Discord not answering
+      // is worth retrying, a channel the bot genuinely cannot send in is not.
+      let fetchFailed: unknown;
+      const channel = await client.channels
+        .fetch(session.lobbyChannelId)
+        .catch((error: unknown) => {
+          fetchFailed = error;
+          return null;
+        });
+      if (fetchFailed !== undefined) {
+        return refuse(
+          `the lottery channel couldn't be reached (${describeReimportError(fetchFailed)}) — worth trying again`,
+        );
+      }
       if (!channel?.isSendable()) {
         return refuse("the bot can't post in the lottery channel — check its permissions");
       }
@@ -969,15 +1003,20 @@ export function performActivityReimport(
 
         const rows = oddsRows(session);
         try {
-          await channel.send({
+          // ONE send, announcement and card together (#250 review). Two sends could half-succeed:
+          // the "re-imported the league … edits were reset" line would already be in the channel
+          // when the card failed, and the rollback's "The bag is unchanged" would then directly
+          // contradict the line above it — with no way for a reader to tell which was true.
+          const preview = await buildPreviewPost(session);
+          await channelIo(channel).post({
+            ...preview,
             content: [
               `🔄 **${session.title}** — the commissioner re-imported the league from ESPN.`,
               `${teams.length} teams, ${rows.reduce((sum, row) => sum + row.balls, 0)} balls. Any earlier in-Activity edits were reset.`,
               ...notes,
+              preview.content,
             ].join('\n'),
-            allowedMentions: { parse: [] },
           });
-          await channelIo(channel).post(await buildPreviewPost(session));
         } catch (error) {
           // The card render or the channel send failed, so the new bag has no public preview. Keeping
           // it would let a later `begin` commit a bag the league never saw — put the old one back.
@@ -1019,10 +1058,14 @@ export function performActivityReimport(
             // would have cleared the request never happened, so the button would stay disabled
             // for every commissioner (#250, the reported symptom). Free it and say what happened:
             // "unchanged" would be a lie here, so this line is worded for the split state.
-            await releasePress("the Activity lobby couldn't be updated");
             await say(
               "⚠️ **Re-import landed, but the Activity couldn't be updated** — the odds above are current; " +
                 'the Lottery Machine may still show the old bag until the next change.',
+            );
+            // NOT phrased as a failure: the refetch happened and the channel has the new odds.
+            // The client prints this reason verbatim, so it must be true standing alone.
+            await releasePress(
+              'Re-import landed — the odds card in the channel is current, but this screen may still show the old bag.',
             );
           });
       } finally {

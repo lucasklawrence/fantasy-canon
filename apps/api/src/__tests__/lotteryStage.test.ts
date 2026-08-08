@@ -48,6 +48,14 @@ const EDITABLE: LotteryLobbyRequest = {
 /** The same editable lobby, stamped with the guild that owns it — what a real `setup` arms. */
 const IN_G1: LotteryLobbyRequest = { ...EDITABLE, guildId: 'g1' };
 
+/** A minimal well-formed seal press, for tests that only care that one is refused or accepted. */
+const SEAL = {
+  delaySeconds: 20,
+  direction: 'worst-to-first',
+  visual: 'machine',
+  ballFaces: 'numbers',
+} as const;
+
 const START: LotteryStart = {
   title: '2026 Draft Lottery',
   commitment: 'hash',
@@ -627,6 +635,41 @@ describe('rename + re-import — the rest of the in-Activity field edits (#219)'
     // keeps the pre-#250 "free whatever is pending" behaviour.
     stage.releaseReimport({ guildId: 'g1', reason: 'no stamp' });
     expect(stage.snapshot().reimportRequested).toBeUndefined();
+  });
+
+  it('refuses a seal while a refetch is pending, so no draw starts on a stale bag (#250)', () => {
+    const stage = createLotteryStage();
+    stage.lobby(IN_G1);
+    stage.requestReimport();
+
+    // Recording it and holding it back watcher-side was the trap: releasing the failed refetch
+    // then un-gated it and the draw started unattended, right after the failure message.
+    expect(() => stage.requestBegin(SEAL)).toThrow(StageNotEditableError);
+
+    stage.releaseReimport({ guildId: 'g1', reason: 'ESPN was down' });
+    expect(stage.snapshot().beginRequested).toBeUndefined();
+    // …and once the refetch is settled the seal is pressable again.
+    expect(() => stage.requestBegin(SEAL)).not.toThrow();
+  });
+
+  it('a refusal notice is one-shot — the next commissioner action clears it (#250)', () => {
+    for (const act of [
+      (s: ReturnType<typeof createLotteryStage>) => s.adjust({ teamId: 't-a', balls: 4 }),
+      (s: ReturnType<typeof createLotteryStage>) => s.adjustAll(3),
+      (s: ReturnType<typeof createLotteryStage>) => s.rename({ teamId: 't-a', displayName: 'Zed' }),
+      (s: ReturnType<typeof createLotteryStage>) => s.setAuditMode('seal-only'),
+    ]) {
+      const stage = createLotteryStage();
+      stage.lobby(IN_G1);
+      stage.requestReimport();
+      stage.releaseReimport({ guildId: 'g1', reason: 'ESPN was down' });
+      expect(stage.snapshot().reimportDenied).toBe('ESPN was down');
+
+      // Otherwise it sits at the top of the client's status precedence and masks the feedback
+      // for every later edit, rename and seal.
+      act(stage);
+      expect(stage.snapshot().reimportDenied).toBeUndefined();
+    }
   });
 
   it('a re-arm means the refetch landed, so it clears a stale refusal notice (#250)', () => {

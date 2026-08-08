@@ -490,7 +490,10 @@ function trackReimportPress(stamp: number | undefined, denied: string | undefine
  * press nothing has answered, is the one thing on this screen the commissioner must act on.
  */
 function paintLobbyStatus(): void {
-  if (reimportDenied) setStatus(`re-import failed: ${reimportDenied}`, 'err');
+  // Printed verbatim: the bot writes a complete sentence because not every release is a failure
+  // — the "import landed but the lobby couldn't be re-armed" path would be a lie under a
+  // hardcoded "failed" prefix (#250 review).
+  if (reimportDenied) setStatus(reimportDenied, 'err');
   else if (reimportPending && reimportStale) {
     setStatus('re-import: no response from the bot — is it running?', 'err');
   } else if (reimportPending) setStatus('re-importing from ESPN…', 'live');

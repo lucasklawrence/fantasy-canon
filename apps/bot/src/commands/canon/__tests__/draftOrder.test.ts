@@ -1230,9 +1230,13 @@ describe('performActivityReimport (#219)', () => {
     // A refetched roster invalidates mini-game awards made against the old one.
     expect(session.miniGameBonuses).toBeUndefined();
     // The channel gets a plain announcement plus the re-rendered odds card.
+    // One post, not two (#250): a half-succeeding pair could leave "the league was re-imported"
+    // in the channel next to a rollback saying the bag is unchanged.
+    expect(sent).toHaveLength(1);
     expect(sent[0].content).toContain('re-imported the league');
     expect(sent[0].content).toContain('earlier in-Activity edits were reset');
-    expect(sent[1].files).toHaveLength(1);
+    expect(sent[0].content).toContain('frozen by this preview');
+    expect(sent[0].files).toHaveLength(1);
   });
 
   it('refuses a refetched roster that would be invalid, leaving the old one installed', async () => {
@@ -1379,6 +1383,28 @@ describe('performActivityReimport (#219)', () => {
     expect(released[0].reason).toContain('ESPN');
     expect(sent[0]?.content).toContain('Re-import from ESPN failed');
     expect(sent[0]?.content).toContain('The bag is unchanged');
+  });
+
+  it('frees a press this bot has no ceremony for — the restart case (#250)', async () => {
+    const { context } = createMockContext({ defaultLeagueId: 'league-1' });
+    // No session at all: the stage still shows the lobby, but this process restarted and its
+    // in-memory ceremonies are gone. Nothing later clears the press, and there is no channel
+    // to explain it in — so the Activity has to be told.
+    const sent: { content?: string }[] = [];
+    const { stage, released } = releasingReimportStage();
+
+    await expect(
+      performActivityReimport(reimportClient(sent), context, stage)('guild-1', 77),
+    ).resolves.toBe(false);
+
+    expect(released).toEqual([
+      {
+        guildId: 'guild-1',
+        stamp: 77,
+        reason: 'this bot has no open lottery for this server — run /canon draftorder setup',
+      },
+    ]);
+    expect(sent).toHaveLength(0);
   });
 
   it('releases the press and names the reason when ESPN is down (#250)', async () => {
