@@ -316,6 +316,43 @@ describe('handleDraftOrderBeginSubcommand — abort race', () => {
     expect(session?.secretSeed).toBeUndefined();
     expect(begin.lastContent()).toContain('aborted before it could start');
   });
+
+  /**
+   * #237. The launch-button post is the last await before the ceremony dispatches, and the slash
+   * path used to dispatch on a check taken one await earlier — the same window `performActivityBegin`
+   * closed in #236. A replacing `setup` landing inside it leaves this session detached from the
+   * registry but still GAME_OPEN, so the ceremony starts and posts its commitment AFTER the
+   * replacement's fresh preview.
+   */
+  it('a replacing setup during the launch-button post stops begin before any commitment', async () => {
+    const { context } = createMockContext();
+    const setup = ceremonyInteraction({ options: { season: 2026, teams: 'A, B, C, D' } });
+    await handleDraftOrderSetupSubcommand(setup.interaction, context);
+    const session = getCeremony('guild-1');
+
+    const begin = ceremonyInteraction({ options: { delay: 5, stage: 'activity' } });
+    Object.assign(begin.interaction.channel as object, {
+      send: (payload: ChannelPost): Promise<{ id: string }> => {
+        begin.channelPosts.push(payload);
+        // Drop the registry entry as the launch-button post goes out, standing in for a
+        // concurrent setup completing inside that await.
+        if (payload.content?.includes('streams live in the Lottery Machine')) {
+          resetCeremoniesForTests();
+        }
+        return Promise.resolve({ id: `chan-${begin.channelPosts.length}` });
+      },
+    });
+
+    await handleDraftOrderBeginSubcommand(begin.interaction, stageHolding());
+
+    // Never sealed: no seed, no commitment, state untouched.
+    expect(session?.state).toBe('GAME_OPEN');
+    expect(session?.secretSeed).toBeUndefined();
+    // Match the bag listing, not the word "commitment" — the launch-button copy contains that
+    // word too, the same trap the adjusted-preview test above calls out.
+    expect(begin.channelPosts.some((p) => p.content?.includes('• A ('))).toBe(false);
+    expect(begin.lastContent()).toContain('while the launch button was posting');
+  });
 });
 
 describe('status + abort', () => {
