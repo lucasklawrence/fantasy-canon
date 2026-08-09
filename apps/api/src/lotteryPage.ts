@@ -247,6 +247,12 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     background: linear-gradient(180deg, #10141f 0%, #151a2a 100%);
     box-shadow: inset 0 -12px 30px rgba(0,0,0,.4), 0 0 40px rgba(245,214,123,.05); }
   #race-canvas { display: block; width: 100%; }
+  /* the wheel (#244): the third visual. A circle like the drum, so it takes the drum's footprint
+     and its breakpoint — no wide mode, nothing to gain from the extra width. Everything on it is
+     canvas (wheelSim.ts); the shell only reserves the square. */
+  #wheel-canvas { display: block; margin: 10px auto 0;
+    width: var(--hopper-px); height: var(--hopper-px);
+    filter: drop-shadow(0 6px 22px rgba(0,0,0,.5)); }
   /* Race mode wants the monitor (#239): the page cap lifts and the spare width goes to the
      TRACK (the reveal column keeps a readable fixed measure), so lanes fit whole team names.
      The machine keeps the cozy 980px frame — its drum is a fixed circle and gains nothing.
@@ -485,6 +491,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
         <div class="chute" id="chute"><div class="pullball" id="tube-ball"></div></div>
         <div id="tube-hold" aria-hidden="true"></div>
         <div class="racetrack hidden" id="racetrack"><canvas id="race-canvas"></canvas></div>
+        <canvas class="hidden" id="wheel-canvas"></canvas>
       </div>
       <div>
         <div id="drum">

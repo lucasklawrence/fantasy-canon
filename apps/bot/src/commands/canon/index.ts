@@ -739,6 +739,7 @@ export const canonCommand = new SlashCommandBuilder()
               .addChoices(
                 { name: 'machine — the ball machine drum', value: 'machine' },
                 { name: 'race — lane race, finishing order = draft order', value: 'race' },
+                { name: 'wheel — spinning wheel, wedge size = ball count', value: 'wheel' },
               ),
           ),
       )

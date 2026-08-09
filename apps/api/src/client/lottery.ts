@@ -27,6 +27,7 @@ import { assignBallRanges, drawnBallFor, rangeLabel } from './ballAssignments.js
 import { createCeremonyAudio } from './ceremonyAudio.js';
 import { createHopperSim, type HopperSim } from './hopperSim.js';
 import { createRaceSim, type RaceSim } from './raceSim.js';
+import { createWheelSim, type WheelSim } from './wheelSim.js';
 import {
   createPlaybackCursor,
   onHiddenAction,
@@ -231,6 +232,16 @@ function race(): RaceSim {
   return raceSim;
 }
 
+// The wheel (#244). Lazy like the other two, and sized from `--hopper-px` for the same reason the
+// hopper is (#256): it is built while `#stage` is `display: none`, so the canvas measures 0.
+let wheelSim: WheelSim | null = null;
+function wheel(): WheelSim {
+  if (!wheelSim) {
+    wheelSim = createWheelSim(byId('wheel-canvas') as HTMLCanvasElement, drumSizePx());
+  }
+  return wheelSim;
+}
+
 // --- team logos (#242): same-origin proxied images, keyed by ceremony teamId -------------------
 
 /**
@@ -427,19 +438,25 @@ function redressDropBall(): void {
  * The ceremony's reveal visualization (#235), fixed by `start` so every viewer renders the same
  * spectacle. The lobby has no start yet — it always shows the machine's loaded hopper.
  */
-function activeVisual(): 'machine' | 'race' {
-  return currentStart?.visual === 'race' ? 'race' : 'machine';
+function activeVisual(): 'machine' | 'race' | 'wheel' {
+  const visual = currentStart?.visual;
+  return visual === 'race' || visual === 'wheel' ? visual : 'machine';
 }
 
-/** Swap the stage's left panel to match the active visual: hopper+chute, or the racetrack. */
+/** Swap the stage's left panel to match the active visual: hopper+chute, racetrack, or wheel. */
 function applyStageLayout(): void {
-  const racing = activeVisual() === 'race';
-  show('hopper', !racing);
-  show('chute', !racing);
+  const visual = activeVisual();
+  const racing = visual === 'race';
+  const wheeling = visual === 'wheel';
+  show('hopper', visual === 'machine');
+  show('chute', visual === 'machine');
   show('racetrack', racing);
+  show('wheel-canvas', wheeling);
   // The wide-page mode rides the same switch (#239): race mode takes the monitor's spare width
-  // for the track; the machine (and every pre-ceremony phase) keeps the cozy centered frame.
+  // for the track. The wheel is a circle like the drum, so it gains nothing from the extra width
+  // and keeps the cozy centered frame — same reasoning that left the machine out of it.
   document.body.classList.toggle('race', racing);
+  if (wheeling) wheel().ensureSize();
 }
 
 // Ceremony sound (#216) — silent until the viewer arms it; the callback keeps the 🔊 pill honest
@@ -509,7 +526,14 @@ function renderOddsTable(
     tr.appendChild(el('td', 'num', `${row.top3Pct.toFixed(1)}%`));
     rows.appendChild(tr);
   }
-  if (activeVisual() === 'race') {
+  if (activeVisual() === 'wheel') {
+    // Wedge width is ball count, so the wheel and the table beside it say the same thing.
+    wheel().sync(
+      oddsRows,
+      drawn.map((entry) => entry.team),
+    );
+    hopperSim?.sync([], []);
+  } else if (activeVisual() === 'race') {
     race().sync(oddsRows, drawn);
     // Don't leave the machine simulating behind a hidden panel — but never *create* it for this.
     hopperSim?.sync([], []);
@@ -1189,7 +1213,10 @@ function renderDrum(pick: number, remaining: string[], windowMs?: number): void 
   applyStageLayout();
   byId('drum-now').textContent = `Drawing pick #${pick}…`;
   const win = windowMs ?? currentStart?.delayMs ?? 4000;
-  if (activeVisual() === 'race') {
+  if (activeVisual() === 'wheel') {
+    // The wheel's drum roll is simply the spin — it free-runs until the reveal names a wedge.
+    wheel().spin(true);
+  } else if (activeVisual() === 'race') {
     // The race's drum roll: the field bunches and breaks harder (#235). No chute to glow.
     race().agitate(true);
   } else {
@@ -1443,6 +1470,32 @@ function renderDrop(reveal: LotteryReveal): void {
   // A later reveal retires the envelope (#243) — reachable in first-to-last, where pick #1 opens
   // the ceremony and pick #2 follows. Pick #1's own repaints leave it alone.
   if (rerun && reveal.pick !== 1) closeEnvelope();
+  if (activeVisual() === 'wheel') {
+    // The wheel reveal (#244): ease onto the named wedge. Like the race, the card shows straight
+    // away rather than waiting on the animation — cosmetics never block a reveal.
+    if (rerun) {
+      audio.stopRoll();
+      audio.hit();
+      wheel().land(reveal.team, reveal.pick);
+      show('drop', true);
+      const ball = replaceNode('drop-pick');
+      ball.classList.remove('flip');
+      ball.classList.add('fall');
+      ball.textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
+      applyDropFace(ball, reveal.team, num !== null && range !== undefined ? range.hue : undefined);
+      replaceNode('drop-team').textContent = reveal.team;
+      replaceNode('drop-odds').textContent = oddsText;
+      // The landing ease is the wheel's payoff, so the envelope waits it out the way the race
+      // waits for its park — same reason, different animation length.
+      queueEnvelope(reveal, range?.hue, ENVELOPE_LEAD_MS.wheel, playbackMode);
+    } else {
+      show('drop', true);
+      byId('drop-pick').textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
+      byId('drop-team').textContent = reveal.team;
+      byId('drop-odds').textContent = oddsText;
+    }
+    return;
+  }
   if (activeVisual() === 'race') {
     // The race reveal (#235): the racer parks itself — falls off the pace, or crosses the line
     // (`lockKind`) — while the field keeps dueling. Parallel spectacle, so the reveal card shows
@@ -1521,6 +1574,9 @@ function renderFinish(snapshot: LotterySnapshot): void {
     if (snapshot.finish && currentStart) raceSim?.sync(currentStart.rows, snapshot.finish.order);
     else raceSim?.sync([], []);
   }
+  // The wheel has no loose bodies to park, but it does keep spinning if the finish outran the
+  // last reveal — stop it rather than leave a hidden canvas animating (#235's rule).
+  wheelSim?.spin(false);
   audio.stopRoll(); // a finish can land mid-roll (a skip, or a finish with no drop before it)
   show('waiting', false);
   show('stage', false);
@@ -1704,7 +1760,8 @@ function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
   // pile, reveals re-park the racers — the shrinking lock set forces the race rebuild (#235).
   const bagRows = source.start?.rows ?? currentStart?.rows;
   if (bagRows) {
-    if (activeVisual() === 'race') race().sync(bagRows, []);
+    if (activeVisual() === 'wheel') wheel().sync(bagRows, []);
+    else if (activeVisual() === 'race') race().sync(bagRows, []);
     else hopper().sync(bagRows, []);
   }
   applyStageLayout();

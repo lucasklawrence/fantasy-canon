@@ -257,7 +257,9 @@ export function parseLotteryStart(body: string): Parsed<LotteryStart> {
       ...(isStr(r.guildId) ? { guildId: r.guildId } : {}),
       // Unknown values are dropped rather than rejected (#235): the visual is presentation-only,
       // so a newer bot's vocabulary degrades to the machine instead of stalling the ceremony.
-      ...(r.visual === 'machine' || r.visual === 'race' ? { visual: r.visual } : {}),
+      ...(r.visual === 'machine' || r.visual === 'race' || r.visual === 'wheel'
+        ? { visual: r.visual }
+        : {}),
       // Same rule for the ball faces (#252): numbers is the absent default, junk degrades.
       ...(r.ballFaces === 'logos' ? { ballFaces: 'logos' as const } : {}),
     },
@@ -476,7 +478,12 @@ export function parseLotteryBegin(
   }
   // Absent defaults to the machine (an older bundle simply doesn't offer the picker, #235);
   // present-but-junk is rejected like the rest of the vocabulary.
-  if (r.visual !== undefined && r.visual !== 'machine' && r.visual !== 'race') {
+  if (
+    r.visual !== undefined &&
+    r.visual !== 'machine' &&
+    r.visual !== 'race' &&
+    r.visual !== 'wheel'
+  ) {
     return { error: 'begin needs visual "machine" or "race"' };
   }
   // Same shape for the ball faces (#252): absent ⇒ numbers, junk rejected.
@@ -487,7 +494,7 @@ export function parseLotteryBegin(
     value: {
       delaySeconds: r.delaySeconds as number,
       direction: r.direction,
-      visual: r.visual === 'race' ? 'race' : 'machine',
+      visual: r.visual === 'race' || r.visual === 'wheel' ? r.visual : 'machine',
       ballFaces: r.ballFaces === 'logos' ? 'logos' : 'numbers',
     },
   };

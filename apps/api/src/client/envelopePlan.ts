@@ -16,7 +16,7 @@ export const ENVELOPE_MS = 3600;
  * FLIP separately (a promise, not a timer), then this small settle; the race needs the winning
  * cross/fall park (~900ms lock) to land on screen before the dim swallows it.
  */
-export const ENVELOPE_LEAD_MS = { machine: 250, race: 1100 } as const;
+export const ENVELOPE_LEAD_MS = { machine: 250, race: 1100, wheel: 2400 } as const;
 
 export type PlaybackKind = 'catchup' | 'replay' | null;
 

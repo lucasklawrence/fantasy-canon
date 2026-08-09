@@ -69,7 +69,7 @@ export interface StageBeginRequest {
   /** Hopper-ball faces (#252): numbers (default) or team logos. */
   ballFaces?: 'numbers' | 'logos';
   /** Reveal visualization (#235). Absent (an older api) ⇒ the machine. */
-  visual?: 'machine' | 'race';
+  visual?: 'machine' | 'race' | 'wheel';
   /** Discord user id of the commissioner who pressed the button, stamped by the api's route. */
   requestedBy?: string;
 }
