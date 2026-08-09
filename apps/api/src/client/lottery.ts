@@ -1354,9 +1354,12 @@ async function runExitChoreography(
   //
   // The only thing chained off this promise is the pick-#1 envelope, and it adds a small settle
   // before dimming the screen. Measured from the start of a 620ms spring that settle put the dim
-  // at ~90% opacity over the ball-#N face the envelope exists to showcase. The budget already
-  // bills FLIP_MS as part of the exit (`exitBudget.totalMs`), so waiting it out here is also what
-  // makes the promise's duration and the planned duration the same number.
+  // at ~90% opacity over the ball-#N face the envelope exists to showcase.
+  //
+  // This is NOT the same as `exitBudget.totalMs`, and nothing should be scheduled as if it were:
+  // the envelope pick skips the hold, a reveal with no ball number never flies at all, and every
+  // superseded return above resolves with no FLIP. `totalMs` is the planner's worst case; this is
+  // what the run actually spent. What the two do share is a ceiling — see ENVELOPE_LEAD_MS.
   await landing;
   // Whether this run still owns the screen. Waiting out the spring turned a window that used to be
   // one tick into most of a second, and an abort landing inside it tears the stage down WITHOUT
