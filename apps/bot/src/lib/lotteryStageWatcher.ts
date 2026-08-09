@@ -69,7 +69,7 @@ export interface StageBeginRequest {
   /** Hopper-ball faces (#252): numbers (default) or team logos. */
   ballFaces?: 'numbers' | 'logos';
   /** Reveal visualization (#235). Absent (an older api) ⇒ the machine. */
-  visual?: 'machine' | 'race';
+  visual?: 'machine' | 'race' | 'wheel';
   /** Discord user id of the commissioner who pressed the button, stamped by the api's route. */
   requestedBy?: string;
 }
@@ -650,14 +650,23 @@ function toBeginRequest(raw: unknown): StageBeginRequest | undefined {
   if (d.direction !== 'worst-to-first' && d.direction !== 'first-to-last') return undefined;
   // Same closed-vocabulary rule as the rest of the frame (#235): absent means an older api and
   // defaults machine downstream, but present-and-junk voids the whole request.
-  if (d.visual !== undefined && d.visual !== 'machine' && d.visual !== 'race') return undefined;
+  if (
+    d.visual !== undefined &&
+    d.visual !== 'machine' &&
+    d.visual !== 'race' &&
+    d.visual !== 'wheel'
+  ) {
+    return undefined;
+  }
   if (d.ballFaces !== undefined && d.ballFaces !== 'numbers' && d.ballFaces !== 'logos') {
     return undefined;
   }
   return {
     delaySeconds: d.delaySeconds,
     direction: d.direction,
-    ...(d.visual === 'machine' || d.visual === 'race' ? { visual: d.visual } : {}),
+    ...(d.visual === 'machine' || d.visual === 'race' || d.visual === 'wheel'
+      ? { visual: d.visual }
+      : {}),
     ...(d.ballFaces === 'numbers' || d.ballFaces === 'logos' ? { ballFaces: d.ballFaces } : {}),
     ...(typeof d.requestedBy === 'string' ? { requestedBy: d.requestedBy } : {}),
   };

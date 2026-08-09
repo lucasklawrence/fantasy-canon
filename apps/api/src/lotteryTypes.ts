@@ -35,7 +35,7 @@ export interface LotteryOddsRow {
  * only — either way the client consumes the same paced beat→reveal stream and never receives the
  * final order early (ADR 0006), so the choice can never affect fairness.
  */
-export type LotteryVisual = 'machine' | 'race';
+export type LotteryVisual = 'machine' | 'race' | 'wheel';
 
 /** Opens the stage: everything the waiting room needs before the first ball drops. */
 export interface LotteryStart {

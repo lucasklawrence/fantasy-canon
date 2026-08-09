@@ -55,4 +55,22 @@ describe('envelopeEligible (#243)', () => {
     const exit = exitBudget(REPLAY_DWELL_MS);
     expect(exit.totalMs + ENVELOPE_LEAD_MS.machine).toBeLessThanOrEqual(REPLAY_DWELL_MS);
   });
+
+  /**
+   * #244. The test above is the machine's, and it is machine-shaped: the exit budget only models
+   * that visual's chain. Every OTHER visual still has to open before the finish sweeps the stage,
+   * and the room is the same for all of them — the last reveal is followed by the finish
+   * `FINISH_LEAD_MS` later, full stop.
+   *
+   * Written over the whole key set rather than one visual at a time, because the wheel's lead was
+   * added at 2400ms against an 1800ms gap and nothing complained: every existing check named
+   * `machine` and `race` explicitly, so a third visual was invisible to them. The `keys` assertion
+   * is the part that matters — adding a fourth visual fails here until someone states its budget.
+   */
+  it('every visual opens its finale before the finish sweeps the stage', () => {
+    expect(Object.keys(ENVELOPE_LEAD_MS).sort()).toEqual(['machine', 'race', 'wheel']);
+    for (const [visual, lead] of Object.entries(ENVELOPE_LEAD_MS)) {
+      expect(lead, `${visual} lead must fit the finish gap`).toBeLessThan(FINISH_LEAD_MS);
+    }
+  });
 });

@@ -158,7 +158,7 @@ export interface RunCeremonyOptions {
    * presentational — the channel reveal and the draw itself are untouched — and meaningless
    * without {@link RunCeremonyOptions.stage}.
    */
-  visual?: 'machine' | 'race';
+  visual?: 'machine' | 'race' | 'wheel';
   /**
    * What the hopper pile's balls wear (#252): numbers (default) or team logos with the number
    * badged on top where the radius permits. Same presentational-only rules as `visual`.
@@ -253,7 +253,7 @@ export interface RevealStage {
     /** Lets the stage refuse a second guild's ceremony while another is armed/live. */
     guildId?: string;
     /** Reveal visualization every viewer renders (#235). Absent ⇒ the machine. */
-    visual?: 'machine' | 'race';
+    visual?: 'machine' | 'race' | 'wheel';
     /** Hopper-ball faces (#252): team logos instead of numbers. Absent ⇒ numbers. */
     ballFaces?: 'numbers' | 'logos';
   }): Promise<void>;

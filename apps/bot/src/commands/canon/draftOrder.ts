@@ -674,7 +674,8 @@ export async function handleDraftOrderBeginSubcommand(
   const stageMode = interaction.options.getString('stage') ?? 'channel';
   const direction = (interaction.options.getString('direction') ?? 'worst-to-first') as
     'worst-to-first' | 'first-to-last';
-  const visual = (interaction.options.getString('visual') ?? 'machine') as 'machine' | 'race';
+  const visual = (interaction.options.getString('visual') ?? 'machine') as
+    'machine' | 'race' | 'wheel';
 
   const directionNote =
     direction === 'first-to-last' ? ' Revealing pick #1 first (first-to-last).' : '';
@@ -1264,7 +1265,8 @@ export function performActivityBegin(
         ? request.delaySeconds
         : DEFAULT_REVEAL_DELAY_SECONDS;
     const direction = request.direction === 'first-to-last' ? 'first-to-last' : 'worst-to-first';
-    const visual = request.visual === 'race' ? 'race' : 'machine';
+    const visual =
+      request.visual === 'race' || request.visual === 'wheel' ? request.visual : 'machine';
     const ballFaces = request.ballFaces === 'logos' ? 'logos' : 'numbers';
 
     const channel = await client.channels.fetch(session.lobbyChannelId).catch(() => null);
