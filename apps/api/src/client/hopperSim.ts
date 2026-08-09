@@ -122,7 +122,7 @@ export function createHopperSim(
   // to be able to re-derive them rather than let CSS upscale a stale backing store.
   let cssSize = sizePx || canvas.clientWidth || 260;
   let { center, wallRadius, chuteMouth } = drumGeometry(cssSize);
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = cssSize * dpr;
   canvas.height = cssSize * dpr;
   const ctx = canvas.getContext('2d');
@@ -140,17 +140,13 @@ export function createHopperSim(
   const VANE_RATIO = 0.34;
   const VANE_COUNT = 3;
 
-  /** Current vane reach — the renderer draws the vanes, so it lives outside {@link buildDrum}. */
-  let vaneLength = 0;
-
   /**
    * Assemble the cage at the current {@link wallRadius}. Split out for #267 so a resize can throw
    * the old compound away and lay out a new one, rather than scaling a body built for another
    * diameter.
    */
   function buildDrum(): Matter.Body {
-    vaneLength = wallRadius * VANE_RATIO;
-    const VANE_LENGTH = vaneLength;
+    const VANE_LENGTH = wallRadius * VANE_RATIO;
     const parts: Matter.Body[] = [];
     const segmentCount = 28;
     for (let i = 0; i < segmentCount; i += 1) {
@@ -192,8 +188,6 @@ export function createHopperSim(
 
   const meta = new Map<Matter.Body, BallMeta>();
   let bagSig = '';
-  /** The rows the pile was last built from — what a resize rebuilds against (#267). */
-  let bagRows: { team: string; balls: number }[] = [];
   const drawn = new Set<string>();
   let agitating = false;
   let running = true;
@@ -236,8 +230,8 @@ export function createHopperSim(
       const angle = drumAngle + (i / VANE_COUNT) * Math.PI * 2;
       ctx.beginPath();
       ctx.moveTo(
-        center + Math.cos(angle) * (wallRadius - vaneLength),
-        center + Math.sin(angle) * (wallRadius - vaneLength),
+        center + Math.cos(angle) * (wallRadius - wallRadius * VANE_RATIO),
+        center + Math.sin(angle) * (wallRadius - wallRadius * VANE_RATIO),
       );
       ctx.lineTo(
         center + Math.cos(angle) * (wallRadius - 1),
@@ -328,7 +322,6 @@ export function createHopperSim(
   }
 
   function buildBag(rows: { team: string; balls: number }[]): void {
-    bagRows = rows;
     clearBalls();
     const ranges = assignBallRanges(rows);
     const total = ranges.reduce((sum, range) => sum + Math.max(0, range.end - range.start + 1), 0);
@@ -480,8 +473,13 @@ export function createHopperSim(
       // would strand that reveal, so decline and let the caller come back when idle (#267).
       if (extraction) return false;
 
+      const previousCentre = center;
+      const ratio = next / cssSize;
       cssSize = next;
       ({ center, wallRadius, chuteMouth } = drumGeometry(cssSize));
+      // Re-read rather than reuse the construction-time value: the resize that matters most is a
+      // drag onto a second monitor, which is exactly when the density changes too.
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = cssSize * dpr;
       canvas.height = cssSize * dpr;
 
@@ -489,11 +487,32 @@ export function createHopperSim(
       drum = buildDrum();
       Body.setAngle(drum, drumAngle); // keep the vanes where the last frame drew them
 
-      // The pile has to be laid out again: the packing-fit radius is a function of the wall, and
-      // the sprites are rastered per radius. `buildBag` honours `drawn`, so a mid-ceremony resize
-      // keeps the teams already pulled out of the bag out of it.
-      buildBag(bagRows);
-      wake();
+      // SCALE the pile in place rather than rebuilding it. `buildBag` re-randomises every spawn
+      // into the top semicircle, so a resize between reveals — the common case, since the refusal
+      // above only covers the extraction — made a motionless pile visibly re-rain, which reads as
+      // the machine resetting itself mid-ceremony. It also destroys balls part-way through
+      // `removeTeam`'s fade, popping the just-drawn team out instead of ghosting it.
+      for (const [body, ball] of meta) {
+        Body.setPosition(body, {
+          x: center + (body.position.x - previousCentre) * ratio,
+          y: center + (body.position.y - previousCentre) * ratio,
+        });
+        Body.scale(body, ratio, ratio);
+        ball.radius *= ratio;
+        // Sprites are rastered per radius AND per dpr, so both changes land here.
+        ball.sprite = buildBallSprite(
+          String(ball.num),
+          ball.hue,
+          ball.radius,
+          dpr,
+          getLogo(ball.team),
+        );
+      }
+
+      // `wake()` is a no-op under reduced motion, so painting has to be explicit there or the
+      // resize leaves a blank canvas until some later event happens to draw.
+      if (reducedMotion) draw(performance.now());
+      else wake();
       return true;
     },
     setRunning(on): void {

@@ -206,8 +206,12 @@ function hopper(): HopperSim {
  *
  * The canvas itself cannot answer this: the sim is built lazily from the lobby, while `#stage`
  * is still `display: none`, so `clientWidth` is 0. `<body>` is always rendered, so the custom
- * property resolves at any phase — and because the same property drives the `.hopper` rule, the
- * breakpoints live in exactly one place instead of being duplicated into a matchMedia ladder.
+ * property resolves at any phase, and the sizes themselves stay in the stylesheet.
+ *
+ * The BREAKPOINT is duplicated, though: `watchDrumSize` has to name 1500px to know when to re-ask,
+ * because a custom property cannot be observed. Only the trigger is duplicated, never the values —
+ * and `.race` is a second trigger that fires no event at all, which is why `applyStageLayout`
+ * re-asks too.
  */
 function drumSizePx(): number {
   return cssPx('--hopper-px', 260);
@@ -229,18 +233,27 @@ let pendingDrumResize = false;
 function watchDrumSize(): void {
   if (typeof window.matchMedia !== 'function') return;
   const wide = window.matchMedia('(min-width: 1500px)');
-  const onCross = (): void => {
-    pendingDrumResize = !(hopperSim?.ensureSize(drumSizePx()) ?? true);
-  };
+  const onCross = (): void => flushDrumResize(true);
   // `addEventListener` on MediaQueryList is the modern form; older Safari only has addListener,
   // and the Activity's webview is Chromium, so the modern one is enough here.
   wide.addEventListener('change', onCross);
 }
 
-/** Apply a crossing the sim refused mid-flight. Called when an exit choreography finishes. */
-function flushDrumResize(): void {
-  if (!pendingDrumResize) return;
-  pendingDrumResize = !(hopperSim?.ensureSize(drumSizePx()) ?? true);
+/**
+ * Bring the drum to the current `--hopper-px`, or latch the attempt for later.
+ *
+ * `force` is for the events that CHANGE the size (the breakpoint, the race class coming off);
+ * without it this only retries a crossing that was previously refused. A sim that does not exist
+ * yet leaves the latch set rather than clearing it — it will be built at the right size, but a
+ * later real refusal must not look already-handled.
+ */
+function flushDrumResize(force = false): void {
+  if (!force && !pendingDrumResize) return;
+  if (!hopperSim) {
+    pendingDrumResize = true;
+    return;
+  }
+  pendingDrumResize = !hopperSim.ensureSize(drumSizePx());
 }
 
 /**
@@ -470,6 +483,10 @@ function applyStageLayout(): void {
   // The wide-page mode rides the same switch (#239): race mode takes the monitor's spare width
   // for the track; the machine (and every pre-ceremony phase) keeps the cozy centered frame.
   document.body.classList.toggle('race', racing);
+  // `.race` is the SECOND input to --hopper-px — the wide rule is `body:not(.race)` — and toggling
+  // a class fires no matchMedia event, so a race ending on a wide screen would otherwise leave the
+  // drum stretched from 254 into a 334px box for the rest of the session (#267).
+  if (!racing) flushDrumResize(true);
 }
 
 // Ceremony sound (#216) — silent until the viewer arms it; the callback keeps the 🔊 pill honest
@@ -1218,6 +1235,9 @@ function renderDrum(pick: number, remaining: string[], windowMs?: number): void 
   byId('drum').classList.remove('hidden');
   applyStageLayout();
   byId('drum-now').textContent = `Drawing pick #${pick}…`;
+  // Between reveals: the safest moment to apply a crossing the sim refused mid-flight, and the
+  // path that catches the ones the choreography's early returns would otherwise have dropped.
+  flushDrumResize();
   const win = windowMs ?? currentStart?.delayMs ?? 4000;
   if (activeVisual() === 'race') {
     // The race's drum roll: the field bunches and breaks harder (#235). No chute to glow.
