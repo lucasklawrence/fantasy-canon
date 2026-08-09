@@ -314,23 +314,61 @@ export function clearCeremony(guildId: string): void {
  * entry-point agnostic: the watcher already serialises Activity presses per guild, so the pairs
  * that actually collide are slash+Activity and slash+slash.
  */
-const setupsInFlight = new Set<string>();
+const setupsInFlight = new Map<string, number>();
+
+/**
+ * How long a claim is trusted before it is treated as abandoned.
+ *
+ * A backstop, not a schedule: the ESPN client passes no AbortSignal, so a stalled request can hold
+ * a claim for as long as the socket stays open, and the commissioner's obvious remedy — `/canon
+ * draftorder abort` — clears the session registry without reaching in here. Without an expiry, one
+ * hung fetch locks a guild out of starting a lottery until the process restarts, which on draft
+ * night is the whole feature. Well above any healthy setup, which is seconds.
+ */
+const SETUP_CLAIM_TTL_MS = 120_000;
 
 /**
  * Reserve the setup slot for a guild. `false` means someone else holds it and the caller must
  * refuse — visibly, per the #236 rule that every refusal leaves the presser a way forward.
  *
- * Every claim must be released on every exit path, including throws. Use `try/finally`.
+ * Prefer {@link withSetupClaim}, which cannot leak the slot. This is exported for tests and for
+ * the rare caller that genuinely needs the two halves apart.
  */
-export function claimSetup(guildId: string): boolean {
-  if (setupsInFlight.has(guildId)) return false;
-  setupsInFlight.add(guildId);
+export function claimSetup(guildId: string, now: number = Date.now()): boolean {
+  const heldSince = setupsInFlight.get(guildId);
+  if (heldSince !== undefined && now - heldSince < SETUP_CLAIM_TTL_MS) return false;
+  setupsInFlight.set(guildId, now);
   return true;
 }
 
 /** Release a {@link claimSetup} reservation. Safe to call when nothing is held. */
 export function releaseSetupClaim(guildId: string): void {
   setupsInFlight.delete(guildId);
+}
+
+/**
+ * Run `work` holding the guild's setup slot; run `busy` instead if someone else holds it.
+ *
+ * A wrapper rather than a bare claim/release pair, because the pair proved too easy to get wrong:
+ * the very first caller written against it put an `await` between the claim and its `try`, so a
+ * routine `deferReply` rejection (10062 Unknown interaction, which needs nothing more than a brief
+ * event-loop stall) escaped before the `finally` and leaked the slot **permanently** — locking the
+ * guild out of both setup surfaces until the process restarted. That is a far worse outcome than
+ * the duplicate preview the lock exists to prevent.
+ *
+ * There is no way to hold the slot through this function without giving it back.
+ */
+export async function withSetupClaim<T>(
+  guildId: string,
+  work: () => Promise<T>,
+  busy: () => T | Promise<T>,
+): Promise<T> {
+  if (!claimSetup(guildId)) return await busy();
+  try {
+    return await work();
+  } finally {
+    releaseSetupClaim(guildId);
+  }
 }
 
 /** Test hook — wipe all in-memory ceremonies. */

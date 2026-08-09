@@ -16,7 +16,6 @@ import {
   markPreviewPosted,
   oddsRows,
   type CeremonySession,
-  releaseSetupClaim,
   requestAbort,
   resetCeremoniesForTests,
   type RunCeremonyOptions,
@@ -1708,7 +1707,6 @@ describe('performActivitySetup (#253)', () => {
       expect(releases[0].reason).toContain('already in progress');
       expect(sent).toHaveLength(0); // nothing reaches the channel's permanent record
       expect(getCeremony('guild-1')).toBeUndefined();
-      releaseSetupClaim('guild-1');
     });
 
     it('two concurrent presses leave one preview and one session', async () => {
@@ -1736,18 +1734,75 @@ describe('performActivitySetup (#253)', () => {
 
     it('hands the slot back after a setup throws, so the next attempt is not wedged', async () => {
       // No mTeam payload ⇒ the import throws from inside the guarded region.
-      const { context } = createMockContext({ defaultLeagueId: 'league-1' });
+      const failing = createMockContext({ defaultLeagueId: 'league-1' });
       const sent: ChannelPost[] = [];
-      const { stage } = releasingStage();
       const { memo } = memoWith('lobby-chan');
 
       await expect(
-        performActivitySetup(setupClient(sent), context, stage, memo)(PRESS),
+        performActivitySetup(
+          setupClient(sent),
+          failing.context,
+          releasingStage().stage,
+          memo,
+        )(PRESS),
       ).resolves.toBe(false);
 
-      // A leaked claim would wedge every later setup for the life of the process.
+      // Asserting `claimSetup` here would pass just as well against a build that never claimed at
+      // all, so the next attempt is driven for real instead: a leaked slot would refuse it.
+      const { context } = createMockContext({
+        defaultLeagueId: 'league-1',
+        fetchPayloads: { mTeam: FOUR_TEAMS },
+      });
+      pngLogos();
+      const { stage, releases } = releasingStage();
+      await expect(
+        performActivitySetup(setupClient(sent), context, stage, memo)(PRESS),
+      ).resolves.toBe(true);
+      expect(releases).toHaveLength(0);
+      expect(getCeremony('guild-1')?.state).toBe('GAME_OPEN');
+    });
+
+    /**
+     * The slash path is the one that carried the leak: its claim originally sat before
+     * `deferReply`, outside the releasing region, so a 10062 rejection wedged the guild for the
+     * life of the process. All the coverage above drives the Activity door.
+     */
+    it('refuses a slash setup while the slot is held, without posting', async () => {
       expect(claimSetup('guild-1')).toBe(true);
-      releaseSetupClaim('guild-1');
+      const { context } = createMockContext({ fetchPayloads: { mTeam: FOUR_TEAMS } });
+      const setup = ceremonyInteraction({ options: { season: 2026, teams: 'A, B' } });
+
+      await handleDraftOrderSetupSubcommand(setup.interaction, context);
+
+      expect(setup.lastContent()).toContain('already running');
+      expect(setup.channelPosts).toHaveLength(0);
+      expect(getCeremony('guild-1')).toBeUndefined();
+    });
+
+    it('does not wedge the guild when the slash reply itself fails', async () => {
+      const { context } = createMockContext({ fetchPayloads: { mTeam: FOUR_TEAMS } });
+      const doomed = ceremonyInteraction({ options: { season: 2026, teams: 'A, B' } });
+      // 10062 Unknown interaction: routine, and it used to escape before the release.
+      Object.assign(doomed.interaction as object, {
+        deferReply: () => Promise.reject(new Error('Unknown interaction')),
+      });
+
+      await expect(handleDraftOrderSetupSubcommand(doomed.interaction, context)).rejects.toThrow(
+        'Unknown interaction',
+      );
+
+      // The next setup must still be able to run — a leaked slot would refuse it forever.
+      const setup = ceremonyInteraction({ options: { season: 2026, teams: 'A, B' } });
+      await handleDraftOrderSetupSubcommand(setup.interaction, context);
+      expect(getCeremony('guild-1')?.state).toBe('GAME_OPEN');
+    });
+
+    it('treats a claim older than the TTL as abandoned', () => {
+      // The ESPN client passes no AbortSignal, so a stalled fetch can hold a claim indefinitely
+      // and `/canon draftorder abort` does not reach it. The expiry is the only way out.
+      expect(claimSetup('guild-1')).toBe(true);
+      expect(claimSetup('guild-1')).toBe(false);
+      expect(claimSetup('guild-1', Date.now() + 120_001)).toBe(true);
     });
   });
 });
