@@ -53,6 +53,19 @@ export function finaleHoldMs(leadMs: number, exitMs: number): number {
   return Math.max(0, exitMs) + Math.max(0, leadMs) + ENVELOPE_MS;
 }
 
+/**
+ * Who the finale is about — the team holding pick #1, or null if the draw has not produced one.
+ *
+ * The overlay is re-openable from the sealed board, so this has to answer for a viewer who never
+ * saw the ceremony at all: a late joiner landing straight on 'finished' has the order but no
+ * reveal history. Reads whichever list the caller has, and refuses to guess from an incomplete one
+ * — a board mid-draw simply has no pick #1 yet, and offering to re-open an envelope that was never
+ * sealed would be a button that lies.
+ */
+export function finaleSubject(entries: readonly { pick: number; team: string }[]): string | null {
+  return entries.find((entry) => entry.pick === 1)?.team ?? null;
+}
+
 export type PlaybackKind = 'catchup' | 'replay' | null;
 
 /**

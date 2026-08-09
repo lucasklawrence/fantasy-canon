@@ -291,7 +291,17 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
      tab can't strand it. */
   #envelope { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center;
     justify-content: center; background: rgba(6, 8, 14, 0); pointer-events: none; }
-  #envelope.playing { background: rgba(6, 8, 14, .78); transition: background .45s ease-out; }
+  /* Clicks pass through until the overlay is actually playing — a hidden fixed layer that eats
+     input is the #202 confetti bug. While it IS playing the click is the dismissal, so it wants
+     them. Removing the playing class restores the pass-through. */
+  #envelope.playing { background: rgba(6, 8, 14, .78); transition: background .45s ease-out;
+    pointer-events: auto; cursor: pointer; }
+  .env-dismiss { position: fixed; left: 0; right: 0; bottom: 26px; text-align: center;
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: rgba(233,238,250,.5);
+    opacity: 0; }
+  /* Held back until the card has risen — an exit hint competing with the reveal undercuts it. */
+  #envelope.playing .env-dismiss { animation: envHint .5s 2.1s ease-out forwards; }
+  @keyframes envHint { to { opacity: 1; } }
   #envelope .env { position: relative; width: min(340px, 86vw); height: 300px; }
   .env-pocket { position: absolute; left: 0; right: 0; bottom: 24px; height: 150px;
     background: linear-gradient(180deg, #232c42, #161c2c); border: 1px solid rgba(245,214,123,.5);
@@ -398,6 +408,14 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     #tube-hold.present { animation: none !important; opacity: 1; transform: scale(1); }
     /* The backdrop stays — it is atmosphere, not motion — but it stops drifting (#256). */
     .ambient span { animation: none !important; }
+    /* The finale never opens ITSELF here (eligibility skips reduced motion), but it is re-openable
+       by hand from the sealed board, and a viewer who asks for it should get the settled card
+       rather than nothing. These are the end states of envFlap/envCard, held from the first frame. */
+    #envelope.playing { transition: none !important; }
+    #envelope.playing .env-flap { animation: none !important; opacity: 0; }
+    #envelope.playing .env-card { animation: none !important; transform: translateY(-96px);
+      z-index: 6; }
+    #envelope.playing .env-dismiss { animation: none !important; opacity: 1; }
     /* The canvas pile honors this too — hopperSim renders a settled still frame, no loop. */
   }
 </style>
@@ -512,6 +530,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   <section class="card hidden" id="board">
     <div class="board-head">
       <h2>The order so far</h2>
+      <button id="envelope-btn" class="replay hidden" type="button">&#9993; Open the envelope</button>
       <button id="replay-btn" class="replay hidden" type="button">&#8635; Replay the reveal</button>
     </div>
     <ol id="board-list"></ol>
@@ -547,6 +566,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
       <div id="env-team"></div>
     </div>
   </div>
+  <div class="env-dismiss">tap anywhere to close</div>
 </div>
 <script>window.__DRAFT_CONFIG__ = { clientId: ${jsonForScript(clientId)}, maxTeamBalls: ${jsonForScript(maxTeamBalls)} };</script>
 <script type="module" src="./client/lottery.js"></script>

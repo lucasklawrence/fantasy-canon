@@ -40,6 +40,7 @@ import {
   ENVELOPE_MS,
   envelopeEligible,
   finaleHoldMs,
+  finaleSubject,
   type PlaybackKind,
 } from './envelopePlan.js';
 import {
@@ -408,17 +409,25 @@ function closeEnvelope(): void {
  * hidden check repeats here: the lead timer can fire after a backgrounding, and an overlay opened
  * in a frozen tab would still be mid-animation when the viewer returns.
  */
-function openEnvelope(reveal: LotteryReveal, hue: number | undefined, token: number): void {
+function openEnvelope(team: string, hue: number | undefined, token: number): void {
   if (token !== envelopeToken || document.visibilityState === 'hidden') return;
-  byId('env-team').textContent = reveal.team;
+  paintEnvelope(team, hue);
+  envelopeTimer = window.setTimeout(() => {
+    if (token === envelopeToken) closeEnvelope();
+  }, ENVELOPE_MS);
+}
+
+/** Dress the card and restart the CSS choreography. Shared by the ceremony and the re-open. */
+function paintEnvelope(team: string, hue: number | undefined): void {
+  byId('env-team').textContent = team;
   // Logo when we have one; otherwise the team's hue disc with its initial — the card is never
   // faceless (the issue's "logo if it exists, else name + hue").
-  const logo = teamLogo(reveal.team);
+  const logo = teamLogo(team);
   const img = byId('env-logo') as HTMLImageElement;
   if (logo) img.src = logo.src;
   show('env-logo', logo !== null);
   const disc = byId('env-disc');
-  disc.textContent = [...reveal.team][0]?.toUpperCase() ?? '?';
+  disc.textContent = [...team][0]?.toUpperCase() ?? '?';
   disc.style.background = `hsl(${hue ?? 45} 60% 55%)`;
   show('env-disc', logo === null);
   const overlay = byId('envelope');
@@ -427,9 +436,38 @@ function openEnvelope(reveal: LotteryReveal, hue: number | undefined, token: num
   overlay.classList.remove('playing');
   void (overlay as HTMLElement).offsetWidth;
   overlay.classList.add('playing');
-  envelopeTimer = window.setTimeout(() => {
-    if (token === envelopeToken) closeEnvelope();
-  }, ENVELOPE_MS);
+}
+
+/**
+ * Re-open the finale from the sealed board, on demand and for as long as the viewer wants it.
+ *
+ * Deliberately NOT subject to `envelopeEligible`: that gate answers "should this play itself",
+ * and every one of its reasons to skip (a catch-up sprint, a hidden tab, reduced motion) is about
+ * an unasked-for interruption. A viewer pressing a button has asked. Reduced motion still gets a
+ * still card rather than the choreography — the stylesheet holds the end states.
+ *
+ * No auto-dismiss either: the ceremony's copy is a moment that has to keep moving, this one is a
+ * thing you opened and can sit with.
+ */
+function reopenEnvelope(): void {
+  const team = finaleTeam;
+  if (team === null) return;
+  envelopeToken += 1; // retire any pending open/dismiss from the ceremony
+  if (envelopeTimer !== null) {
+    clearTimeout(envelopeTimer);
+    envelopeTimer = null;
+  }
+  paintEnvelope(team, hueForTeam(team));
+}
+
+/** The team the finale is about, once the draw has produced a pick #1. */
+let finaleTeam: string | null = null;
+
+/** A team's ceremony hue, for the no-logo disc. Same assignment the pile and the race read. */
+function hueForTeam(team: string): number | undefined {
+  const rows = currentStart?.rows;
+  if (!rows) return undefined;
+  return assignBallRanges(rows).find((range) => range.team === team)?.hue;
 }
 
 /**
@@ -467,7 +505,7 @@ function queueEnvelope(
 ): void {
   if (!willEnvelope(reveal.pick, mode)) return;
   const token = ++envelopeToken;
-  envelopeTimer = window.setTimeout(() => openEnvelope(reveal, hue, token), leadMs);
+  envelopeTimer = window.setTimeout(() => openEnvelope(reveal.team, hue, token), leadMs);
 }
 
 /** The lead this visual gives its finale — the beat its own payoff needs before the dim. */
@@ -1794,6 +1832,10 @@ function renderFinish(snapshot: LotterySnapshot): void {
     renderBoard(snapshot.reveals);
   }
   show('board', true);
+  // Who the re-openable finale is about. Taken from the sealed ORDER when there is one, so a late
+  // joiner who never saw the ceremony can still open the envelope; a board with no pick #1 yet
+  // leaves it null and the button stays hidden.
+  finaleTeam = finaleSubject(snapshot.finish?.order ?? snapshot.reveals);
   const verify = snapshot.finish?.verify;
   if (verify) {
     byId('verify-commitment').textContent = `commitment: ${verify.commitment}`;
@@ -2122,6 +2164,11 @@ function skipReplay(): void {
  */
 function updateReplayAffordance(): void {
   const btn = byId('replay-btn');
+  // The finale re-open (live feedback) sits beside the replay and follows the same rules: only on
+  // a sealed board, never over a running playback, and only once there is a pick #1 to show. It is
+  // offered to late joiners too, which is why the subject comes from the ORDER rather than from
+  // having witnessed the ceremony.
+  show('envelope-btn', !isPlaying() && livePhase === 'finished' && finaleTeam !== null);
   if (isPlaying()) {
     show('replay-btn', false);
     return;
@@ -2544,6 +2591,13 @@ async function boot(): Promise<void> {
     else startCatchUp();
   });
   byId('replay-skip').addEventListener('click', skipReplay);
+  // The finale is dismissible and re-openable (live feedback). Dismissing early also releases a
+  // finish sweep the ceremony was holding — a viewer who skips the moment gets the board at once.
+  byId('envelope').addEventListener('click', closeEnvelope);
+  byId('envelope-btn').addEventListener('click', reopenEnvelope);
+  document.addEventListener('keydown', (event: KeyboardEvent) => {
+    if (event.key === 'Escape') closeEnvelope();
+  });
   byId('reimport-btn').addEventListener('click', () => void sendReimport());
   byId('begin-btn').addEventListener('click', () => void sendBegin());
   byId('bulk-btn').addEventListener('click', () => void sendBulk());

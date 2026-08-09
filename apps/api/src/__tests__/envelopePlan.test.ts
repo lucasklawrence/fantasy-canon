@@ -4,6 +4,7 @@ import {
   ENVELOPE_MS,
   envelopeEligible,
   finaleHoldMs,
+  finaleSubject,
 } from '../client/envelopePlan.js';
 import { exitBudget, EXTRACT_CAP_MS, FINISH_LEAD_MS, FLIP_MS } from '../client/exitBudget.js';
 import { REPLAY_DWELL_MS } from '../client/replayTimeline.js';
@@ -88,6 +89,33 @@ describe('envelopeEligible (#243)', () => {
       const hold = finaleHoldMs(lead, EXTRACT_CAP_MS + FLIP_MS);
       expect(hold, `${visual} hold must stay bounded`).toBeLessThanOrEqual(10_000);
     }
+  });
+
+  /**
+   * The finale is re-openable from the sealed board (live feedback), so "who is it about" has to
+   * be answerable by a viewer who never saw the ceremony — a late joiner lands on 'finished' with
+   * an order and no reveal history.
+   */
+  it('names the finale’s subject from whichever list the caller has', () => {
+    const order = [
+      { pick: 2, team: 'Geese' },
+      { pick: 1, team: 'Ducks' },
+      { pick: 3, team: 'Swans' },
+    ];
+    expect(finaleSubject(order)).toBe('Ducks'); // not the first entry — the one holding pick #1
+    expect(finaleSubject([...order].reverse())).toBe('Ducks'); // order of the list is irrelevant
+  });
+
+  it('refuses to guess when the draw has produced no pick #1', () => {
+    // A board mid-draw, and an empty one. Offering to re-open an envelope that was never sealed
+    // would be a button that lies — the caller hides it on null.
+    expect(
+      finaleSubject([
+        { pick: 12, team: 'Ducks' },
+        { pick: 11, team: 'Geese' },
+      ]),
+    ).toBeNull();
+    expect(finaleSubject([])).toBeNull();
   });
 
   it('treats a negative or absent leg as zero rather than shortening the hold', () => {
