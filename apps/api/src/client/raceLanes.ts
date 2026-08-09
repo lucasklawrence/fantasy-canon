@@ -40,10 +40,18 @@ export const FALL_ZONE_END = 0.42;
  * order is supposed to give.
  */
 export const PACK_FLOOR = 0.45;
-/** Left edge of the band the un-locked pack jockeys inside. */
-export const PACK_MIN = 0.48;
-/** Right edge of the jockeying band — nobody drifts across the line uninvited. */
-export const PACK_MAX = 0.76;
+/**
+ * The band a still-racing team's pace maps into: no balls at {@link PACK_MIN}, the biggest stack
+ * left at {@link PACK_MAX}.
+ *
+ * Both ends leave {@link WANDER_MAX} of clearance — PACK_MIN above PACK_FLOOR, PACK_MAX below the
+ * line — so the jockeying is bounded by construction rather than by the frame loop's clamp. That
+ * clamp still exists as a backstop, but relying on it would flat-top every trailing racer against
+ * the floor and quietly delete their wobble.
+ */
+export const PACK_MIN = 0.5;
+/** Right edge of the pace band — nobody drifts across the line uninvited. */
+export const PACK_MAX = 0.79;
 /** The finish line. */
 export const FINISH_X = 0.86;
 /** Where a winner parks, just past the line. */
@@ -98,6 +106,30 @@ export function lockKind(pick: number, lockedPicks: number[], teamCount: number)
   }
   // `pick` outside 1..teamCount, or already locked — malformed input; a fall is the quiet answer.
   return 'fall';
+}
+
+/**
+ * How far a racer may drift from its pace. Bounded so the track keeps meaning what it says: the
+ * jockeying is life, not noise, and two racers can only trade places when their stacks are close
+ * enough that the outcome really is close. A leader cannot wander behind a longshot.
+ */
+export const WANDER_MAX = 0.035;
+
+/**
+ * A still-racing team's place on the track: distance is its stack measured against the biggest one
+ * still in the bag (live feedback — "total distance per ball").
+ *
+ * Before this the pack jockeyed around random midpoints, so a racer's position said nothing at all
+ * — which is why a front-runner being drawn read as arbitrary rather than as an upset. Now the
+ * leader is the favourite, and the field is a live picture of the odds.
+ *
+ * Measured against the REMAINING leader, so eliminating the front-runner promotes everyone behind
+ * it: your stack is worth more once a bigger one leaves the bag, and the field surges to show it.
+ */
+export function paceFor(balls: number, leaderBalls: number): number {
+  if (!(leaderBalls > 0)) return PACK_MIN;
+  const ratio = Math.min(1, Math.max(0, balls / leaderBalls));
+  return PACK_MIN + ratio * (PACK_MAX - PACK_MIN);
 }
 
 /**

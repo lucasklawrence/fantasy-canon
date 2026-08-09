@@ -26,9 +26,9 @@ import {
   FINISH_X,
   laneMetrics,
   lockKind,
+  paceFor,
   PACK_FLOOR,
-  PACK_MAX,
-  PACK_MIN,
+  WANDER_MAX,
 } from './raceLanes.js';
 
 export interface RaceSim {
@@ -63,10 +63,23 @@ const PAD = 6;
 const RIGHT_PAD = 6;
 /** The gutter never shrinks below the original fixed strip, so tiny canvases stay sane. */
 const MIN_GUTTER = 64;
-/** How long a lock's park animation runs. */
-const LOCK_MS = 900;
+/** How long a winner's sprint through the line runs. */
+const CROSS_MS = 900;
+/**
+ * A drawn team goes to the BACK before it goes to the standings (live feedback).
+ *
+ * The complaint was "someone at the front is chosen and goes to back" — a leader teleporting
+ * backwards reads as a glitch. So an elimination is two moves: the field overtakes them
+ * (`SLIP_MS`), and only then do they drop off the rear into their slot (`DROP_MS`). The motion
+ * tells the story in the order it happened. Their sum stays inside the old 900ms lock, so the
+ * race's envelope lead still covers a finale.
+ */
+const SLIP_MS = 520;
+const DROP_MS = 380;
 /** Drum-roll surge multiplier eased in/out, so the pack doesn't snap between intensities. */
 const SURGE = 1.8;
+/** How fast a racer closes on a changed pace — a leader leaving promotes the whole field. */
+const PACE_EASE = 0.045;
 
 interface Racer {
   team: string;
@@ -75,8 +88,12 @@ interface Racer {
   label: string;
   /** Current position as a fraction of the drawable track. */
   frac: number;
-  /** Cosmetic motion parameters — unconstrained randomness, nothing readable in them. */
-  mid: number;
+  /** This team's stack, and the place on the track it earns. */
+  balls: number;
+  /** Eased toward {@link Racer.paceTarget} so a promotion is a surge, not a jump. */
+  pace: number;
+  paceTarget: number;
+  /** Cosmetic motion parameters — jockeying around the pace, bounded by WANDER_MAX. */
   amp1: number;
   w1: number;
   p1: number;
@@ -85,7 +102,14 @@ interface Racer {
   p2: number;
   sprite: HTMLCanvasElement;
   locked?: { pick: number; kind: 'cross' | 'fall' };
-  anim?: { from: number; to: number; startedAt: number };
+  /** `then` chains the drop behind the slip; see SLIP_MS. */
+  anim?: {
+    from: number;
+    to: number;
+    startedAt: number;
+    ms: number;
+    then?: { to: number; ms: number };
+  };
 }
 
 /**
@@ -249,19 +273,33 @@ export function createRaceSim(
     intensity += ((agitating ? SURGE : 1) - intensity) * 0.06;
     for (const racer of racers) {
       if (racer.anim) {
-        const t01 = Math.min(1, (now - racer.anim.startedAt) / LOCK_MS);
+        const t01 = Math.min(1, (now - racer.anim.startedAt) / racer.anim.ms);
         // Ease-out: a winner sprints through the line, a straggler decelerates to a stop.
         const ease = 1 - (1 - t01) * (1 - t01) * (1 - t01);
         racer.frac = racer.anim.from + (racer.anim.to - racer.anim.from) * ease;
-        if (t01 >= 1) racer.anim = undefined;
+        if (t01 >= 1) {
+          const next = racer.anim.then;
+          // The drop off the rear, chained behind the slip so the field is seen to overtake first.
+          racer.anim = next
+            ? { from: racer.frac, to: next.to, startedAt: now, ms: next.ms }
+            : undefined;
+        }
       } else if (!racer.locked) {
-        // The jockeying: two superimposed sine drifts per racer, scaled by the drum-roll surge.
-        // Bounded ahead of the standings zone and short of the line: a team still in contention
-        // must never drift behind one already drawn, or the parked order stops meaning anything.
+        // Close on the pace this stack earns. Eased rather than snapped: when the leader is drawn
+        // out, every remaining stack is suddenly worth more, and the field should surge forward
+        // rather than teleport.
+        racer.pace += (racer.paceTarget - racer.pace) * PACE_EASE;
+        // The jockeying: two superimposed sine drifts around that pace, scaled by the drum-roll
+        // surge. Bounded by WANDER_MAX so position keeps meaning something — close stacks can
+        // trade places, a leader can never wander behind a longshot. Clamped ahead of the
+        // standings zone: a team still in contention must never sit behind one already drawn.
         const wander =
           racer.amp1 * Math.sin(racer.w1 * t + racer.p1) * intensity +
           racer.amp2 * Math.sin(racer.w2 * t + racer.p2) * intensity;
-        racer.frac = Math.min(FINISH_X - 0.02, Math.max(PACK_FLOOR, racer.mid + wander));
+        racer.frac = Math.min(
+          FINISH_X - 0.02,
+          Math.max(PACK_FLOOR, racer.pace + Math.max(-WANDER_MAX, Math.min(WANDER_MAX, wander))),
+        );
       }
     }
     draw();
@@ -273,13 +311,20 @@ export function createRaceSim(
     rafId = requestAnimationFrame(frame);
   }
 
-  /** Reduced motion: no loop — spread the field deterministically and paint one still frame. */
+  /**
+   * Reduced motion: no loop, one still frame — but the same picture everyone else is reading.
+   *
+   * This used to spread the field by LANE INDEX, which was harmless when position meant nothing
+   * and is a lie now that it means odds: it would show a reduced-motion viewer a field ordered by
+   * odds-table row. They get the pace, with the jockeying simply absent.
+   */
   function stillFrame(): void {
     ensureSize();
+    repace();
     for (const racer of racers) {
       if (racer.locked) continue;
-      racer.frac =
-        PACK_MIN + ((racer.lane + 0.5) / Math.max(1, racers.length)) * (PACK_MAX - PACK_MIN);
+      racer.pace = racer.paceTarget; // no loop to ease it, so land on the answer directly
+      racer.frac = racer.pace;
     }
     draw();
   }
@@ -295,6 +340,7 @@ export function createRaceSim(
     racer.anim = undefined;
     racer.frac = kind === 'cross' ? CROSS_PARK_X : fallPosition(pick, racers.length);
     racer.sprite = spriteFor(racer);
+    repace();
   }
 
   function applyLock(pick: number, team: string, animate: boolean): void {
@@ -306,29 +352,68 @@ export function createRaceSim(
       repaint();
       return;
     }
-    const to = kind === 'cross' ? CROSS_PARK_X : fallPosition(pick, racers.length);
     racer.locked = { pick, kind };
-    racer.anim = { from: racer.frac, to, startedAt: performance.now() };
     racer.sprite = spriteFor(racer);
+    const startedAt = performance.now();
+    if (kind === 'cross') {
+      racer.anim = { from: racer.frac, to: CROSS_PARK_X, startedAt, ms: CROSS_MS };
+    } else {
+      // Overtaken first, then dropped. Slipping to the floor of the pack puts them behind every
+      // racer still running, whichever end of the field they were at when their name came up.
+      racer.anim = {
+        from: racer.frac,
+        to: PACK_FLOOR,
+        startedAt,
+        ms: SLIP_MS,
+        then: { to: fallPosition(pick, racers.length), ms: DROP_MS },
+      };
+    }
+    // One fewer stack in the bag: everyone left is worth more, and eases forward to show it.
+    repace();
     wake();
   }
 
+  /**
+   * Re-derive every still-racing team's pace from the stacks still in the bag.
+   *
+   * Called after any change to who is running, because the scale is the REMAINING leader — drawing
+   * the front-runner promotes the whole field, which is the visual answer to "why did my position
+   * change when it wasn't my pick".
+   */
+  function repace(): void {
+    const running_ = racers.filter((racer) => !racer.locked);
+    const leaderBalls = running_.reduce((max, racer) => Math.max(max, racer.balls), 0);
+    for (const racer of running_) racer.paceTarget = paceFor(racer.balls, leaderBalls);
+  }
+
   function buildField(rows: { team: string; balls: number }[]): void {
-    racers = assignLanes(rows).map((lane) => ({
-      team: lane.team,
-      hue: lane.hue,
-      lane: lane.lane,
-      label: lane.team, // refit against the real gutter in ensureSize below
-      frac: PACK_MIN + Math.random() * (PACK_MAX - PACK_MIN),
-      mid: (PACK_MIN + PACK_MAX) / 2 + (Math.random() - 0.5) * 0.12,
-      amp1: 0.1 + Math.random() * 0.06,
-      w1: 0.35 + Math.random() * 0.4,
-      p1: Math.random() * Math.PI * 2,
-      amp2: 0.03 + Math.random() * 0.03,
-      w2: 1.2 + Math.random() * 1.1,
-      p2: Math.random() * Math.PI * 2,
-      sprite: buildBallSprite(null, lane.hue, ballR, dpr, getLogo(lane.team)),
-    }));
+    const ballsByTeam = new Map(rows.map((row) => [row.team, row.balls]));
+    const leaderBalls = rows.reduce((max, row) => Math.max(max, row.balls), 0);
+    racers = assignLanes(rows).map((lane) => {
+      const balls = ballsByTeam.get(lane.team) ?? 0;
+      // Start ON the pace rather than scattered: the field's opening arrangement IS the odds, and
+      // a viewer who joins before the first beat should already be able to read it.
+      const pace = paceFor(balls, leaderBalls);
+      return {
+        team: lane.team,
+        hue: lane.hue,
+        lane: lane.lane,
+        label: lane.team, // refit against the real gutter in ensureSize below
+        balls,
+        frac: pace,
+        pace,
+        paceTarget: pace,
+        // Sized so amp1 + amp2 stays under WANDER_MAX even at full SURGE — otherwise the drum
+        // roll would flat-top the drift against the clamp and the surge would stop reading.
+        amp1: 0.008 + Math.random() * 0.005,
+        w1: 0.35 + Math.random() * 0.4,
+        p1: Math.random() * Math.PI * 2,
+        amp2: 0.003 + Math.random() * 0.003,
+        w2: 1.2 + Math.random() * 1.1,
+        p2: Math.random() * Math.PI * 2,
+        sprite: buildBallSprite(null, lane.hue, ballR, dpr, getLogo(lane.team)),
+      };
+    });
     // Force: a same-size rebuild still has NEW names — the gutter and labels must refresh.
     ensureSize(true);
   }
