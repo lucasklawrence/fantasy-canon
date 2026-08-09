@@ -23,12 +23,7 @@ import {
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
-import {
-  computePickOdds,
-  DraftOrderState,
-  DraftOrderTeamInput,
-  MAX_TEAM_BALLS,
-} from '@fantasy-canon/core';
+import { computePickOdds, DraftOrderTeamInput, MAX_TEAM_BALLS } from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
 import { resolveLeagueId } from '../../lib/leagueId.js';
 import { ensureSnapshot } from '../../lib/snapshots.js';
@@ -45,6 +40,7 @@ import {
   CeremonyIo,
   CeremonyPost,
   type CeremonySession,
+  withSetupClaim,
   clearCeremony,
   createCeremony,
   getCeremony,
@@ -396,6 +392,17 @@ export async function handleDraftOrderSetupSubcommand(
     });
     return;
   }
+  // A re-import is the other operation that replaces the roster and posts its own odds card
+  // (#219). The setup claim below cannot see it — re-import holds no claim, it flags the session —
+  // so without this the two overlap and the channel gets two competing previews, with `begin`
+  // later sealing whichever bag won the race rather than the one the league saw last.
+  if (existing?.reimportActive) {
+    await interaction.reply({
+      content: 'A re-import from ESPN is running — wait for its odds card, then run setup again.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   const season = interaction.options.getInteger('season', true);
   const manualTeams = interaction.options.getString('teams') ?? undefined;
@@ -413,123 +420,212 @@ export async function handleDraftOrderSetupSubcommand(
     return;
   }
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  try {
-    const notes: string[] = [];
-    let resolvedLeagueId: string | undefined;
-    let teams: SetupTeam[];
-    let dressing: Promise<SessionLogoDress>;
-    if (manualTeams) {
-      teams = parseManualTeams(manualTeams).map((team, index) => ({
-        teamId: `team-${index + 1}`,
-        name: team.name,
+  // Held across everything below (#261). The ESPN roster, the standings round-trip and the logo
+  // prefetch run for seconds with no session in the registry to collide on, so without this a
+  // second setup sails through the checks above, posts its own preview, and its `setCeremony`
+  // discards this one along with any lobby joins made against it.
+  //
+  // `deferReply` is INSIDE the claim deliberately. It was outside in the first version, and a
+  // rejection there — 10062 Unknown interaction, which a brief event-loop stall is enough to
+  // cause — escaped before the release and wedged the guild's setup permanently.
+  await withSetupClaim(
+    guildId,
+    async () => {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await runSetup(channel);
+    },
+    async () => {
+      await interaction.reply({
+        content: 'A setup is already running for this server — give it a moment and try again.',
+        flags: MessageFlags.Ephemeral,
+      });
+    },
+  );
+
+  // `channel` is passed rather than closed over: the guard above narrows it out of `undefined`,
+  // and TS does not carry that narrowing across a nested function boundary.
+  async function runSetup(channel: SendableChannel): Promise<void> {
+    try {
+      const notes: string[] = [];
+      let resolvedLeagueId: string | undefined;
+      let teams: SetupTeam[];
+      let dressing: Promise<SessionLogoDress>;
+      if (manualTeams) {
+        teams = parseManualTeams(manualTeams).map((team, index) => ({
+          teamId: `team-${index + 1}`,
+          name: team.name,
+          bonusBalls: team.bonusBalls,
+        }));
+        // Manual rosters carry no logos — this resolves immediately.
+        dressing = fetchSessionLogoDress(teams, context);
+      } else {
+        resolvedLeagueId = await resolveLeagueId(interaction, context);
+        const leagueId = resolvedLeagueId;
+        if (!leagueId) {
+          throw new Error(
+            'League ID is required — set it via /canon config set, ESPN_LEAGUE_ID, or pass a manual `teams` list.',
+          );
+        }
+        teams = await resolveEspnTeams(context, leagueId, season);
+        // Cosmetic only (#242): the Activity's odds table, drop ball, race cars — and, since
+        // #254, the odds/board cards — wear these; the commitment preimage never sees a logo.
+        // Started here so the prefetch overlaps the standings round-trip below, and awaited
+        // BEFORE the re-validation so the check-then-act window never spans it.
+        dressing = fetchSessionLogoDress(teams, context);
+        if (weightsMode === 'standings') {
+          notes.push(...(await applyStandingsWeights(context, leagueId, season, teams)));
+        }
+      }
+      applyBallsOverrides(teams, ballsInput);
+      applyBonusOverrides(teams, bonusInput);
+
+      const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
+        teamId: team.teamId,
+        displayName: team.name,
+        baseBalls: team.baseBalls,
         bonusBalls: team.bonusBalls,
       }));
-      // Manual rosters carry no logos — this resolves immediately.
-      dressing = fetchSessionLogoDress(teams, context);
-    } else {
-      resolvedLeagueId = await resolveLeagueId(interaction, context);
-      const leagueId = resolvedLeagueId;
-      if (!leagueId) {
-        throw new Error(
-          'League ID is required — set it via /canon config set, ESPN_LEAGUE_ID, or pass a manual `teams` list.',
-        );
-      }
-      teams = await resolveEspnTeams(context, leagueId, season);
-      // Cosmetic only (#242): the Activity's odds table, drop ball, race cars — and, since
-      // #254, the odds/board cards — wear these; the commitment preimage never sees a logo.
-      // Started here so the prefetch overlaps the standings round-trip below, and awaited
-      // BEFORE the re-validation so the check-then-act window never spans it.
-      dressing = fetchSessionLogoDress(teams, context);
-      if (weightsMode === 'standings') {
-        notes.push(...(await applyStandingsWeights(context, leagueId, season, teams)));
-      }
-    }
-    applyBallsOverrides(teams, ballsInput);
-    applyBonusOverrides(teams, bonusInput);
-
-    const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
-      teamId: team.teamId,
-      displayName: team.name,
-      baseBalls: team.baseBalls,
-      bonusBalls: team.bonusBalls,
-    }));
-    const names = new Map(teams.map((team) => [team.teamId, team.name]));
-    const session = createCeremony(
-      guildId,
-      `${season} Draft Lottery`,
-      { teams: configTeams, baseBallCount },
-      names,
-    );
-
-    const dress = await dressing;
-
-    // Re-validate after the awaits above (ESPN fetch, logo prefetch): if a ceremony started
-    // running meanwhile, replacing it now would orphan a live draw.
-    if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
-      await interaction.editReply({
-        content: 'A ceremony started running while setup was working — abort it first.',
-      });
-      return;
-    }
-    dressSession(session, dress);
-    const preview = await buildPreviewPost(session);
-    await channelIo(channel).post(preview);
-    markPreviewPosted(session);
-    // Where the odds preview just landed — the audit line for an in-Activity edit (#220) posts
-    // here, since it fires before `begin` has captured `channelId`.
-    session.lobbyChannelId = interaction.channelId;
-    // What an in-Activity re-import (#219) refetches: the exact league + season this setup opened,
-    // and the member allowed to ask for it. A manual `teams:` setup leaves leagueId unset, so a
-    // re-import correctly refuses — there is no ESPN league behind it.
-    session.leagueId = resolvedLeagueId;
-    session.season = season;
-    session.commissionerIds = [interaction.user.id];
-    setCeremony(session);
-    // The Activity's "start a lottery" press (#253) anchors here next time — a doorbell from a
-    // dead-idle stage has no channel of its own.
-    memo.remember(guildId, interaction.channelId);
-
-    // Best-effort: arm the Activity lobby (#198) so members can join before `begin`.
-    // Failures are logged but never propagate — the ceremony state is already committed above.
-    // `commissionerIds` is what makes the lobby editable from inside the Activity (#210): the
-    // member who ran this command, which `denyUnlessCommissioner` already gated on Manage Server.
-    // No `keepAdjustments` — this is a brand-new bag, so edits to the previous one are meaningless.
-    const lobbyRows = oddsRows(session);
-    const armStage = stageFromEnv();
-    void armStage
-      .lobby({
-        title: session.title,
-        teamCount: session.config.teams.length,
-        totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
-        rows: lobbyRows,
+      const names = new Map(teams.map((team) => [team.teamId, team.name]));
+      const session = createCeremony(
         guildId,
-        commissionerIds: [interaction.user.id],
-      })
-      .then(() => {
-        // Deliver the logos the api can't fetch itself (#249): ESPN-hosted art needs the league's
-        // cookies, stock logos need rasterizing. Strictly AFTER the lobby claimed the stage — a
-        // rejected arm (another guild's ceremony owns it) must not seed the shared cache with
-        // this guild's art under colliding ESPN team ids.
-        pushSessionLogos(session, context, armStage);
-      })
-      .catch((error: unknown) => {
-        console.error('[draftorder] failed to arm the Activity lobby:', error);
-      });
+        `${season} Draft Lottery`,
+        { teams: configTeams, baseBallCount },
+        names,
+      );
 
-    await interaction.editReply({
-      content: [
-        `Odds preview posted — the bag is frozen at ${teams.length} teams. ` +
-          'Run `/canon draftorder begin` to post the commitment and start the reveal. ' +
-          'Changing teams/balls means re-running setup (fresh public preview) first. ' +
-          'Build the countdown with `/canon draftorder hype`.',
-        ...notes,
-      ].join('\n'),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await interaction.editReply({ content: `Setup failed: ${message}` });
+      const dress = await dressing;
+
+      // Re-validate after the awaits above (ESPN fetch, logo prefetch): if a ceremony started
+      // running meanwhile, replacing it now would orphan a live draw.
+      if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
+        await interaction.editReply({
+          content: 'A ceremony started running while setup was working — abort it first.',
+        });
+        return;
+      }
+      dressSession(session, dress);
+      const preview = await buildPreviewPost(session);
+      await channelIo(channel).post(preview);
+      markPreviewPosted(session);
+      // Where the odds preview just landed — the audit line for an in-Activity edit (#220) posts
+      // here, since it fires before `begin` has captured `channelId`.
+      session.lobbyChannelId = interaction.channelId;
+      // What an in-Activity re-import (#219) refetches: the exact league + season this setup opened,
+      // and the member allowed to ask for it. A manual `teams:` setup leaves leagueId unset, so a
+      // re-import correctly refuses — there is no ESPN league behind it.
+      session.leagueId = resolvedLeagueId;
+      session.season = season;
+      session.commissionerIds = [interaction.user.id];
+      setCeremony(session);
+      // The Activity's "start a lottery" press (#253) anchors here next time — a doorbell from a
+      // dead-idle stage has no channel of its own.
+      memo.remember(guildId, interaction.channelId);
+
+      // Best-effort: arm the Activity lobby (#198) so members can join before `begin`.
+      // Failures are logged but never propagate — the ceremony state is already committed above.
+      // `commissionerIds` is what makes the lobby editable from inside the Activity (#210): the
+      // member who ran this command, which `denyUnlessCommissioner` already gated on Manage Server.
+      // No `keepAdjustments` — this is a brand-new bag, so edits to the previous one are meaningless.
+      const lobbyRows = oddsRows(session);
+      const armStage = stageFromEnv();
+      void armStage
+        .lobby({
+          title: session.title,
+          teamCount: session.config.teams.length,
+          totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
+          rows: lobbyRows,
+          guildId,
+          commissionerIds: [interaction.user.id],
+        })
+        .then(() => {
+          // Deliver the logos the api can't fetch itself (#249): ESPN-hosted art needs the league's
+          // cookies, stock logos need rasterizing. Strictly AFTER the lobby claimed the stage — a
+          // rejected arm (another guild's ceremony owns it) must not seed the shared cache with
+          // this guild's art under colliding ESPN team ids.
+          pushSessionLogos(session, context, armStage);
+        })
+        .catch((error: unknown) => {
+          console.error('[draftorder] failed to arm the Activity lobby:', error);
+        });
+
+      await interaction.editReply({
+        content: [
+          `Odds preview posted — the bag is frozen at ${teams.length} teams. ` +
+            'Run `/canon draftorder begin` to post the commitment and start the reveal. ' +
+            'Changing teams/balls means re-running setup (fresh public preview) first. ' +
+            'Build the countdown with `/canon draftorder hype`.',
+          ...notes,
+        ].join('\n'),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await interaction.editReply({ content: `Setup failed: ${message}` });
+    }
   }
+}
+
+/**
+ * Is `session` still the guild's live, sealable ceremony?
+ *
+ * Every `begin` checkpoint asks exactly this, at every await boundary, on both front doors. The
+ * hazard is a replacing `setup` finishing mid-flight: it calls `setCeremony` with a new session,
+ * leaving this one detached from the registry but still `GAME_OPEN` and perfectly willing to
+ * commit. A detached ceremony that commits posts its commitment *after* the replacement's fresh
+ * odds preview, which is the one ordering ADR 0006 does not allow.
+ *
+ * One function rather than five copies of the same five-line boolean, so a later edit to what
+ * "sealable" means cannot reach four checkpoints and miss the fifth (#237).
+ */
+function stillSealable(guildId: string, session: CeremonySession): boolean {
+  return (
+    getCeremony(guildId) === session &&
+    !session.abort.signal.aborted &&
+    !session.miniGameActive &&
+    !session.reimportActive &&
+    // No `as DraftOrderState` here, unlike the call sites this replaced: they needed the
+    // assertion to defeat TS narrowing the state to 'GAME_OPEN' from the guard at the top of the
+    // handler, which is exactly the stale belief the re-check exists to disprove. A standalone
+    // function has no such narrowing to fight.
+    session.state === 'GAME_OPEN'
+  );
+}
+
+/**
+ * Why {@link stillSealable} said no, in the commissioner's terms (#237).
+ *
+ * Shared by every `begin` checkpoint, so the actionable branches — wait for the odds card, wait
+ * for the results post — cannot be present at one and missing at the next. The replaced-ceremony
+ * case earns its own line: a concurrent `setup` leaves this session GAME_OPEN with no interlocks
+ * set, so before this it fell through to "aborted" and sent people looking for an abort nobody
+ * performed.
+ */
+function notSealableReason(session: CeremonySession, when: string): string {
+  if (session.reimportActive) {
+    return `A re-import from ESPN started ${when} — wait for its odds card, then \`begin\`.`;
+  }
+  if (session.miniGameActive) {
+    return `A reaction round armed ${when} — wait for its results post, then \`begin\`.`;
+  }
+  if (session.abort.signal.aborted) {
+    return 'The ceremony was aborted before it could start — nothing was committed.';
+  }
+  if (session.state === 'LOTTERY_RUNNING') return 'The ceremony is already running.';
+  return `A newer setup replaced this lottery ${when} — nothing was committed. Run \`begin\` again against the fresh odds card.`;
+}
+
+/**
+ * The "open the Lottery Machine" invite, built once for both front doors (#237). The `createdAt`
+ * suffix on the custom id is a marker only: nothing parses it, and the handler deliberately does
+ * not validate it, because launching is idempotent and a stale press simply opens whatever the
+ * stage currently holds. Shared so the id scheme cannot drift between the two doors.
+ */
+function launchButtonRow(session: CeremonySession): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${DRAFT_ORDER_LAUNCH_ID}:${session.createdAt}`)
+      .setLabel('🎰 Open the Lottery Machine')
+      .setStyle(ButtonStyle.Primary),
+  );
 }
 
 /**
@@ -592,24 +688,12 @@ export async function handleDraftOrderBeginSubcommand(
   // A reaction round that armed while we awaited the reply also stops us — sealing the bag
   // would just doom that round to a public discard — and a concurrent `begin` that already
   // moved the state gets a clean refusal instead of an assertTransition error in the log.
-  // Widened via assertion: another handler can mutate the state across the await above, which
-  // TS's narrowing (still "GAME_OPEN" from the top guard, even through a const alias) can't see.
-  const stateNow = session.state as DraftOrderState;
-  if (
-    getCeremony(guildId) !== session ||
-    session.abort.signal.aborted ||
-    session.miniGameActive ||
-    session.reimportActive ||
-    stateNow !== 'GAME_OPEN'
-  ) {
-    const content = session.reimportActive
-      ? 'A re-import from ESPN started just now — wait for its odds card, then `begin`.'
-      : session.miniGameActive
-        ? 'A reaction round armed just now — wait for its results post, then `begin`.'
-        : stateNow === 'LOTTERY_RUNNING'
-          ? 'The ceremony is already running.'
-          : 'The ceremony was aborted before it could start — nothing was committed.';
-    await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
+  if (!stillSealable(guildId, session)) {
+    // Caught like its two siblings: a rejected refusal (10062 after a slow reply, a 429) should
+    // decline the begin, not surface as a crash.
+    await interaction
+      .followUp({ content: notSealableReason(session, 'just now'), flags: MessageFlags.Ephemeral })
+      .catch(() => {});
     return;
   }
 
@@ -633,20 +717,10 @@ export async function handleDraftOrderBeginSubcommand(
   // already posted its own public preview; starting this session now would put a commitment for
   // the *old* bag into the channel after it. A reaction round that armed meanwhile is the same
   // hazard the earlier block guards: sealing a bag in flux dooms that round to a public discard.
-  if (
-    getCeremony(guildId) !== session ||
-    session.abort.signal.aborted ||
-    session.miniGameActive ||
-    session.reimportActive ||
-    (session.state as DraftOrderState) !== 'GAME_OPEN'
-  ) {
+  if (!stillSealable(guildId, session)) {
     await interaction
       .followUp({
-        content: session.reimportActive
-          ? 'A re-import from ESPN started while the Activity edits were being applied — wait for its odds card, then `begin`.'
-          : session.miniGameActive
-            ? 'A reaction round armed while the Activity edits were being applied — wait for its results post, then `begin`.'
-            : 'The ceremony changed while the Activity edits were being applied — nothing was committed.',
+        content: notSealableReason(session, 'while the Activity edits were being applied'),
         flags: MessageFlags.Ephemeral,
       })
       .catch(() => {});
@@ -657,22 +731,23 @@ export async function handleDraftOrderBeginSubcommand(
   // The reveal itself streams there; commitment, final board, and seed reveal still post here.
   // Best-effort — a failed invite post (permissions, transient API error) must never block the
   // ceremony itself, which the commissioner was just told is starting.
+  // Tracked so the checkpoint below knows whether there is a public promise to retract.
+  let postedLaunchInvite = false;
   if (stageMode === 'activity') {
     try {
-      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`${DRAFT_ORDER_LAUNCH_ID}:${session.createdAt}`)
-          .setLabel('🎰 Open the Lottery Machine')
-          .setStyle(ButtonStyle.Primary),
-      );
       await channel.send({
         content: `🎰 **${session.title}** — the ball-by-ball reveal streams live in the Lottery Machine. Click to watch; the commitment, final board, and seed verification still post right here.`,
-        components: [row],
+        components: [launchButtonRow(session)],
         allowedMentions: { parse: [] }, // uniform ceremony-surface policy (#222)
       });
+      postedLaunchInvite = true;
     } catch (error) {
       console.error('[draftorder] failed to post the lottery-machine launch button:', error);
-      await interaction
+      // Deliberately not awaited: this reassurance is only true if the checkpoint below lets the
+      // ceremony through, and awaiting it here is another suspension point where a replacing
+      // setup can land — which used to leave the commissioner holding two contradictory
+      // ephemerals ("still runs" then "nothing was committed").
+      void interaction
         .followUp({
           content:
             'Could not post the Lottery Machine button — the ceremony still runs (members can open the Activity from the app launcher).',
@@ -689,6 +764,35 @@ export async function handleDraftOrderBeginSubcommand(
     void stage.clear({ guildId }).catch((error: unknown) => {
       console.error('[draftorder] failed to disarm the Activity lobby for a channel run:', error);
     });
+  }
+
+  // Last checkpoint, after the launch-button post's await (#237). `performActivityBegin` has had
+  // this since #236; the slash path was the front door still dispatching on a check taken one
+  // await earlier. A replacing `setup` completing inside that window leaves this session detached
+  // but still GAME_OPEN, and the ceremony it starts would post its commitment after the
+  // replacement's fresh preview.
+  if (!stillSealable(guildId, session)) {
+    await interaction
+      .followUp({
+        content: notSealableReason(session, 'while the launch button was posting'),
+        flags: MessageFlags.Ephemeral,
+      })
+      .catch(() => {});
+    // In activity mode the invite is already public, and it promises "the commitment, final
+    // board, and seed verification still post right here". An ephemeral correction is invisible
+    // to everyone it was promised to, so the channel gets one too — otherwise the league watches
+    // for a commitment that never comes and can click through to a machine holding another bag.
+    if (postedLaunchInvite) {
+      await channel
+        .send({
+          content: `⚠️ **${session.title}** — hold off: the lottery changed while that button was posting, so nothing was sealed. The button above is stale; wait for a fresh odds card.`,
+          allowedMentions: { parse: [] },
+        })
+        .catch((error: unknown) => {
+          console.error('[draftorder] could not retract the stale launch invite:', error);
+        });
+    }
+    return;
   }
 
   // Fire and forget: the ceremony runs on channel messages and outlives this interaction's
@@ -1172,13 +1276,7 @@ export function performActivityBegin(
     }
     // Re-validate after the fetch — same discipline as the slash handler after its reply await: a
     // slash `begin`, an abort, or a replacing `setup` can land while Discord round-trips.
-    if (
-      getCeremony(guildId) !== session ||
-      session.abort.signal.aborted ||
-      session.miniGameActive ||
-      session.reimportActive ||
-      (session.state as DraftOrderState) !== 'GAME_OPEN'
-    ) {
+    if (!stillSealable(guildId, session)) {
       return false;
     }
 
@@ -1196,13 +1294,7 @@ export function performActivityBegin(
     // Re-validate after the drain's awaits (stage read, card render, preview post) — a replacing
     // `setup` in that window has already posted its own preview, and sealing the old bag after it
     // is exactly what the slash handler's twin check prevents.
-    if (
-      getCeremony(guildId) !== session ||
-      session.abort.signal.aborted ||
-      session.miniGameActive ||
-      session.reimportActive ||
-      (session.state as DraftOrderState) !== 'GAME_OPEN'
-    ) {
+    if (!stillSealable(guildId, session)) {
       return false;
     }
 
@@ -1211,16 +1303,10 @@ export function performActivityBegin(
     // button occupy. Best-effort like the slash path's button post: a failed invite must never
     // block the ceremony, whose commitment is the actual record.
     try {
-      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`${DRAFT_ORDER_LAUNCH_ID}:${session.createdAt}`)
-          .setLabel('🎰 Open the Lottery Machine')
-          .setStyle(ButtonStyle.Primary),
-      );
       const who = request.requestedBy ? `<@${request.requestedBy}>` : 'The commissioner';
       await channel.send({
         content: `🔒 **${session.title}** — ${who} sealed the bag from inside the Lottery Machine. The commitment posts now; first reveal ~${delaySeconds}s after its drum roll, streaming live in the Activity.`,
-        components: [row],
+        components: [launchButtonRow(session)],
         allowedMentions: { parse: [] }, // uniform ceremony-surface policy (#222)
       });
     } catch (error) {
@@ -1230,13 +1316,7 @@ export function performActivityBegin(
     // the checkpoints above, one await later. A detached session must never commit after the
     // replacement's fresh preview; the stray seal line (already posted) is cosmetic, the
     // commitment is what must not follow it.
-    if (
-      getCeremony(guildId) !== session ||
-      session.abort.signal.aborted ||
-      session.miniGameActive ||
-      session.reimportActive ||
-      (session.state as DraftOrderState) !== 'GAME_OPEN'
-    ) {
+    if (!stillSealable(guildId, session)) {
       return false;
     }
 
@@ -1302,6 +1382,11 @@ export function performActivitySetup(
     if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
       return release('a ceremony is already running — abort it first');
     }
+    // Same reason as the slash door: a re-import replaces the roster and posts its own odds card,
+    // and it flags the session rather than taking the setup claim, so the claim cannot see it.
+    if (getCeremony(guildId)?.reimportActive) {
+      return release('a re-import from ESPN is running — wait for its odds card, then try again');
+    }
 
     const channelId = memo.recall(guildId);
     if (!channelId) {
@@ -1323,87 +1408,105 @@ export function performActivitySetup(
       return release('no ESPN league is configured for this server — use /canon draftorder setup');
     }
 
-    try {
-      const teams = await resolveEspnTeams(context, leagueId, season);
-      // The logo prefetch (#254) starts now and overlaps the standings round-trip — it needs
-      // only the roster, and it never rejects (per-logo failures are swallowed inside it).
-      const dressing = fetchSessionLogoDress(teams, context);
-      const notes = await applyStandingsWeights(context, leagueId, season, teams);
-      const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
-        teamId: team.teamId,
-        displayName: team.name,
-        baseBalls: team.baseBalls,
-        bonusBalls: team.bonusBalls,
-      }));
-      const names = new Map(teams.map((team) => [team.teamId, team.name]));
-      // Throws on a roster `begin` would later choke on (duplicate names, odds cap) — caught
-      // below and released with the reason, before anything posts.
-      const session = createCeremony(
-        guildId,
-        `${season} Draft Lottery`,
-        { teams: configTeams, baseBallCount: 1 },
-        names,
-      );
-      // Awaited (bounded) before the re-validation below — the check-then-act window must not
-      // span this network wait — and before the preview renders so the card wears them (#254).
-      const dress = await dressing;
+    // Same reservation the slash handler takes (#261). The watcher already serialises presses
+    // per guild, so what this catches is the cross-surface pair: a press landing while a
+    // commissioner's `/canon draftorder setup` is still fetching, or the reverse.
+    return await withSetupClaim(
+      guildId,
+      () => importAndArm(channelId, channel, leagueId),
+      () => release('a setup is already in progress — give it a moment and press again'),
+    );
 
-      // Re-validate after the round-trips above (ESPN, logo prefetch), same as the slash
-      // handler: replacing a session that started running meanwhile would orphan a live draw.
-      if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
-        return release('a ceremony started while the import was running');
-      }
-      dressSession(session, dress);
-
-      // The preview is the public record the whole feature hangs off (ADR 0006). The intro line
-      // names who pressed the button — the same audit slot the slash runner's command invocation
-      // occupies in the channel history. The setup notes ride here too: there is no ephemeral
-      // surface to whisper them through.
-      await channel.send({
-        content: [
-          `🎰 **${session.title}** — <@${requestedBy}> started the lottery from the Activity.`,
-          ...notes,
-        ].join('\n'),
-        allowedMentions: { parse: [] },
-      });
-      await channelIo(channel).post(await buildPreviewPost(session));
-      markPreviewPosted(session);
-      session.lobbyChannelId = channelId;
-      session.leagueId = leagueId;
-      session.season = season;
-      session.commissionerIds = [requestedBy];
-      setCeremony(session);
-      memo.remember(guildId, channelId);
-
-      const lobbyRows = oddsRows(session);
-      await stage
-        .lobby({
-          title: session.title,
-          teamCount: session.config.teams.length,
-          totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
-          rows: lobbyRows,
+    // Narrowed values are passed rather than closed over: the checks above narrow `channel` via
+    // `isSendable()` and `channelId`/`leagueId` via early returns, and TS does not carry that
+    // narrowing across a nested function boundary.
+    async function importAndArm(
+      channelId: string,
+      channel: SendableChannel,
+      leagueId: string,
+    ): Promise<boolean> {
+      try {
+        const teams = await resolveEspnTeams(context, leagueId, season);
+        // The logo prefetch (#254) starts now and overlaps the standings round-trip — it needs
+        // only the roster, and it never rejects (per-logo failures are swallowed inside it).
+        const dressing = fetchSessionLogoDress(teams, context);
+        const notes = await applyStandingsWeights(context, leagueId, season, teams);
+        const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
+          teamId: team.teamId,
+          displayName: team.name,
+          baseBalls: team.baseBalls,
+          bonusBalls: team.bonusBalls,
+        }));
+        const names = new Map(teams.map((team) => [team.teamId, team.name]));
+        // Throws on a roster `begin` would later choke on (duplicate names, odds cap) — caught
+        // below and released with the reason, before anything posts.
+        const session = createCeremony(
           guildId,
-          commissionerIds: [requestedBy],
-        })
-        .then(() => {
-          pushSessionLogos(session, context, stage);
-        })
-        .catch((error: unknown) => {
-          // The ceremony exists and its preview is public — but the arm is what answers the
-          // doorbell, so a failed arm must still free the idle screens.
-          console.error('[draftorder] Activity setup armed nothing — stage unreachable:', error);
-          release(
-            'the stage is unreachable — the ceremony is set up; continue with /canon draftorder',
-          );
+          `${season} Draft Lottery`,
+          { teams: configTeams, baseBallCount: 1 },
+          names,
+        );
+        // Awaited (bounded) before the re-validation below — the check-then-act window must not
+        // span this network wait — and before the preview renders so the card wears them (#254).
+        const dress = await dressing;
+
+        // Re-validate after the round-trips above (ESPN, logo prefetch), same as the slash
+        // handler: replacing a session that started running meanwhile would orphan a live draw.
+        if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
+          return release('a ceremony started while the import was running');
+        }
+        dressSession(session, dress);
+
+        // The preview is the public record the whole feature hangs off (ADR 0006). The intro line
+        // names who pressed the button — the same audit slot the slash runner's command invocation
+        // occupies in the channel history. The setup notes ride here too: there is no ephemeral
+        // surface to whisper them through.
+        await channel.send({
+          content: [
+            `🎰 **${session.title}** — <@${requestedBy}> started the lottery from the Activity.`,
+            ...notes,
+          ].join('\n'),
+          allowedMentions: { parse: [] },
         });
-      console.log(
-        `[draftorder] Activity setup: ${teams.length} teams for guild ${guildId} by ${requestedBy}`,
-      );
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('[draftorder] in-Activity setup failed:', error);
-      return release(`setup failed: ${message.slice(0, 200)}`);
+        await channelIo(channel).post(await buildPreviewPost(session));
+        markPreviewPosted(session);
+        session.lobbyChannelId = channelId;
+        session.leagueId = leagueId;
+        session.season = season;
+        session.commissionerIds = [requestedBy];
+        setCeremony(session);
+        memo.remember(guildId, channelId);
+
+        const lobbyRows = oddsRows(session);
+        await stage
+          .lobby({
+            title: session.title,
+            teamCount: session.config.teams.length,
+            totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
+            rows: lobbyRows,
+            guildId,
+            commissionerIds: [requestedBy],
+          })
+          .then(() => {
+            pushSessionLogos(session, context, stage);
+          })
+          .catch((error: unknown) => {
+            // The ceremony exists and its preview is public — but the arm is what answers the
+            // doorbell, so a failed arm must still free the idle screens.
+            console.error('[draftorder] Activity setup armed nothing — stage unreachable:', error);
+            release(
+              'the stage is unreachable — the ceremony is set up; continue with /canon draftorder',
+            );
+          });
+        console.log(
+          `[draftorder] Activity setup: ${teams.length} teams for guild ${guildId} by ${requestedBy}`,
+        );
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[draftorder] in-Activity setup failed:', error);
+        return release(`setup failed: ${message.slice(0, 200)}`);
+      }
     }
   };
 }
