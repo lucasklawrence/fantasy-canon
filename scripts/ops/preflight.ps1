@@ -50,6 +50,35 @@ function Report {
     Write-Host ('{0,-5} {1,-34} {2}' -f $Status, $Name, $Detail) -ForegroundColor $colour
 }
 
+# Reads one key out of a dotenv file, or $null when absent/empty.
+#
+# `[^\S\r\n]` is "whitespace except newlines", and the distinction is load-bearing: .NET's `\s`
+# matches `\r\n`, so the obvious `KEY\s*=\s*\S` happily runs past the line break and treats a blank
+# `KEY=` followed by any non-empty line as a filled value -- reporting PASS for exactly the empty
+# secret the check exists to catch.
+function Get-EnvValue {
+    param([string]$Path, [string]$Key)
+    if (-not (Test-Path $Path)) { return $null }
+    $pattern = "(?m)^[^\S\r\n]*" + [regex]::Escape($Key) + "[^\S\r\n]*=[^\S\r\n]*(\S[^\r\n]*)"
+    $m = [regex]::Match((Get-Content $Path -Raw), $pattern)
+    if ($m.Success) { return $m.Groups[1].Value.Trim() }
+    return $null
+}
+
+function Test-EnvFile {
+    param([string]$Path, [string]$Label, [string[]]$Required)
+    if (-not (Test-Path $Path)) {
+        Report FAIL $Label "missing at $Path"
+        return
+    }
+    $missing = @()
+    foreach ($key in $Required) {
+        if (-not (Get-EnvValue $Path $key)) { $missing += $key }
+    }
+    if ($missing.Count -eq 0) { Report PASS $Label ($Required -join ', ') }
+    else { Report FAIL $Label ("empty or missing: " + ($missing -join ', ')) }
+}
+
 function Get-Health {
     param([string]$BaseUrl)
     try {
@@ -85,6 +114,14 @@ Write-Host ''
 Write-Host "fantasy-canon preflight  ($RepoRoot)" -ForegroundColor Cyan
 Write-Host ''
 
+# Refuse the combination that checks nothing. `-SkipLocal` with no `-PublicUrl` would otherwise run
+# zero checks and print a green "all clear" -- the most dangerous output this script could produce,
+# since it is the exact invocation someone reaches for from the road.
+if ($SkipLocal -and -not $PublicUrl) {
+    Write-Host '-SkipLocal needs -PublicUrl, or there is nothing left to check.' -ForegroundColor Red
+    exit 2
+}
+
 if (-not $SkipLocal) {
 
     # --- Toolchain -----------------------------------------------------------------------------
@@ -107,32 +144,36 @@ if (-not $SkipLocal) {
     else { Report FAIL 'pnpm on PATH' 'not found -- the scheduled tasks invoke it' }
 
     # --- Secrets -------------------------------------------------------------------------------
-    $envPath = Join-Path $RepoRoot '.env'
-    if (-not (Test-Path $envPath)) {
-        Report FAIL '.env' 'missing at the repo root'
-    }
-    else {
-        $envText = Get-Content $envPath -Raw
-        $required = @('DISCORD_TOKEN', 'DISCORD_APP_ID', 'ESPN_LEAGUE_ID', 'FANTASY_STAGE_KEY', 'FANTASY_STAGE_URL')
-        $missing = @()
-        foreach ($key in $required) {
-            # Present AND non-empty: an empty FANTASY_STAGE_KEY leaves the stage unauthenticated
-            # on a publicly reachable hostname.
-            if ($envText -notmatch "(?m)^\s*$key\s*=\s*\S") { $missing += $key }
-        }
-        if ($missing.Count -eq 0) { Report PASS '.env required keys' ($required -join ', ') }
-        else { Report FAIL '.env required keys' ("empty or missing: " + ($missing -join ', ')) }
-
-        if ($envText -match '(?m)^\s*ESPN_S2\s*=\s*\S') { Report PASS 'ESPN cookies' 'ESPN_S2 set (private league)' }
-        else { Report WARN 'ESPN cookies' 'ESPN_S2 empty -- fine for a public league, fatal for a private one' }
-    }
-
+    # PER-PACKAGE, not the repo root. The scheduled tasks run `pnpm -C apps/<pkg> run dev`, and -C
+    # re-roots the script's cwd to that package -- so the bot's dotenv lookup lands on
+    # apps/bot/.env and the api's on apps/api/.env. A root .env is not read by either, and an
+    # earlier revision of this script failed a perfectly healthy machine over its absence.
+    $botEnv = Join-Path $RepoRoot 'apps\bot\.env'
     $apiEnv = Join-Path $RepoRoot 'apps\api\.env'
-    if ((Test-Path $apiEnv) -and ((Get-Content $apiEnv -Raw) -match '(?m)^\s*DISCORD_CLIENT_SECRET\s*=\s*\S')) {
-        Report PASS 'apps/api/.env secret' 'DISCORD_CLIENT_SECRET set'
+
+    # FANTASY_STAGE_URL is deliberately absent from both lists: the bot falls back to
+    # http://127.0.0.1:4610, which is exactly right when the api is on the same box.
+    Test-EnvFile $botEnv 'apps/bot/.env' @('DISCORD_TOKEN', 'DISCORD_APP_ID', 'ESPN_LEAGUE_ID', 'FANTASY_STAGE_KEY')
+    Test-EnvFile $apiEnv 'apps/api/.env' @('DISCORD_APP_ID', 'DISCORD_CLIENT_SECRET', 'FANTASY_STAGE_KEY')
+
+    # The two halves of the shared secret have to agree or every stage POST 401s and the Activity
+    # sits empty while the in-channel ceremony runs on regardless -- a confusing way to lose a night.
+    # Compared, never printed.
+    $botKey = Get-EnvValue $botEnv 'FANTASY_STAGE_KEY'
+    $apiKey = Get-EnvValue $apiEnv 'FANTASY_STAGE_KEY'
+    if ($botKey -and $apiKey) {
+        if ($botKey -eq $apiKey) { Report PASS 'stage key agreement' 'bot and api match' }
+        else { Report FAIL 'stage key agreement' 'bot and api FANTASY_STAGE_KEY DIFFER -- every stage POST will 401' }
     }
     else {
-        Report FAIL 'apps/api/.env secret' 'DISCORD_CLIENT_SECRET missing -- the Activity handshake cannot exchange its code'
+        Report SKIP 'stage key agreement' 'one side missing (see above)'
+    }
+
+    if ((Get-EnvValue $botEnv 'ESPN_S2') -and (Get-EnvValue $botEnv 'ESPN_SWID')) {
+        Report PASS 'ESPN cookies' 'ESPN_S2 + ESPN_SWID set'
+    }
+    else {
+        Report WARN 'ESPN cookies' 'ESPN_S2/ESPN_SWID incomplete -- fine for a public league, fatal for a private one'
     }
 
     # --- Supervision ---------------------------------------------------------------------------
@@ -165,8 +206,12 @@ if (-not $SkipLocal) {
     }
 
     # --- State ------------------------------------------------------------------------------------
+    # Same cwd story as the .env files: ceremonyStore defaults to `<cwd>/.data`, and the bot's cwd
+    # under `pnpm -C apps/bot run dev` is apps/bot. Checking the repo root instead finds either
+    # nothing or a stale artifact from a run started by hand, and reports "none" while a real
+    # undisclosed seed sits in the file that matters.
     $stateDir = $env:FANTASY_STATE_DIR
-    if (-not $stateDir) { $stateDir = Join-Path $RepoRoot '.data' }
+    if (-not $stateDir) { $stateDir = Join-Path $RepoRoot 'apps\bot\.data' }
     $store = Join-Path $stateDir 'draftorder-ceremonies.json'
     if (Test-Path $store) {
         $records = 0

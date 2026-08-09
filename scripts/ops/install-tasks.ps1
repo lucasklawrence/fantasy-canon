@@ -79,8 +79,11 @@ if (-not (Test-Path (Join-Path $RepoRoot 'pnpm-workspace.yaml'))) {
 
 $pnpm = (Get-Command pnpm -ErrorAction SilentlyContinue).Source
 if (-not $pnpm) { throw 'pnpm is not on PATH for this account. Install it, then re-run.' }
-# Scheduled Tasks need a real executable, not a shim resolved through the shell.
-if ($pnpm -notmatch '\.(cmd|bat|exe)$') { $pnpm = "$pnpm.cmd" }
+# Scheduled Tasks need a real executable, not a shim the shell resolves. Get-Command prefers the
+# PowerShell shim -- on this host it returns `...\pnpm.ps1` -- so swap the EXTENSION rather than
+# appending one: "$pnpm.cmd" yields `pnpm.ps1.cmd`, which does not exist, and the throw below then
+# aborts before either task is registered.
+if ($pnpm -notmatch '\.(cmd|bat|exe)$') { $pnpm = [IO.Path]::ChangeExtension($pnpm, 'cmd') }
 if (-not (Test-Path $pnpm)) { throw "Resolved pnpm to $pnpm, which does not exist." }
 
 if (-not (Test-Path (Join-Path $RepoRoot '.env'))) {
@@ -117,21 +120,25 @@ $jobs = @(
 foreach ($job in $jobs) {
     $action = New-ScheduledTaskAction -Execute $pnpm -Argument $job.Args -WorkingDirectory $RepoRoot
     $task = New-ScheduledTask -Action $action -Principal $principal -Trigger $triggers -Settings $settings -Description $job.Desc
+    $existed = [bool](Get-ScheduledTask -TaskName $job.Name -ErrorAction SilentlyContinue)
+    $verb = 'Register scheduled task'
+    if ($existed) { $verb = 'Replace existing scheduled task' }
 
-    if (Get-ScheduledTask -TaskName $job.Name -ErrorAction SilentlyContinue) {
-        if ($PSCmdlet.ShouldProcess($job.Name, 'Replace existing scheduled task')) {
-            Unregister-ScheduledTask -TaskName $job.Name -Confirm:$false
-            Register-ScheduledTask -TaskName $job.Name -InputObject $task | Out-Null
-            Write-Host "replaced $($job.Name)"
-        }
-    }
-    else {
-        if ($PSCmdlet.ShouldProcess($job.Name, 'Register scheduled task')) {
-            Register-ScheduledTask -TaskName $job.Name -InputObject $task | Out-Null
-            Write-Host "registered $($job.Name)"
-        }
+    if ($PSCmdlet.ShouldProcess($job.Name, $verb)) {
+        # -Force replaces in one step. Unregister-then-register leaves a window where a failure in
+        # the second half strands the machine with NO supervision -- the opposite of the point, and
+        # invisible until the reboot it was meant to survive.
+        Register-ScheduledTask -TaskName $job.Name -InputObject $task -Force | Out-Null
+        if ($existed) { Write-Host "replaced $($job.Name)" } else { Write-Host "registered $($job.Name)" }
     }
 }
+
+# Registration succeeding is not the same as the task being runnable, and the difference only shows
+# up at the reboot nobody is around for. Say what was actually recorded.
+Write-Host ''
+Get-ScheduledTask -TaskName $BotTask, $ApiTask -ErrorAction SilentlyContinue |
+    Select-Object TaskName, State |
+    Format-Table -AutoSize
 
 Write-Host ''
 Write-Host 'Next:'

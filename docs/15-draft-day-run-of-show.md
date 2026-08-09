@@ -87,14 +87,14 @@ edits are drained at `begin`, and the bot re-posts the full odds card at that mo
 
 Diagnose in this order. `https://<hostname>/healthz` answers the first three questions at once.
 
-| Symptom                                 | Check                                                                                     | Fix                                                                                                                                                       |
-| --------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Activity won't open at all              | `/healthz` unreachable                                                                    | Tunnel or PC is down — see below                                                                                                                          |
-| Activity opens, then goes blank         | `/healthz` → `config.lotteryBundle: false`                                                | The client bundle is missing. Someone must run `pnpm -C apps/api run build:client` and restart the api                                                    |
-| Buttons do nothing, "not commissioner"  | You are not whoever ran `setup`                                                           | Run `setup` again yourself, from the phone                                                                                                                |
-| A button spins then gives up            | `/healthz` → `stage.beginRequested` / `setupRequested` / `reimportRequested` still `true` | The bot isn't answering the doorbell. Its watcher socket is down — restart the bot task. The Activity releases the button with a reason after ~25s (#250) |
-| Reveal froze mid-ceremony               | `/healthz` → `stage.phase`                                                                | If the api restarted, the stage is gone; the bot's ceremony continues and re-arms. If the bot died, see below                                             |
-| Ceremony interrupted, seed never posted | —                                                                                         | The bot discloses it automatically on next boot (#176). Just get the bot back up                                                                          |
+| Symptom                                 | Check                                                                                     | Fix                                                                                                                                                                                                                                                                                   |
+| --------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Activity won't open at all              | `/healthz` unreachable                                                                    | Tunnel or PC is down — see below                                                                                                                                                                                                                                                      |
+| Activity opens, then goes blank         | `/healthz` → `config.lotteryBundle: false`                                                | The client bundle is missing. Someone must run `pnpm -C apps/api run build:client` and restart the api                                                                                                                                                                                |
+| Buttons do nothing, "not commissioner"  | You are not whoever ran `setup`                                                           | Run `setup` again yourself, from the phone                                                                                                                                                                                                                                            |
+| A button does nothing                   | `/healthz` → `stage.beginRequested` / `setupRequested` / `reimportRequested` still `true` | The bot isn't answering the doorbell — its watcher socket is down. Restart the bot task. Only **re-import** gives up on its own (~25s, #250); a stuck **begin** or **setup** waits indefinitely, so the health flag is the only way to tell                                           |
+| Reveal froze mid-ceremony               | `/healthz` → `stage.phase`                                                                | If the **api** restarted, the stage is empty and does not refill: the in-channel ceremony carries on correctly, but the Activity will show only the picks drawn after the restart, with no commitment or odds table. Tell people to watch the channel. If the **bot** died, see below |
+| Ceremony interrupted, seed never posted | —                                                                                         | The bot discloses it automatically on next boot (#176). Just get the bot back up                                                                                                                                                                                                      |
 
 **Getting a process back without being there.** You need remote access to the host (RDP, Tailscale,
 Chrome Remote Desktop — set one up _before_ you leave; nothing in this repo provides it). Then:
@@ -106,16 +106,27 @@ Start-ScheduledTask -TaskName FantasyCanon-Api
 .\scripts\ops\preflight.ps1 -PublicUrl https://<hostname>
 ```
 
-If you have no remote access and the PC is unreachable, the ceremony cannot run in the Activity.
-**Fall back to the in-channel ceremony** — it needs no api and no tunnel at all:
+If the api or the tunnel is unreachable but **the bot is alive**, fall back to the in-channel
+ceremony — it needs no api and no tunnel at all:
 
 ```text
+/canon draftorder setup season:2025
 /canon draftorder begin delay:10
 ```
+
+**Run `setup` first, even if you already ran it.** `begin` needs an open ceremony held _in the bot's
+memory_; if the bot restarted, that session is gone and `begin` will refuse. Re-running `setup` is
+harmless — it re-reads the league and posts a fresh odds card, and nothing is committed until
+`begin`.
 
 This is the Tier 1 surface (#164) and it is fully fair on its own: same commitment, same seed
 disclosure, same board. The Activity is the deluxe presentation, never the source of truth. Knowing
 this is the fallback is the single most useful thing in this document.
+
+If the **bot** is the thing that is down, nothing can run until it is back — that is the single
+point of failure ADR 0009 accepts. Get the process up (remote access, above), and note that a
+ceremony interrupted after its commitment discloses its seed automatically on the next boot (#176),
+so the fair thing has already happened without you.
 
 **Aborting.** `/canon draftorder abort` before the commitment simply cancels. After the commitment,
 the bot still discloses the seed — that is deliberate: a committed draw is public whether or not it
@@ -143,5 +154,8 @@ The lottery decides the order; the draft itself happens in the ESPN app. This st
 - **No remote-access tooling ships in this repo.** Set up RDP/Tailscale yourself beforehand.
 - **`/healthz` reports the api only.** A dead bot with a live api looks healthy on the health URL;
   the giveaway is a doorbell that stays pending, or reveals that stop arriving.
+- **An api restart mid-ceremony cannot be repaired from the Activity.** The stage is in-memory and
+  the bot does not re-send the ceremony's opening frames, so viewers keep the partial reveal until
+  the run finishes. The channel remains correct throughout; the board and seed still post.
 - **Node version.** The repo declares `engines: >=24` and CI runs 24. If the host is on an older
   Node, preflight fails loudly — fix it before the window, not during it (#228).
