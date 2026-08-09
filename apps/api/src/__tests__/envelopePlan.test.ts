@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ENVELOPE_LEAD_MS, ENVELOPE_MS, envelopeEligible } from '../client/envelopePlan.js';
-import { exitBudget, FINISH_LEAD_MS } from '../client/exitBudget.js';
+import {
+  ENVELOPE_LEAD_MS,
+  ENVELOPE_MS,
+  envelopeEligible,
+  finaleHoldMs,
+} from '../client/envelopePlan.js';
+import { exitBudget, EXTRACT_CAP_MS, FINISH_LEAD_MS, FLIP_MS } from '../client/exitBudget.js';
 import { REPLAY_DWELL_MS } from '../client/replayTimeline.js';
 
 describe('envelopeEligible (#243)', () => {
@@ -34,43 +39,61 @@ describe('envelopeEligible (#243)', () => {
   });
 
   /**
-   * #269. The machine's finale is the composition of two independently-tuned things — the exit
-   * budget and this lead — inside one fixed gap, and neither module can see the other. Awaiting
-   * the FLIP made the exit consume nearly the whole gap, and a 250ms lead stacked on top pushed
-   * the overlay PAST the finish: it dimmed a board the ball had already left, which is the same
-   * mis-timed handoff the change set out to remove, inverted.
+   * #244. Adding a visual must be a deliberate act. The wheel's lead shipped at 2400ms against an
+   * 1800ms gap and nothing complained, because every check named `machine` and `race` explicitly —
+   * a third visual was invisible to all of them. The `keys` assertion is the part that matters.
    *
-   * Nothing in either module fails on its own when that happens, which is exactly why this
-   * assertion is here rather than in a comment.
+   * The bound itself is now hygiene rather than correctness (the finish waits — see below), but a
+   * lead longer than a natural reveal gap still means the ceremony is sitting on its hands.
    */
-  it('leaves the finale room to open before the finish sweeps the stage', () => {
-    // The last reveal's gap IS the finish lead — there is no next pick, only the finish.
-    const exit = exitBudget(FINISH_LEAD_MS);
-    expect(exit.totalMs + ENVELOPE_LEAD_MS.machine).toBeLessThanOrEqual(FINISH_LEAD_MS);
-  });
-
-  it('leaves the same room on a replay, where the next beat is one dwell away', () => {
-    // First-to-last opens with pick #1, so the thing following its envelope is pick #2's drum
-    // roll rather than the finish. Same arithmetic, same failure if it overruns.
-    const exit = exitBudget(REPLAY_DWELL_MS);
-    expect(exit.totalMs + ENVELOPE_LEAD_MS.machine).toBeLessThanOrEqual(REPLAY_DWELL_MS);
-  });
-
-  /**
-   * #244. The test above is the machine's, and it is machine-shaped: the exit budget only models
-   * that visual's chain. Every OTHER visual still has to open before the finish sweeps the stage,
-   * and the room is the same for all of them — the last reveal is followed by the finish
-   * `FINISH_LEAD_MS` later, full stop.
-   *
-   * Written over the whole key set rather than one visual at a time, because the wheel's lead was
-   * added at 2400ms against an 1800ms gap and nothing complained: every existing check named
-   * `machine` and `race` explicitly, so a third visual was invisible to them. The `keys` assertion
-   * is the part that matters — adding a fourth visual fails here until someone states its budget.
-   */
-  it('every visual opens its finale before the finish sweeps the stage', () => {
+  it('every visual states a lead, and none of them dawdles', () => {
     expect(Object.keys(ENVELOPE_LEAD_MS).sort()).toEqual(['machine', 'race', 'wheel']);
     for (const [visual, lead] of Object.entries(ENVELOPE_LEAD_MS)) {
       expect(lead, `${visual} lead must fit the finish gap`).toBeLessThan(FINISH_LEAD_MS);
     }
+  });
+
+  /**
+   * #243 live feedback, and the reason #269's invariant is gone rather than merely relaxed.
+   *
+   * That invariant said the machine's exit plus its lead had to finish inside `FINISH_LEAD_MS`, or
+   * the overlay would dim a board the ball had already left. It held the lead to 100ms — which the
+   * commissioner reported as no pause at all: the card lands and the screen is already dimming.
+   *
+   * The ordering is now guaranteed by the client holding the sweep instead of racing it, so the
+   * arithmetic that follows is the new contract: the hold must COVER the worst real finale, and
+   * must still be bounded, because a board that never arrives is worse than one that arrives early.
+   */
+  it('the finale hold covers the machine’s worst case, on both the live and replay gaps', () => {
+    for (const gap of [FINISH_LEAD_MS, REPLAY_DWELL_MS]) {
+      const exit = exitBudget(gap);
+      const hold = finaleHoldMs(ENVELOPE_LEAD_MS.machine, exit.totalMs);
+      expect(hold, `gap ${gap}`).toBeGreaterThanOrEqual(
+        exit.totalMs + ENVELOPE_LEAD_MS.machine + ENVELOPE_MS,
+      );
+    }
+  });
+
+  it('the finale hold covers a stalled extraction, where the exit runs to its cap', () => {
+    // The extraction resolves off the sim's rAF loop, which a throttled tab may barely run. The
+    // caller arms the hold against that cap, so the worst case still fits.
+    const hold = finaleHoldMs(ENVELOPE_LEAD_MS.machine, EXTRACT_CAP_MS + FLIP_MS);
+    expect(hold).toBeGreaterThan(EXTRACT_CAP_MS + FLIP_MS + ENVELOPE_MS);
+  });
+
+  it('the finale hold stays bounded — a finale that never opens must not strand the board', () => {
+    // Every visual, worst exit. Ten seconds is already generous for a 3.6s overlay; past that a
+    // viewer is staring at a stage the ceremony has finished with, waiting on a timer.
+    for (const [visual, lead] of Object.entries(ENVELOPE_LEAD_MS)) {
+      const hold = finaleHoldMs(lead, EXTRACT_CAP_MS + FLIP_MS);
+      expect(hold, `${visual} hold must stay bounded`).toBeLessThanOrEqual(10_000);
+    }
+  });
+
+  it('treats a negative or absent leg as zero rather than shortening the hold', () => {
+    // Defensive: `performance.now()` deltas and a re-planned exit can both hand this a negative.
+    // Shortening the hold would release the board mid-ceremony, which is the bug it exists to fix.
+    expect(finaleHoldMs(-500, -500)).toBe(ENVELOPE_MS);
+    expect(finaleHoldMs(0, 0)).toBe(ENVELOPE_MS);
   });
 });

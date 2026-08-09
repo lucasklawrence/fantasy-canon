@@ -39,6 +39,7 @@ import {
   ENVELOPE_LEAD_MS,
   ENVELOPE_MS,
   envelopeEligible,
+  finaleHoldMs,
   type PlaybackKind,
 } from './envelopePlan.js';
 import {
@@ -84,6 +85,11 @@ function setStatus(text: string, kind?: 'live' | 'err'): void {
 
 function show(id: string, visible: boolean): void {
   byId(id).classList.toggle('hidden', !visible);
+}
+
+/** Is the sealed board already on screen? Distinguishes the finish SWEEP from a later repaint. */
+function boardIsUp(): boolean {
+  return !byId('board').classList.contains('hidden');
 }
 
 /** The board list is rebuilt from all reveals so late joiners and live viewers converge. */
@@ -363,6 +369,25 @@ function teamLogo(team: string): HTMLImageElement | null {
 let envelopeToken = 0;
 let envelopeTimer: number | null = null;
 
+/**
+ * When the finale stops owning the screen, as a timestamp (#243 live feedback).
+ *
+ * The bot posts the finish the moment its board PNG renders, which lands while pick #1's ceremony
+ * is still playing — so the board used to sweep in behind the overlay and the finale played over a
+ * stage that had already moved on. `renderFinish` waits this out instead.
+ *
+ * Armed at REVEAL time, not when the overlay opens: on the machine the exit choreography runs for
+ * ~1.6s before the envelope is even queued, and the finish can arrive inside that window. Cleared
+ * by `closeEnvelope`, so a finale that ends early releases the board immediately rather than
+ * burning the rest of its deadline.
+ */
+let finaleUntil = 0;
+
+/** Whether the finale still owns the screen — the finish sweep waits while this is true. */
+function finaleHoldsStage(): boolean {
+  return finaleUntil > 0 && performance.now() < finaleUntil;
+}
+
 /** Tear the overlay down and invalidate any pending open/dismiss timers. Idempotent. */
 function closeEnvelope(): void {
   envelopeToken += 1;
@@ -370,9 +395,12 @@ function closeEnvelope(): void {
     clearTimeout(envelopeTimer);
     envelopeTimer = null;
   }
+  finaleUntil = 0;
   const overlay = byId('envelope');
   overlay.classList.remove('playing');
   show('envelope', false);
+  // The board has been waiting on the ceremony; hand it the screen the moment the ceremony ends.
+  flushDeferredFinish();
 }
 
 /**
@@ -440,6 +468,25 @@ function queueEnvelope(
   if (!willEnvelope(reveal.pick, mode)) return;
   const token = ++envelopeToken;
   envelopeTimer = window.setTimeout(() => openEnvelope(reveal, hue, token), leadMs);
+}
+
+/** The lead this visual gives its finale — the beat its own payoff needs before the dim. */
+function envelopeLeadMs(): number {
+  return ENVELOPE_LEAD_MS[activeVisual()];
+}
+
+/**
+ * Reserve the screen for a finale that is about to play, so `renderFinish` holds the board back
+ * (#243 live feedback). No-op for every reveal that is not getting one.
+ *
+ * The deadline is the whole ceremony's worst case: the machine's exit can stretch to the extraction
+ * cap plus the FLIP, then the lead, then the overlay's own life. Race and wheel have no exit chain
+ * — their lead already spans their payoff — so they budget the lead alone.
+ */
+function armFinale(pick: number, mode: PlaybackKind): void {
+  if (!willEnvelope(pick, mode)) return;
+  const exitMs = activeVisual() === 'machine' ? EXTRACT_CAP_MS + FLIP_MS : 0;
+  finaleUntil = performance.now() + finaleHoldMs(envelopeLeadMs(), exitMs);
 }
 
 /** The face the drop ball currently wears, so a late-decoding logo can re-dress it (#242). */
@@ -1550,6 +1597,10 @@ function renderDrop(reveal: LotteryReveal): void {
   applyStageLayout();
   const rerun = lastDropPick !== reveal.pick;
   lastDropPick = reveal.pick;
+  // Claim the screen for the finale before anything animates (#243 live feedback). The finish can
+  // land while the machine's exit is still running — a good second before `queueEnvelope` is
+  // reached — so arming this at queue time would leave exactly the window the board sweeps into.
+  if (rerun) armFinale(reveal.pick, playbackMode);
   // Which ball came out (#211/#215): cosmetic but stable — every viewer, poll repaint, and replay
   // derives the same number from the public commitment. See `drawnBallFor`.
   const range = currentStart
@@ -1675,7 +1726,50 @@ function renderDrop(reveal: LotteryReveal): void {
 // every couple of seconds must not rain confetti forever.
 let celebrated = false;
 
+/**
+ * A finish sweep held back while the pick-#1 finale plays (#243 live feedback).
+ *
+ * Only the SWEEP is deferred — the transition from a live stage to the sealed board. Repaints of an
+ * already-swept board go straight through, so a poll landing during a replay's finale can't stall
+ * the board that is already on screen.
+ */
+let deferredFinish: LotterySnapshot | null = null;
+let deferredFinishTimer: number | null = null;
+
+/** Drop a held sweep without rendering it — a phase change means it is no longer the truth. */
+function cancelDeferredFinish(): void {
+  deferredFinish = null;
+  if (deferredFinishTimer !== null) {
+    clearTimeout(deferredFinishTimer);
+    deferredFinishTimer = null;
+  }
+}
+
+/** Render a held sweep now. Safe to call when nothing is held. */
+function flushDeferredFinish(): void {
+  const held = deferredFinish;
+  cancelDeferredFinish();
+  if (held) renderFinish(held);
+}
+
 function renderFinish(snapshot: LotterySnapshot): void {
+  // Hold the board while pick #1's ceremony owns the screen. The bot posts the finish as soon as
+  // its PNG renders, which is mid-finale, and the sweep used to land BEHIND the overlay — the
+  // ceremony played over a stage that had already moved on. `closeEnvelope` flushes this the
+  // instant the finale ends; `finaleUntil` is a deadline, so a finale that never opens still lets
+  // the board through. Deferring the sweep costs nothing in the channel: the bot has already
+  // posted the board and the seed reveal there by this point.
+  if (finaleHoldsStage() && !boardIsUp()) {
+    deferredFinish = snapshot;
+    if (deferredFinishTimer === null) {
+      deferredFinishTimer = window.setTimeout(
+        flushDeferredFinish,
+        Math.max(0, finaleUntil - performance.now()),
+      );
+    }
+    return;
+  }
+  cancelDeferredFinish();
   resetChute();
   // A late joiner can land directly on 'finished' without ever rendering the stage — apply the
   // layout here too so a race ceremony's finale board gets the wide frame every viewer saw (#239).
@@ -2156,6 +2250,11 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
   // The envelope survives only the phases its reveal lives in (#243): 'revealing' repaints must
   // not kill a playing finale, and 'finished' arrives moments after pick #1 in worst-to-first.
   // Everything else — idle, a fresh lobby, a new start, an abort — retires it.
+  //
+  // A held finish sweep is only the truth while the stage says 'finished'. Dropped BEFORE the
+  // close, not after: `closeEnvelope` flushes what it is holding, so an abort arriving mid-finale
+  // would otherwise paint the sealed board over the abort screen on its way out.
+  if (snapshot.phase !== 'finished') cancelDeferredFinish();
   if (snapshot.phase !== 'revealing' && snapshot.phase !== 'finished') closeEnvelope();
   // The start doorbell (#253) is an idle-only surface.
   show('setup-actions', snapshot.phase === 'idle');

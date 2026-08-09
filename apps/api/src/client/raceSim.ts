@@ -26,6 +26,7 @@ import {
   FINISH_X,
   laneMetrics,
   lockKind,
+  PACK_FLOOR,
   PACK_MAX,
   PACK_MIN,
 } from './raceLanes.js';
@@ -255,11 +256,12 @@ export function createRaceSim(
         if (t01 >= 1) racer.anim = undefined;
       } else if (!racer.locked) {
         // The jockeying: two superimposed sine drifts per racer, scaled by the drum-roll surge.
-        // Bounded inside the pack band so nobody crosses the line uninvited.
+        // Bounded ahead of the standings zone and short of the line: a team still in contention
+        // must never drift behind one already drawn, or the parked order stops meaning anything.
         const wander =
           racer.amp1 * Math.sin(racer.w1 * t + racer.p1) * intensity +
           racer.amp2 * Math.sin(racer.w2 * t + racer.p2) * intensity;
-        racer.frac = Math.min(FINISH_X - 0.02, Math.max(PACK_MIN - 0.1, racer.mid + wander));
+        racer.frac = Math.min(FINISH_X - 0.02, Math.max(PACK_FLOOR, racer.mid + wander));
       }
     }
     draw();
