@@ -11,10 +11,12 @@ import { ballCountForTeam, type DraftOrderState } from '@fantasy-canon/core';
 import {
   clearCeremony,
   createCeremony,
+  claimSetup,
   getCeremony,
   markPreviewPosted,
   oddsRows,
   type CeremonySession,
+  releaseSetupClaim,
   requestAbort,
   resetCeremoniesForTests,
   type RunCeremonyOptions,
@@ -1667,6 +1669,86 @@ describe('performActivitySetup (#253)', () => {
     ).resolves.toBe(false);
     expect(releases[0].reason).toContain('setup failed:');
     expect(sent).toHaveLength(0);
+  });
+
+  /**
+   * #261. A setup spends seconds in ESPN + standings + the logo prefetch before it posts anything
+   * or registers a session, and the only pre-existing check — is a ceremony already RUNNING —
+   * is false for both racers. Both would post a preview and the second `setCeremony` would
+   * silently discard the first session along with any lobby joins made against it.
+   */
+  describe('single-flight (#261)', () => {
+    function pngLogos() {
+      logoFetchStub.mockImplementation(() =>
+        Promise.resolve(
+          new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]), {
+            status: 200,
+            headers: { 'content-type': 'image/png' },
+          }),
+        ),
+      );
+    }
+
+    it('refuses a press while another setup already holds the slot', async () => {
+      // Stands in for a slash setup mid-fetch: the claim is held, no session exists yet.
+      expect(claimSetup('guild-1')).toBe(true);
+      const { context } = createMockContext({
+        defaultLeagueId: 'league-1',
+        fetchPayloads: { mTeam: FOUR_TEAMS },
+      });
+      pngLogos();
+      const sent: ChannelPost[] = [];
+      const { stage, releases } = releasingStage();
+      const { memo } = memoWith('lobby-chan');
+
+      await expect(
+        performActivitySetup(setupClient(sent), context, stage, memo)(PRESS),
+      ).resolves.toBe(false);
+
+      expect(releases[0].reason).toContain('already in progress');
+      expect(sent).toHaveLength(0); // nothing reaches the channel's permanent record
+      expect(getCeremony('guild-1')).toBeUndefined();
+      releaseSetupClaim('guild-1');
+    });
+
+    it('two concurrent presses leave one preview and one session', async () => {
+      const { context } = createMockContext({
+        defaultLeagueId: 'league-1',
+        fetchPayloads: { mTeam: FOUR_TEAMS },
+      });
+      pngLogos();
+      const sent: ChannelPost[] = [];
+      const { stage, releases } = releasingStage();
+      const { memo } = memoWith('lobby-chan');
+      const press = performActivitySetup(setupClient(sent), context, stage, memo);
+
+      // Started together, not sequentially — the whole point is the overlap.
+      const results = await Promise.all([press(PRESS), press(PRESS)]);
+
+      expect(results.filter(Boolean)).toHaveLength(1);
+      // The intro line and the odds card, once each — not two competing previews.
+      expect(sent).toHaveLength(2);
+      expect(sent[0].content).toContain('started the lottery from the Activity');
+      expect(getCeremony('guild-1')?.state).toBe('GAME_OPEN');
+      // The loser is told why rather than silently dropped (#236).
+      expect(releases.map((r) => r.reason).join()).toContain('already in progress');
+    });
+
+    it('hands the slot back after a setup throws, so the next attempt is not wedged', async () => {
+      // No mTeam payload ⇒ the import throws from inside the guarded region.
+      const { context } = createMockContext({ defaultLeagueId: 'league-1' });
+      const sent: ChannelPost[] = [];
+      const { stage } = releasingStage();
+      const { memo } = memoWith('lobby-chan');
+
+      await expect(
+        performActivitySetup(setupClient(sent), context, stage, memo)(PRESS),
+      ).resolves.toBe(false);
+
+      // A leaked claim would wedge every later setup for the life of the process.
+      expect(claimSetup('guild-1')).toBe(true);
+      releaseSetupClaim('guild-1');
+    });
   });
 });
 

@@ -45,6 +45,7 @@ import {
   CeremonyIo,
   CeremonyPost,
   type CeremonySession,
+  claimSetup,
   clearCeremony,
   createCeremony,
   getCeremony,
@@ -52,6 +53,7 @@ import {
   interruptedDisclosureContent,
   markPreviewPosted,
   oddsRows,
+  releaseSetupClaim,
   requestAbort,
   restoreBag,
   runCeremony,
@@ -413,6 +415,18 @@ export async function handleDraftOrderSetupSubcommand(
     return;
   }
 
+  // Taken before the first slow await (#261). Everything below — the ESPN roster, the standings
+  // round-trip, the logo prefetch — runs for seconds with no session in the registry to collide
+  // on, so without this a second setup sails through the checks above, posts its own preview, and
+  // its `setCeremony` discards this one along with any lobby joins made against it.
+  if (!claimSetup(guildId)) {
+    await interaction.reply({
+      content: 'A setup is already running for this server — give it a moment and try again.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
     const notes: string[] = [];
@@ -529,6 +543,10 @@ export async function handleDraftOrderSetupSubcommand(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({ content: `Setup failed: ${message}` });
+  } finally {
+    // On every path, including the throw above: a leaked claim wedges every later setup for the
+    // life of the process, which is a worse failure than the race it guards.
+    releaseSetupClaim(guildId);
   }
 }
 
@@ -1323,6 +1341,13 @@ export function performActivitySetup(
       return release('no ESPN league is configured for this server — use /canon draftorder setup');
     }
 
+    // Same reservation the slash handler takes (#261). The watcher already serialises presses
+    // per guild, so what this catches is the cross-surface pair: a press landing while a
+    // commissioner's `/canon draftorder setup` is still fetching, or the reverse.
+    if (!claimSetup(guildId)) {
+      return release('a setup is already in progress — give it a moment and press again');
+    }
+
     try {
       const teams = await resolveEspnTeams(context, leagueId, season);
       // The logo prefetch (#254) starts now and overlaps the standings round-trip — it needs
@@ -1404,6 +1429,10 @@ export function performActivitySetup(
       const message = error instanceof Error ? error.message : String(error);
       console.error('[draftorder] in-Activity setup failed:', error);
       return release(`setup failed: ${message.slice(0, 200)}`);
+    } finally {
+      // Every path, throws included — a leaked claim would wedge the doorbell permanently, and
+      // the doorbell is the surface with no other way in (#253).
+      releaseSetupClaim(guildId);
     }
   };
 }

@@ -299,9 +299,44 @@ export function clearCeremony(guildId: string): void {
   sessions.delete(guildId);
 }
 
+/**
+ * Guilds with a `setup` mid-flight (#261).
+ *
+ * A setup does seconds of network work — the ESPN roster, the standings round-trip, the logo
+ * prefetch (#254) — before it posts anything or calls {@link setCeremony}. Two overlapping runs
+ * both clear the only check that existed (a `LOTTERY_RUNNING` session, which neither has yet),
+ * so both post a "started the lottery" line and an odds preview, and the second `setCeremony`
+ * silently discards the first session along with any lobby joins or edits made against it. The
+ * channel's permanent record is then two competing previews for one lottery.
+ *
+ * This has to live beside the registry rather than on the session, because during the window
+ * there is no session to hang a flag on — that is the whole problem. It is also why the guard is
+ * entry-point agnostic: the watcher already serialises Activity presses per guild, so the pairs
+ * that actually collide are slash+Activity and slash+slash.
+ */
+const setupsInFlight = new Set<string>();
+
+/**
+ * Reserve the setup slot for a guild. `false` means someone else holds it and the caller must
+ * refuse — visibly, per the #236 rule that every refusal leaves the presser a way forward.
+ *
+ * Every claim must be released on every exit path, including throws. Use `try/finally`.
+ */
+export function claimSetup(guildId: string): boolean {
+  if (setupsInFlight.has(guildId)) return false;
+  setupsInFlight.add(guildId);
+  return true;
+}
+
+/** Release a {@link claimSetup} reservation. Safe to call when nothing is held. */
+export function releaseSetupClaim(guildId: string): void {
+  setupsInFlight.delete(guildId);
+}
+
 /** Test hook — wipe all in-memory ceremonies. */
 export function resetCeremoniesForTests(): void {
   sessions.clear();
+  setupsInFlight.clear();
 }
 
 /**
