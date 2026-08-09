@@ -49,16 +49,14 @@ const HOLD_MIN_MS = 200;
 /** Slack kept clear of the gap so one slow frame cannot turn a fit into an overrun. */
 const SAFETY_MS = 100;
 /**
- * The sim's own failsafe: an extraction still running at this point snaps to done rather than
- * stall a reveal. So this — not {@link EXTRACT_CAP_MS} — is the most a *successful* extraction can
- * cost, and therefore the worst case the re-plan ever has to absorb.
- */
-export const EXTRACT_SNAP_MS = 1500;
-/**
- * How long the caller waits on the extraction before giving up on it entirely. Deliberately above
- * {@link EXTRACT_SNAP_MS} so the sim always gets to finish and snap first; the extra 300ms only
- * matters when the rAF loop is not running at all (hidden or throttled tab), and in that case the
- * race is lost, `flew` is false, and no descent is attempted.
+ * How long the caller waits on the extraction before giving up on it.
+ *
+ * This is the only real bound on it, and therefore the worst case the re-plan has to absorb. The
+ * sim settles the extraction on the first animation frame at or after {@link EXTRACT_MS}, so under
+ * a starved rAF loop — GC pause, compositor contention, a throttled phone — a *successful*
+ * extraction can cost anything up to this. (The sim also carries a nominal failsafe of its own,
+ * but it is unreachable: its `t` saturates at 1 well before the failsafe's deadline, so the frame
+ * check always decides first. Do not budget against it.)
  */
 export const EXTRACT_CAP_MS = 1800;
 
@@ -72,14 +70,15 @@ export const FINISH_LEAD_MS = 1800;
 export interface ExitBudget {
   /**
    * `full` — transit and a hold. `plain` — transit only, exactly #215's exit. `skip` — the gap
-   * cannot fit even that, so the pile keeps its ball and the drop card lands straight away.
+   * cannot fit even that, so the drop card lands straight away.
    *
-   * `skip` is only ever returned when planning AHEAD. Once the extraction has run there is no
-   * such thing as skipping: the ball has already left the pile and been deleted from the canvas,
-   * so it must be shown reaching the mouth or it simply vanishes there.
+   * `skip` means two slightly different things depending on when it is asked for. Planning ahead,
+   * the pile keeps its ball because the caller never starts an extraction at all. Re-planning, the
+   * extraction has already run and taken the ball with it, so the caller must anchor the FLIP at
+   * the chute mouth — see the note on {@link exitBudget}.
    */
   mode: 'full' | 'plain' | 'skip';
-  /** Chute descent. 0 only in `skip`, which a re-plan never returns. */
+  /** Chute descent. 0 in `skip`. */
   transitMs: number;
   /** Motionless beat at the tube mouth. 0 unless `mode` is `full`. */
   holdMs: number;
@@ -112,20 +111,19 @@ export function exitBudget(gapMs: number, spentExtractingMs?: number): ExitBudge
   const extractMs = sunk ?? EXTRACT_MS;
   const fixed = extractMs + FLIP_MS + SAFETY_MS;
   const room = gap - fixed;
+  // Not even the baseline descent fits: straight to the landing, which still costs the FLIP.
+  //
+  // Padding the descent out to its floor here instead was tried and is worse. On the finale — the
+  // last reveal, whose gap is the 1800ms finish lead — a slow extraction plus a mandatory 400ms
+  // slide finishes AFTER `renderFinish` has bumped `choreoToken`, so the run aborts at its next
+  // token check and pick #1's card never renders at all. Landing early is a smaller loss than
+  // landing after the ceremony has moved on. What makes this safe is on the caller's side: the
+  // FLIP anchors at the chute mouth whenever the descent did not actually run, so the card still
+  // springs from where the ball was last seen rather than from an un-transited tube ball.
   if (room < TUBE_MIN_MS) {
-    // Planning ahead, nothing has moved yet, so the whole flourish goes: no extraction, no
-    // descent, just the landing.
-    if (sunk === null) return { mode: 'skip', transitMs: 0, holdMs: 0, totalMs: FLIP_MS };
-    // Re-planning, the ball is already out of the pile — `settleExtraction` deleted it from the
-    // canvas before resolving — so the descent is no longer discretionary: drop it and the ball
-    // disappears at the mouth with nothing rendering the handoff. Only the hold can be given
-    // back. Overrunning by the floor beats a ball that vanishes.
-    return {
-      mode: 'plain',
-      transitMs: TUBE_MIN_MS,
-      holdMs: 0,
-      totalMs: sunk + TUBE_MIN_MS + FLIP_MS,
-    };
+    // Planning ahead the extraction is skipped too, so it costs nothing; re-planning it is
+    // already spent and has to be billed whether it earned anything or not.
+    return { mode: 'skip', transitMs: 0, holdMs: 0, totalMs: (sunk ?? 0) + FLIP_MS };
   }
 
   const transitMs = Math.round(Math.min(TUBE_MAX_MS, Math.max(TUBE_MIN_MS, room * 0.4)));

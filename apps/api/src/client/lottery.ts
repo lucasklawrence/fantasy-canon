@@ -351,6 +351,23 @@ function openEnvelope(reveal: LotteryReveal, hue: number | undefined, token: num
 }
 
 /**
+ * Will this reveal get the envelope? The rule itself lives in `envelopePlan` — this only gathers
+ * the browser-side inputs. Both the queueing and the exit choreography ask it, so "which pick owns
+ * the finale" stays a single decision: #265 first spelled `pick === 1` inline in the choreography,
+ * which quietly disagreed with this predicate for a catch-up or a hidden tab and would have had to
+ * be edited in two files the day the finale pick changes.
+ *
+ * Both callers must pass the SAME `mode` — see `queueEnvelope` — or they can reach opposite
+ * answers and leave pick #1 with neither a hold nor an envelope.
+ */
+function willEnvelope(pick: number, mode: PlaybackKind): boolean {
+  const reducedMotion =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return envelopeEligible(pick, mode, document.visibilityState === 'hidden', reducedMotion);
+}
+
+/**
  * Queue the envelope behind the visual's own reveal moment — the machine's extraction FLIP and
  * the race's winning park must land on screen before the dim swallows them. Token-guarded: any
  * later reveal, phase change, or playback start silently retires a queued open.
@@ -360,20 +377,6 @@ function openEnvelope(reveal: LotteryReveal, hue: number | undefined, token: num
  * hands off to live (`playbackMode = null`) — which must not retroactively make the sprint's
  * final compressed reveal envelope-eligible.
  */
-/**
- * Will this reveal get the envelope? The rule itself lives in `envelopePlan` — this only gathers
- * the browser-side inputs. Both the queueing and the exit choreography ask it, so "which pick owns
- * the finale" stays a single decision: #265 first spelled `pick === 1` inline in the choreography,
- * which quietly disagreed with this predicate for a catch-up or a hidden tab and would have had to
- * be edited in two files the day the finale pick changes.
- */
-function willEnvelope(pick: number, mode: PlaybackKind): boolean {
-  const reducedMotion =
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  return envelopeEligible(pick, mode, document.visibilityState === 'hidden', reducedMotion);
-}
-
 function queueEnvelope(
   reveal: LotteryReveal,
   hue: number | undefined,
@@ -1222,6 +1225,14 @@ async function runExitChoreography(
   num: number | null,
   hue: number | undefined,
   oddsText: string,
+  /**
+   * The playback mode AS OF THE REVEAL, passed in for the same reason `queueEnvelope` takes it:
+   * this function reads it from behind its awaits, by which point a catch-up may have drained and
+   * flipped the global to live. Reading it live here made the hold and the envelope disagree —
+   * the choreography would suppress the hold believing an envelope was coming, and `queueEnvelope`
+   * would then decline to open one, leaving pick #1 with neither.
+   */
+  mode: PlaybackKind,
 ): Promise<void> {
   const token = ++choreoToken;
   exitInFlight = reveal.pick;
@@ -1250,10 +1261,14 @@ async function runExitChoreography(
   // Re-plan against what the extraction ACTUALLY cost. It is the one phase whose length this side
   // cannot dictate — a throttled tab can spend the whole EXTRACT_CAP_MS in there — and spending a
   // hold out of a budget that was already blown is how the drop card gets wiped mid-spring.
-  // A re-plan never returns `skip`: the ball is already out of the pile, so the descent has to be
-  // rendered whatever the clock says. Only the hold is still on the table.
   const budget = flew ? exitBudget(gapMs, performance.now() - startedAt) : planned;
-  if (flew) {
+  // Whether the ball actually SLID THE TUBE, which is not the same as whether it left the pile: a
+  // re-plan can find the gap already spent and drop the descent. The FLIP anchor below keys off
+  // this rather than off `flew`, because a tube ball that never got `.transit` is parked ~44px
+  // above the mouth at opacity 0 — springing the card from there is the one thing that made
+  // skipping the descent look broken.
+  const descended = flew && budget.transitMs > 0;
+  if (descended) {
     const tube = byId('tube-ball');
     // The real face, not just the hue (#258) — same helper the drop ball uses, so the pile, the
     // tube and the drop ball are unmistakably one ball.
@@ -1268,7 +1283,7 @@ async function runExitChoreography(
     // 3600ms inside the same gap, so a hold there is 600ms taken straight out of the finale, and
     // that pick already has the better showcase. Asked through the shared predicate, so a reveal
     // that will NOT actually get an envelope — a catch-up, a hidden tab — keeps its hold.
-    if (budget.mode === 'full' && !willEnvelope(reveal.pick, playbackMode)) {
+    if (budget.mode === 'full' && !willEnvelope(reveal.pick, mode)) {
       await presentAtMouth(reveal, num, hue, budget.holdMs);
       if (token !== choreoToken) return hideHold();
     }
@@ -1278,13 +1293,15 @@ async function runExitChoreography(
   // Measure BEFORE tearing the transit down, and measure the BALL, not the chute: while
   // `transit` is applied the ball's own rect is exactly where it parked, so the FLIP needs no
   // constant tracking the keyframe's end or the ball's diameter — the two numbers this PR had
-  // to correct once already. A ball that never flew is still sitting above the mouth at opacity
-  // 0, so there the chute is the honest anchor.
+  // to correct once already. A ball that did not descend — never extracted, or extracted into a
+  // gap the re-plan found already spent — is still parked above the mouth at opacity 0, so there
+  // the chute is the honest anchor: the card springs from the mouth, which is the last place the
+  // viewer saw the ball either way.
   const held = holdRect();
   const fromRect =
-    held ?? (flew ? tube.getBoundingClientRect() : byId('chute').getBoundingClientRect());
+    held ?? (descended ? tube.getBoundingClientRect() : byId('chute').getBoundingClientRect());
   const fromAnchor: FlipAnchor =
-    held || flew
+    held || descended
       ? {
           cx: fromRect.left + fromRect.width / 2,
           cy: fromRect.top + fromRect.height / 2,
@@ -1390,8 +1407,11 @@ function hideHold(): undefined {
  */
 function revealGapMs(reveal: LotteryReveal): number {
   if (playbackMode !== null && cursor) {
+    // Never fall through to the live pacing from here. `delayMs` is 5000–30000 while a replay runs
+    // at a compressed cadence, so treating "the cursor has nothing queued" as "unknown" would hand
+    // the planner a runway several times the real one. Nothing queued means the finish is next.
     const next = cursor.nextDelayMs();
-    if (next > 0) return next;
+    return next > 0 ? next : FINISH_LEAD_MS;
   }
   // No next pick at all — only the finish. Read from the payload's own `remaining` because that is
   // direction-agnostic (#258 assumed pick #1 was last, which `first-to-last` inverts).
@@ -1466,7 +1486,7 @@ function renderDrop(reveal: LotteryReveal): void {
     // is captured NOW: a catch-up draining during the choreography must not launder its final
     // compressed reveal into an eligible one.
     const modeAtReveal = playbackMode;
-    void runExitChoreography(reveal, num, range?.hue, oddsText).then(() => {
+    void runExitChoreography(reveal, num, range?.hue, oddsText, modeAtReveal).then(() => {
       if (lastDropPick === reveal.pick) {
         queueEnvelope(reveal, range?.hue, ENVELOPE_LEAD_MS.machine, modeAtReveal);
       }

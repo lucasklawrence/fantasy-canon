@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { catchUpPace, REPLAY_DWELL_MS, REPLAY_MAX_STEP_MS } from '../client/replayTimeline.js';
 import {
   exitBudget,
+  EXTRACT_CAP_MS,
   EXTRACT_MS,
-  EXTRACT_SNAP_MS,
   FINISH_LEAD_MS,
   FLIP_MS,
   TUBE_MIN_MS,
@@ -94,11 +94,11 @@ describe('exitBudget (#265)', () => {
 describe('exitBudget re-planned after the extraction (#265)', () => {
   /**
    * EXTRACT_MS is the happy path; the rest are a tab that was barely being painted. The ceiling is
-   * the sim's own snap, NOT the caller's give-up cap: past the snap the extraction resolves itself,
-   * and if even that never happens the race is lost, `flew` is false, and the caller never
-   * re-plans at all. Testing 1800 here would be asserting over a spend the client cannot hand us.
+   * the caller's race cap, because the sim settles on the first frame at or after EXTRACT_MS and
+   * nothing else bounds when that frame arrives — a successful extraction resolving at 1799ms is
+   * reachable, and the timeout takes over only past that.
    */
-  const SPENDS = [EXTRACT_MS, 900, 1400, EXTRACT_SNAP_MS];
+  const SPENDS = [EXTRACT_MS, 900, 1400, EXTRACT_CAP_MS - 1];
   /**
    * Only gaps whose up-front plan actually runs an extraction ever reach the re-plan — the caller
    * re-plans on `flew`, and it does not extract at all in `skip`. Asserting over the others would
@@ -114,47 +114,51 @@ describe('exitBudget re-planned after the extraction (#265)', () => {
   });
 
   it('never adds anything that pushes the chain past the gap', () => {
-    // Sunk by now: what the extraction cost, the floor descent the ball must be shown making, and
-    // the landing. Everything above that floor has to fit inside the gap or be given back.
-    for (const gap of REACHABLE) {
+    // Only the extraction is sunk; everything after it either fits the gap or is given back. The
+    // bound is stated from the phases the CALLER can still be made to spend — the extraction plus
+    // the landing it cannot skip — rather than by restating what the function returns.
+    for (const gap of REPLANNED) {
       for (const spent of SPENDS) {
         const plan = exitBudget(gap, spent);
-        const floor = spent + TUBE_MIN_MS + FLIP_MS;
-        expect(plan.totalMs).toBeLessThanOrEqual(Math.max(gap, floor));
+        expect(plan.totalMs).toBeLessThanOrEqual(Math.max(gap, spent + FLIP_MS));
       }
     }
   });
 
-  // The state that made the first attempt at this re-plan wrong: `skip` after a successful
-  // extraction. `settleExtraction` has already deleted the ball from the pile canvas by then, so
-  // skipping the descent does not save the flourish — it makes the ball vanish at the mouth and
-  // leaves the FLIP anchored to a `#tube-ball` that never moved.
-  it('never returns skip once the ball has left the pile', () => {
-    for (const gap of REACHABLE) {
-      for (const spent of SPENDS) {
-        const plan = exitBudget(gap, spent);
-        expect(plan.mode).not.toBe('skip');
-        expect(plan.transitMs).toBeGreaterThanOrEqual(TUBE_MIN_MS);
-      }
-    }
-  });
-
-  it('gives back the hold, but not the descent, once the extraction has eaten the gap', () => {
-    // A replay dwell is 1800ms and the extraction snapped at 1500: there is nothing left to spend,
-    // so the hold goes and the descent drops to its floor. Overrunning by the floor is the correct
-    // trade — the alternative is a ball that disappears.
-    const blown = exitBudget(REPLAY_DWELL_MS, EXTRACT_SNAP_MS);
-    expect(blown.mode).toBe('plain');
-    expect(blown.transitMs).toBe(TUBE_MIN_MS);
+  // Padding the descent out to its floor here instead was tried and was worse: on the finale, whose
+  // gap is the finish lead, a slow extraction plus a mandatory slide lands AFTER `renderFinish` has
+  // bumped `choreoToken`, so the run aborts and pick #1's card never renders. Landing early beats
+  // landing after the ceremony has moved on — the caller keeps it honest by anchoring the FLIP at
+  // the chute mouth whenever the descent did not run.
+  it('gives everything back once the extraction has eaten the gap', () => {
+    const blown = exitBudget(REPLAY_DWELL_MS, EXTRACT_CAP_MS - 1);
+    expect(blown.mode).toBe('skip');
+    expect(blown.transitMs).toBe(0);
     expect(blown.holdMs).toBe(0);
-    expect(blown.totalMs).toBe(EXTRACT_SNAP_MS + TUBE_MIN_MS + FLIP_MS);
+    // Billed, unlike a skip planned up front — there the caller never starts an extraction, so
+    // the only cost is the landing. Same mode, two different bills, which is the whole reason
+    // `totalMs` takes the sunk cost as an argument.
+    expect(blown.totalMs).toBe(EXTRACT_CAP_MS - 1 + FLIP_MS);
+    expect(exitBudget(SPRINT).mode).toBe('skip');
+    expect(exitBudget(SPRINT).totalMs).toBe(FLIP_MS);
+  });
+
+  it('keeps the descent whenever the gap can still pay for it', () => {
+    // The flip side of the above: giving it back is a last resort, not the normal outcome. Wherever
+    // there is room the ball is still shown making the trip.
+    for (const gap of REPLANNED) {
+      for (const spent of SPENDS) {
+        const plan = exitBudget(gap, spent);
+        if (plan.mode !== 'skip') expect(plan.transitMs).toBeGreaterThanOrEqual(TUBE_MIN_MS);
+      }
+    }
   });
 
   it('still affords the hold at live pacing even on the slowest extraction', () => {
     // Live has room to spare; a slow extraction must not cost the viewer the beat the gap can pay
     // for. This is the case that would regress if the re-plan were a blanket downgrade.
     for (const gap of LIVE_DELAYS) {
-      const plan = exitBudget(gap, EXTRACT_SNAP_MS);
+      const plan = exitBudget(gap, EXTRACT_CAP_MS - 1);
       expect(plan.mode).toBe('full');
       expect(plan.totalMs).toBeLessThanOrEqual(gap);
     }
