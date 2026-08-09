@@ -23,12 +23,7 @@ import {
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
-import {
-  computePickOdds,
-  DraftOrderState,
-  DraftOrderTeamInput,
-  MAX_TEAM_BALLS,
-} from '@fantasy-canon/core';
+import { computePickOdds, DraftOrderTeamInput, MAX_TEAM_BALLS } from '@fantasy-canon/core';
 import { BotContext } from '../../config.js';
 import { resolveLeagueId } from '../../lib/leagueId.js';
 import { ensureSnapshot } from '../../lib/snapshots.js';
@@ -570,6 +565,70 @@ export async function handleDraftOrderSetupSubcommand(
 }
 
 /**
+ * Is `session` still the guild's live, sealable ceremony?
+ *
+ * Every `begin` checkpoint asks exactly this, at every await boundary, on both front doors. The
+ * hazard is a replacing `setup` finishing mid-flight: it calls `setCeremony` with a new session,
+ * leaving this one detached from the registry but still `GAME_OPEN` and perfectly willing to
+ * commit. A detached ceremony that commits posts its commitment *after* the replacement's fresh
+ * odds preview, which is the one ordering ADR 0006 does not allow.
+ *
+ * One function rather than five copies of the same five-line boolean, so a later edit to what
+ * "sealable" means cannot reach four checkpoints and miss the fifth (#237).
+ */
+function stillSealable(guildId: string, session: CeremonySession): boolean {
+  return (
+    getCeremony(guildId) === session &&
+    !session.abort.signal.aborted &&
+    !session.miniGameActive &&
+    !session.reimportActive &&
+    // No `as DraftOrderState` here, unlike the call sites this replaced: they needed the
+    // assertion to defeat TS narrowing the state to 'GAME_OPEN' from the guard at the top of the
+    // handler, which is exactly the stale belief the re-check exists to disprove. A standalone
+    // function has no such narrowing to fight.
+    session.state === 'GAME_OPEN'
+  );
+}
+
+/**
+ * Why {@link stillSealable} said no, in the commissioner's terms (#237).
+ *
+ * Shared by every `begin` checkpoint, so the actionable branches — wait for the odds card, wait
+ * for the results post — cannot be present at one and missing at the next. The replaced-ceremony
+ * case earns its own line: a concurrent `setup` leaves this session GAME_OPEN with no interlocks
+ * set, so before this it fell through to "aborted" and sent people looking for an abort nobody
+ * performed.
+ */
+function notSealableReason(session: CeremonySession, when: string): string {
+  if (session.reimportActive) {
+    return `A re-import from ESPN started ${when} — wait for its odds card, then \`begin\`.`;
+  }
+  if (session.miniGameActive) {
+    return `A reaction round armed ${when} — wait for its results post, then \`begin\`.`;
+  }
+  if (session.abort.signal.aborted) {
+    return 'The ceremony was aborted before it could start — nothing was committed.';
+  }
+  if (session.state === 'LOTTERY_RUNNING') return 'The ceremony is already running.';
+  return `A newer setup replaced this lottery ${when} — nothing was committed. Run \`begin\` again against the fresh odds card.`;
+}
+
+/**
+ * The "open the Lottery Machine" invite, built once for both front doors (#237). The `createdAt`
+ * suffix on the custom id is a marker only: nothing parses it, and the handler deliberately does
+ * not validate it, because launching is idempotent and a stale press simply opens whatever the
+ * stage currently holds. Shared so the id scheme cannot drift between the two doors.
+ */
+function launchButtonRow(session: CeremonySession): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${DRAFT_ORDER_LAUNCH_ID}:${session.createdAt}`)
+      .setLabel('🎰 Open the Lottery Machine')
+      .setStyle(ButtonStyle.Primary),
+  );
+}
+
+/**
  * `stage` is injected so tests never open a socket (same seam as
  * {@link recoverInterruptedCeremonies}). One client for the whole handler: the pre-commitment
  * drain (#210), the channel-mode lobby disarm, and the reveal pacing all talk to the same stage.
@@ -629,24 +688,12 @@ export async function handleDraftOrderBeginSubcommand(
   // A reaction round that armed while we awaited the reply also stops us — sealing the bag
   // would just doom that round to a public discard — and a concurrent `begin` that already
   // moved the state gets a clean refusal instead of an assertTransition error in the log.
-  // Widened via assertion: another handler can mutate the state across the await above, which
-  // TS's narrowing (still "GAME_OPEN" from the top guard, even through a const alias) can't see.
-  const stateNow = session.state as DraftOrderState;
-  if (
-    getCeremony(guildId) !== session ||
-    session.abort.signal.aborted ||
-    session.miniGameActive ||
-    session.reimportActive ||
-    stateNow !== 'GAME_OPEN'
-  ) {
-    const content = session.reimportActive
-      ? 'A re-import from ESPN started just now — wait for its odds card, then `begin`.'
-      : session.miniGameActive
-        ? 'A reaction round armed just now — wait for its results post, then `begin`.'
-        : stateNow === 'LOTTERY_RUNNING'
-          ? 'The ceremony is already running.'
-          : 'The ceremony was aborted before it could start — nothing was committed.';
-    await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
+  if (!stillSealable(guildId, session)) {
+    // Caught like its two siblings: a rejected refusal (10062 after a slow reply, a 429) should
+    // decline the begin, not surface as a crash.
+    await interaction
+      .followUp({ content: notSealableReason(session, 'just now'), flags: MessageFlags.Ephemeral })
+      .catch(() => {});
     return;
   }
 
@@ -670,20 +717,10 @@ export async function handleDraftOrderBeginSubcommand(
   // already posted its own public preview; starting this session now would put a commitment for
   // the *old* bag into the channel after it. A reaction round that armed meanwhile is the same
   // hazard the earlier block guards: sealing a bag in flux dooms that round to a public discard.
-  if (
-    getCeremony(guildId) !== session ||
-    session.abort.signal.aborted ||
-    session.miniGameActive ||
-    session.reimportActive ||
-    (session.state as DraftOrderState) !== 'GAME_OPEN'
-  ) {
+  if (!stillSealable(guildId, session)) {
     await interaction
       .followUp({
-        content: session.reimportActive
-          ? 'A re-import from ESPN started while the Activity edits were being applied — wait for its odds card, then `begin`.'
-          : session.miniGameActive
-            ? 'A reaction round armed while the Activity edits were being applied — wait for its results post, then `begin`.'
-            : 'The ceremony changed while the Activity edits were being applied — nothing was committed.',
+        content: notSealableReason(session, 'while the Activity edits were being applied'),
         flags: MessageFlags.Ephemeral,
       })
       .catch(() => {});
@@ -694,22 +731,23 @@ export async function handleDraftOrderBeginSubcommand(
   // The reveal itself streams there; commitment, final board, and seed reveal still post here.
   // Best-effort — a failed invite post (permissions, transient API error) must never block the
   // ceremony itself, which the commissioner was just told is starting.
+  // Tracked so the checkpoint below knows whether there is a public promise to retract.
+  let postedLaunchInvite = false;
   if (stageMode === 'activity') {
     try {
-      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`${DRAFT_ORDER_LAUNCH_ID}:${session.createdAt}`)
-          .setLabel('🎰 Open the Lottery Machine')
-          .setStyle(ButtonStyle.Primary),
-      );
       await channel.send({
         content: `🎰 **${session.title}** — the ball-by-ball reveal streams live in the Lottery Machine. Click to watch; the commitment, final board, and seed verification still post right here.`,
-        components: [row],
+        components: [launchButtonRow(session)],
         allowedMentions: { parse: [] }, // uniform ceremony-surface policy (#222)
       });
+      postedLaunchInvite = true;
     } catch (error) {
       console.error('[draftorder] failed to post the lottery-machine launch button:', error);
-      await interaction
+      // Deliberately not awaited: this reassurance is only true if the checkpoint below lets the
+      // ceremony through, and awaiting it here is another suspension point where a replacing
+      // setup can land — which used to leave the commissioner holding two contradictory
+      // ephemerals ("still runs" then "nothing was committed").
+      void interaction
         .followUp({
           content:
             'Could not post the Lottery Machine button — the ceremony still runs (members can open the Activity from the app launcher).',
@@ -726,6 +764,35 @@ export async function handleDraftOrderBeginSubcommand(
     void stage.clear({ guildId }).catch((error: unknown) => {
       console.error('[draftorder] failed to disarm the Activity lobby for a channel run:', error);
     });
+  }
+
+  // Last checkpoint, after the launch-button post's await (#237). `performActivityBegin` has had
+  // this since #236; the slash path was the front door still dispatching on a check taken one
+  // await earlier. A replacing `setup` completing inside that window leaves this session detached
+  // but still GAME_OPEN, and the ceremony it starts would post its commitment after the
+  // replacement's fresh preview.
+  if (!stillSealable(guildId, session)) {
+    await interaction
+      .followUp({
+        content: notSealableReason(session, 'while the launch button was posting'),
+        flags: MessageFlags.Ephemeral,
+      })
+      .catch(() => {});
+    // In activity mode the invite is already public, and it promises "the commitment, final
+    // board, and seed verification still post right here". An ephemeral correction is invisible
+    // to everyone it was promised to, so the channel gets one too — otherwise the league watches
+    // for a commitment that never comes and can click through to a machine holding another bag.
+    if (postedLaunchInvite) {
+      await channel
+        .send({
+          content: `⚠️ **${session.title}** — hold off: the lottery changed while that button was posting, so nothing was sealed. The button above is stale; wait for a fresh odds card.`,
+          allowedMentions: { parse: [] },
+        })
+        .catch((error: unknown) => {
+          console.error('[draftorder] could not retract the stale launch invite:', error);
+        });
+    }
+    return;
   }
 
   // Fire and forget: the ceremony runs on channel messages and outlives this interaction's
@@ -1209,13 +1276,7 @@ export function performActivityBegin(
     }
     // Re-validate after the fetch — same discipline as the slash handler after its reply await: a
     // slash `begin`, an abort, or a replacing `setup` can land while Discord round-trips.
-    if (
-      getCeremony(guildId) !== session ||
-      session.abort.signal.aborted ||
-      session.miniGameActive ||
-      session.reimportActive ||
-      (session.state as DraftOrderState) !== 'GAME_OPEN'
-    ) {
+    if (!stillSealable(guildId, session)) {
       return false;
     }
 
@@ -1233,13 +1294,7 @@ export function performActivityBegin(
     // Re-validate after the drain's awaits (stage read, card render, preview post) — a replacing
     // `setup` in that window has already posted its own preview, and sealing the old bag after it
     // is exactly what the slash handler's twin check prevents.
-    if (
-      getCeremony(guildId) !== session ||
-      session.abort.signal.aborted ||
-      session.miniGameActive ||
-      session.reimportActive ||
-      (session.state as DraftOrderState) !== 'GAME_OPEN'
-    ) {
+    if (!stillSealable(guildId, session)) {
       return false;
     }
 
@@ -1248,16 +1303,10 @@ export function performActivityBegin(
     // button occupy. Best-effort like the slash path's button post: a failed invite must never
     // block the ceremony, whose commitment is the actual record.
     try {
-      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`${DRAFT_ORDER_LAUNCH_ID}:${session.createdAt}`)
-          .setLabel('🎰 Open the Lottery Machine')
-          .setStyle(ButtonStyle.Primary),
-      );
       const who = request.requestedBy ? `<@${request.requestedBy}>` : 'The commissioner';
       await channel.send({
         content: `🔒 **${session.title}** — ${who} sealed the bag from inside the Lottery Machine. The commitment posts now; first reveal ~${delaySeconds}s after its drum roll, streaming live in the Activity.`,
-        components: [row],
+        components: [launchButtonRow(session)],
         allowedMentions: { parse: [] }, // uniform ceremony-surface policy (#222)
       });
     } catch (error) {
@@ -1267,13 +1316,7 @@ export function performActivityBegin(
     // the checkpoints above, one await later. A detached session must never commit after the
     // replacement's fresh preview; the stray seal line (already posted) is cosmetic, the
     // commitment is what must not follow it.
-    if (
-      getCeremony(guildId) !== session ||
-      session.abort.signal.aborted ||
-      session.miniGameActive ||
-      session.reimportActive ||
-      (session.state as DraftOrderState) !== 'GAME_OPEN'
-    ) {
+    if (!stillSealable(guildId, session)) {
       return false;
     }
 
