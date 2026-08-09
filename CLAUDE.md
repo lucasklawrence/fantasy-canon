@@ -91,9 +91,12 @@ committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
 
 ### Other
 
-- **`docs/`** — product PRDs and architecture (`00`–`13`). Start at `docs/00-product-overview.md` and
+- **`docs/`** — product PRDs and architecture (`00`–`15`). Start at `docs/00-product-overview.md` and
   `docs/05-repository-structure.md`. ADRs live in `docs/decisions/` (numbered `000N-title.md`).
-- **`scripts/`** — `debug-espn.ts` and the VS Code workspace.
+  `docs/15-draft-day-run-of-show.md` is the operational one: how the stack is run unattended while
+  the commissioner is away from the host PC (#246, ADR 0009).
+- **`scripts/`** — `debug-espn.ts`, `archive-draft.ts`, the VS Code workspace, and
+  [`scripts/ops/`](scripts/ops/README.md) (named tunnel, process supervision, preflight).
 
 ## Conventions
 

@@ -41,6 +41,7 @@ function deps(h: DraftHub, over: Partial<RouteDeps> = {}): RouteDeps {
     lottery: over.lottery ?? createLotteryStage(),
     lotteryScript: over.lotteryScript ?? ((): string | undefined => 'export const machine = 1;'),
     stageKey: over.stageKey ?? '',
+    uptimeSec: over.uptimeSec,
   };
 }
 
@@ -105,6 +106,107 @@ describe('normalizePath', () => {
 
   it('leaves an un-prefixed path untouched', () => {
     expect(normalizePath('/api/pick')).toBe('/api/pick');
+  });
+});
+
+/**
+ * The remote-ops surface (#246): the commissioner is away from the host PC for the draft window,
+ * so this is what a phone or an uptime monitor can see.
+ */
+describe('GET /healthz', () => {
+  const body = async (over: Partial<RouteDeps> = {}): Promise<Record<string, never>> =>
+    JSON.parse((await routeRequest('GET', '/healthz', '', deps(hub(), over))).body) as Record<
+      string,
+      never
+    >;
+
+  it('answers 200 with liveness and uptime', async () => {
+    const reply = await routeRequest('GET', '/healthz', '', deps(hub(), { uptimeSec: () => 42.7 }));
+    expect(reply.status).toBe(200);
+    expect(reply.contentType).toContain('application/json');
+    expect(JSON.parse(reply.body)).toMatchObject({
+      ok: true,
+      service: 'fantasy-canon-api',
+      uptimeSec: 42, // floored — a monitor watching for restarts wants whole seconds
+    });
+  });
+
+  // The Activity proxies everything under `/.proxy`, and a health URL that only worked off-proxy
+  // would be exactly the wrong one to discover was wrong from a hotel.
+  it('answers through the Activity proxy prefix too', async () => {
+    expect((await routeRequest('GET', '/.proxy/healthz', '', deps(hub()))).status).toBe(200);
+  });
+
+  it('reports the stage phase and reveal count', async () => {
+    const d = deps(hub());
+    expect(await body()).toMatchObject({ stage: { phase: 'idle', reveals: 0 } });
+
+    // `start` seals the bag and opens the drum-roll window; the first reveal is what moves it on.
+    await routeRequest('POST', '/api/lottery/start', LOTTERY_START_BODY, d);
+    const sealed = JSON.parse((await routeRequest('GET', '/healthz', '', d)).body) as {
+      stage: { phase: string; reveals: number };
+    };
+    expect(sealed.stage).toEqual({
+      phase: 'waiting',
+      reveals: 0,
+      beginRequested: false,
+      setupRequested: false,
+      reimportRequested: false,
+    });
+
+    await routeRequest(
+      'POST',
+      '/api/lottery/reveal',
+      JSON.stringify({ pick: 2, team: 'A', balls: 1, oddsPct: 33.3, remaining: ['B'] }),
+      d,
+    );
+    const revealing = JSON.parse((await routeRequest('GET', '/healthz', '', d)).body) as {
+      stage: { phase: string; reveals: number };
+    };
+    expect(revealing.stage.phase).toBe('revealing');
+    expect(revealing.stage.reveals).toBe(1);
+  });
+
+  // A doorbell the bot never answered is the remote failure mode #250 was filed for; being able
+  // to see it stuck without a laptop is the point of putting it here.
+  it('surfaces an unanswered in-Activity doorbell', async () => {
+    const d = deps(hub());
+    await routeRequest('POST', '/api/lottery/lobby', EDITABLE_LOBBY_BODY, d);
+    expect(await body({ lottery: d.lottery })).toMatchObject({
+      stage: { reimportRequested: false },
+    });
+
+    await routeRequest('POST', '/api/lottery/reimport', '{}', d, asCommissioner);
+    const pressed = JSON.parse((await routeRequest('GET', '/healthz', '', d)).body) as {
+      stage: { reimportRequested: boolean };
+    };
+    expect(pressed.stage.reimportRequested).toBe(true);
+  });
+
+  // A missing bundle is the quietest failure this stack has: the Activity loads, then 503s
+  // fetching its own script, which from a phone is indistinguishable from a dead tunnel.
+  it('flags a missing client bundle', async () => {
+    expect(await body()).toMatchObject({ config: { lotteryBundle: true, dashboardBundle: true } });
+    expect(await body({ lotteryScript: () => undefined })).toMatchObject({
+      config: { lotteryBundle: false },
+    });
+  });
+
+  it('reports config as booleans and never leaks the values', async () => {
+    const reply = await routeRequest(
+      'GET',
+      '/healthz',
+      '',
+      deps(hub(), { stageKey: 'super-secret-key', clientId: 'app-42' }),
+    );
+    expect(JSON.parse(reply.body)).toMatchObject({ config: { stageKey: true, clientId: true } });
+    expect(reply.body).not.toContain('super-secret-key');
+    expect(reply.body).not.toContain('app-42');
+  });
+
+  it('needs no stage key — it has to work when everything else is broken', async () => {
+    const reply = await routeRequest('GET', '/healthz', '', deps(hub(), { stageKey: 'k' }));
+    expect(reply.status).toBe(200);
   });
 });
 

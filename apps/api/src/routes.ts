@@ -112,6 +112,11 @@ export interface RouteDeps {
    * server binds 127.0.0.1). Set it in production — the mapped host is publicly reachable.
    */
   stageKey: string;
+  /**
+   * Seconds this process has been up, for `GET /healthz` (#246). Injected so the reply is
+   * deterministic in tests; `server.ts` passes `process.uptime`.
+   */
+  uptimeSec?: () => number;
 }
 
 const json = (status: number, value: unknown): HttpReply => ({
@@ -172,6 +177,48 @@ export function normalizePath(url: string): string {
   return path;
 }
 
+/**
+ * Liveness, plus a glance at what the stack is actually doing (#246).
+ *
+ * The commissioner is away from the host machine for the whole draft window, so this is the one
+ * URL that answers "is it still up?" from a phone, and the one an external uptime monitor can
+ * poll. Unauthenticated and side-effect free, for the same reason `/api/lottery/state` is: it has
+ * to work precisely when everything else is broken.
+ *
+ * Nothing here is sensitive. `phase` and the reveal count are already public on the wire; the
+ * config entries are reported as booleans only, because "is it set" is the operational question
+ * and the values themselves must never leave the process.
+ *
+ * The two bundle flags exist because a missing bundle is this stack's quietest failure: the
+ * Activity loads, then 503s fetching its own script, and from a phone that looks like a dead
+ * tunnel. `uptimeSec` is the other remote-ops signal — supervision restarting a crash loop looks
+ * healthy on every single poll unless you can see the clock keep resetting.
+ */
+function healthReply(deps: RouteDeps): HttpReply {
+  const snapshot = deps.lottery.snapshot();
+  return json(200, {
+    ok: true,
+    service: 'fantasy-canon-api',
+    uptimeSec: Math.floor(deps.uptimeSec?.() ?? 0),
+    stage: {
+      phase: snapshot.phase,
+      reveals: snapshot.reveals.length,
+      // Doorbells the bot has not answered yet: all three mean "the Activity asked, and the
+      // watcher is the thing that has to act". A press stuck here is the remote failure mode
+      // #250 was filed for, and the one worth being able to see without a laptop.
+      beginRequested: snapshot.beginRequested !== undefined,
+      setupRequested: snapshot.setupRequested !== undefined,
+      reimportRequested: snapshot.reimportRequested === true,
+    },
+    config: {
+      lotteryBundle: deps.lotteryScript() !== undefined,
+      dashboardBundle: deps.clientScript() !== undefined,
+      stageKey: Boolean(deps.stageKey),
+      clientId: Boolean(deps.clientId),
+    },
+  });
+}
+
 export async function routeRequest(
   method: string,
   url: string,
@@ -180,6 +227,9 @@ export async function routeRequest(
   headers: Record<string, string | string[] | undefined> = {},
 ): Promise<HttpReply> {
   const path = normalizePath(url);
+
+  // First and cheapest: a health check must never be shadowed by, or wait behind, anything else.
+  if (method === 'GET' && path === '/healthz') return healthReply(deps);
 
   if (method === 'GET' && (path === '/' || path === '/index.html')) {
     // A Discord Activity iframe always opens at the root URL mapping — it cannot ask for
