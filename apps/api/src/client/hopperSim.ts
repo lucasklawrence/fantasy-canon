@@ -17,7 +17,7 @@
 
 import Matter from 'matter-js';
 
-import { assignBallRanges, ballRadius } from './ballAssignments.js';
+import { assignBallRanges, ballRadius, drumGeometry } from './ballAssignments.js';
 import { buildBallSprite } from './ballSprite.js';
 import { EXTRACT_MS } from './exitBudget.js';
 
@@ -61,6 +61,17 @@ export interface HopperSim {
    * longer than a bounded cap: cosmetics must not block a reveal.
    */
   extractBall(num: number): Promise<boolean>;
+  /**
+   * Re-derive the scene at a new CSS size (#267) — backing store, cage, and the packing-fit ball
+   * radius, with the pile rebuilt from the bag it currently holds.
+   *
+   * The caller supplies the size because only it can read `--hopper-px`: the sim is built from the
+   * lobby, where `#stage` is `display: none` and `canvas.clientWidth` is 0.
+   *
+   * Returns `false` when it declined — an extraction is in flight, and replacing the world under a
+   * ball mid-way to the chute would strand the reveal. Retry from the next idle moment.
+   */
+  ensureSize(nextPx: number): boolean;
   /** Hidden-tab pause — the sim neither steps nor draws while off. */
   setRunning(on: boolean): void;
   destroy(): void;
@@ -106,7 +117,11 @@ export function createHopperSim(
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  const cssSize = sizePx || canvas.clientWidth || 260;
+  // Mutable since #267: the drum is responsive (`--hopper-px`, 254 → 334 at ≥1500px) and every
+  // piece of scene geometry below is derived from this one number, so a breakpoint crossing has
+  // to be able to re-derive them rather than let CSS upscale a stale backing store.
+  let cssSize = sizePx || canvas.clientWidth || 260;
+  let { center, wallRadius, chuteMouth } = drumGeometry(cssSize);
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = cssSize * dpr;
   canvas.height = cssSize * dpr;
@@ -121,41 +136,55 @@ export function createHopperSim(
   // No applied forces at all — earlier force-based boils either froze the top of a big pile or
   // levitated it wholesale (constant lift is just buoyancy), while a spinning cage churns any bag
   // size for free because the mechanism is mechanical, not a field.
-  const center = cssSize / 2;
-  const wallRadius = cssSize / 2 - 4;
-  /** Vane reach into the chamber, as measured from the wall toward the center. */
-  const VANE_LENGTH = wallRadius * 0.34;
+  /** Vane reach into the chamber, as a fraction of the wall radius. */
+  const VANE_RATIO = 0.34;
   const VANE_COUNT = 3;
-  const parts: Matter.Body[] = [];
-  const segmentCount = 28;
-  for (let i = 0; i < segmentCount; i += 1) {
-    const angle = (i / segmentCount) * Math.PI * 2;
-    const segLength = (2 * Math.PI * wallRadius) / segmentCount + 4;
-    parts.push(
-      Bodies.rectangle(
-        center + Math.cos(angle) * (wallRadius + 5),
-        center + Math.sin(angle) * (wallRadius + 5),
-        10,
-        segLength,
-        { angle: angle, friction: 0.4 },
-      ),
-    );
+
+  /** Current vane reach — the renderer draws the vanes, so it lives outside {@link buildDrum}. */
+  let vaneLength = 0;
+
+  /**
+   * Assemble the cage at the current {@link wallRadius}. Split out for #267 so a resize can throw
+   * the old compound away and lay out a new one, rather than scaling a body built for another
+   * diameter.
+   */
+  function buildDrum(): Matter.Body {
+    vaneLength = wallRadius * VANE_RATIO;
+    const VANE_LENGTH = vaneLength;
+    const parts: Matter.Body[] = [];
+    const segmentCount = 28;
+    for (let i = 0; i < segmentCount; i += 1) {
+      const angle = (i / segmentCount) * Math.PI * 2;
+      const segLength = (2 * Math.PI * wallRadius) / segmentCount + 4;
+      parts.push(
+        Bodies.rectangle(
+          center + Math.cos(angle) * (wallRadius + 5),
+          center + Math.sin(angle) * (wallRadius + 5),
+          10,
+          segLength,
+          { angle: angle, friction: 0.4 },
+        ),
+      );
+    }
+    for (let i = 0; i < VANE_COUNT; i += 1) {
+      const angle = (i / VANE_COUNT) * Math.PI * 2;
+      const mid = wallRadius - VANE_LENGTH / 2;
+      parts.push(
+        Bodies.rectangle(
+          center + Math.cos(angle) * mid,
+          center + Math.sin(angle) * mid,
+          VANE_LENGTH,
+          7,
+          { angle: angle, friction: 0.4, chamfer: { radius: 3 } },
+        ),
+      );
+    }
+    const built = Body.create({ parts, isStatic: true });
+    Composite.add(engine.world, built);
+    return built;
   }
-  for (let i = 0; i < VANE_COUNT; i += 1) {
-    const angle = (i / VANE_COUNT) * Math.PI * 2;
-    const mid = wallRadius - VANE_LENGTH / 2;
-    parts.push(
-      Bodies.rectangle(
-        center + Math.cos(angle) * mid,
-        center + Math.sin(angle) * mid,
-        VANE_LENGTH,
-        7,
-        { angle: angle, friction: 0.4, chamfer: { radius: 3 } },
-      ),
-    );
-  }
-  const drum = Body.create({ parts, isStatic: true });
-  Composite.add(engine.world, drum);
+
+  let drum = buildDrum();
   /** Accumulated drum rotation, for drawing the vanes in step with the physics. */
   let drumAngle = 0;
   /** Cage spin while agitating, radians per second. */
@@ -163,6 +192,8 @@ export function createHopperSim(
 
   const meta = new Map<Matter.Body, BallMeta>();
   let bagSig = '';
+  /** The rows the pile was last built from — what a resize rebuilds against (#267). */
+  let bagRows: { team: string; balls: number }[] = [];
   const drawn = new Set<string>();
   let agitating = false;
   let running = true;
@@ -177,7 +208,6 @@ export function createHopperSim(
     resolve: (flew: boolean) => void;
   } | null = null;
   /** Where the extraction lands: the chute mouth at the drum's bottom center. */
-  const chuteMouth = { x: center, y: cssSize - 10 };
 
   /** Finish the in-flight extraction now — ball out, promise settled. Safe to call twice. */
   function settleExtraction(flew: boolean): void {
@@ -206,8 +236,8 @@ export function createHopperSim(
       const angle = drumAngle + (i / VANE_COUNT) * Math.PI * 2;
       ctx.beginPath();
       ctx.moveTo(
-        center + Math.cos(angle) * (wallRadius - VANE_LENGTH),
-        center + Math.sin(angle) * (wallRadius - VANE_LENGTH),
+        center + Math.cos(angle) * (wallRadius - vaneLength),
+        center + Math.sin(angle) * (wallRadius - vaneLength),
       );
       ctx.lineTo(
         center + Math.cos(angle) * (wallRadius - 1),
@@ -298,6 +328,7 @@ export function createHopperSim(
   }
 
   function buildBag(rows: { team: string; balls: number }[]): void {
+    bagRows = rows;
     clearBalls();
     const ranges = assignBallRanges(rows);
     const total = ranges.reduce((sum, range) => sum + Math.max(0, range.end - range.start + 1), 0);
@@ -439,6 +470,31 @@ export function createHopperSim(
       }
       if (reducedMotion) draw(now);
       else wake();
+    },
+    ensureSize(nextPx): boolean {
+      const next = Math.round(nextPx);
+      if (destroyed || !Number.isFinite(next) || next <= 0) return false;
+      if (next === cssSize) return true; // already right — the common case on a spurious event
+      // A ball is mid-flight to the chute: its target, the world it is being steered through, and
+      // the promise the reveal is awaiting all belong to the current geometry. Rebuilding here
+      // would strand that reveal, so decline and let the caller come back when idle (#267).
+      if (extraction) return false;
+
+      cssSize = next;
+      ({ center, wallRadius, chuteMouth } = drumGeometry(cssSize));
+      canvas.width = cssSize * dpr;
+      canvas.height = cssSize * dpr;
+
+      Composite.remove(engine.world, drum);
+      drum = buildDrum();
+      Body.setAngle(drum, drumAngle); // keep the vanes where the last frame drew them
+
+      // The pile has to be laid out again: the packing-fit radius is a function of the wall, and
+      // the sprites are rastered per radius. `buildBag` honours `drawn`, so a mid-ceremony resize
+      // keeps the teams already pulled out of the bag out of it.
+      buildBag(bagRows);
+      wake();
+      return true;
     },
     setRunning(on): void {
       if (running === on) return;

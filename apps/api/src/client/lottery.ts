@@ -214,6 +214,36 @@ function drumSizePx(): number {
 }
 
 /**
+ * Keep the drum tracking the viewport (#267).
+ *
+ * Driven by the breakpoint rather than by `resize`, so it fires once per crossing instead of once
+ * per frame of a drag — rebuilding a matter-js world is not something to do at 60fps. The query
+ * has to name the same 1500px the stylesheet uses; the size itself still comes from `--hopper-px`,
+ * so the actual numbers stay in one place.
+ *
+ * The sim may decline while a ball is in flight, so a refused crossing is retried once the exit
+ * finishes rather than dropped — otherwise a viewer who resizes mid-reveal keeps the old drum for
+ * the rest of the ceremony.
+ */
+let pendingDrumResize = false;
+function watchDrumSize(): void {
+  if (typeof window.matchMedia !== 'function') return;
+  const wide = window.matchMedia('(min-width: 1500px)');
+  const onCross = (): void => {
+    pendingDrumResize = !(hopperSim?.ensureSize(drumSizePx()) ?? true);
+  };
+  // `addEventListener` on MediaQueryList is the modern form; older Safari only has addListener,
+  // and the Activity's webview is Chromium, so the modern one is enough here.
+  wide.addEventListener('change', onCross);
+}
+
+/** Apply a crossing the sim refused mid-flight. Called when an exit choreography finishes. */
+function flushDrumResize(): void {
+  if (!pendingDrumResize) return;
+  pendingDrumResize = !(hopperSim?.ensureSize(drumSizePx()) ?? true);
+}
+
+/**
  * Read a pixel-valued custom property off `<body>` (#256). `<body>` rather than the element that
  * uses it, because the elements that care live inside `#stage`, which is `display: none` for the
  * whole lobby — and these values have to be readable exactly then.
@@ -1326,6 +1356,9 @@ async function runExitChoreography(
   // After the FLIP has measured its start, so retiring the hold cannot make the ball vanish
   // before the drop card has taken its place.
   hideHold();
+  // The ball is out of the drum, so a breakpoint crossing the sim refused mid-flight can land
+  // now (#267) — otherwise resizing during a reveal keeps the old drum for the whole ceremony.
+  flushDrumResize();
 }
 
 /**
@@ -2276,6 +2309,7 @@ async function boot(): Promise<void> {
   byId('bulk-btn').addEventListener('click', () => void sendBulk());
   byId('audit-mode').addEventListener('change', () => void sendAuditMode());
   byId('setup-btn').addEventListener('click', () => void sendSetupRequest());
+  watchDrumSize();
   // Default the season picker to the year the page loaded — draft season in practice.
   (byId('setup-season') as HTMLInputElement).value = String(new Date().getFullYear());
   byId('sound-btn').addEventListener('click', () => audio.toggle());
