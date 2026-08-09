@@ -207,11 +207,54 @@ function hopper(): HopperSim {
  *
  * The canvas itself cannot answer this: the sim is built lazily from the lobby, while `#stage`
  * is still `display: none`, so `clientWidth` is 0. `<body>` is always rendered, so the custom
- * property resolves at any phase — and because the same property drives the `.hopper` rule, the
- * breakpoints live in exactly one place instead of being duplicated into a matchMedia ladder.
+ * property resolves at any phase, and the sizes themselves stay in the stylesheet.
+ *
+ * The BREAKPOINT is duplicated, though: `watchDrumSize` has to name 1500px to know when to re-ask,
+ * because a custom property cannot be observed. Only the trigger is duplicated, never the values —
+ * and `.race` is a second trigger that fires no event at all, which is why `applyStageLayout`
+ * re-asks too.
  */
 function drumSizePx(): number {
   return cssPx('--hopper-px', 260);
+}
+
+/**
+ * Keep the drum tracking the viewport (#267).
+ *
+ * Driven by the breakpoint rather than by `resize`, so it fires once per crossing instead of once
+ * per frame of a drag — rebuilding a matter-js world is not something to do at 60fps. The query
+ * has to name the same 1500px the stylesheet uses; the size itself still comes from `--hopper-px`,
+ * so the actual numbers stay in one place.
+ *
+ * The sim may decline while a ball is in flight, so a refused crossing is retried once the exit
+ * finishes rather than dropped — otherwise a viewer who resizes mid-reveal keeps the old drum for
+ * the rest of the ceremony.
+ */
+let pendingDrumResize = false;
+function watchDrumSize(): void {
+  if (typeof window.matchMedia !== 'function') return;
+  const wide = window.matchMedia('(min-width: 1500px)');
+  const onCross = (): void => flushDrumResize(true);
+  // `addEventListener` on MediaQueryList is the modern form; older Safari only has addListener,
+  // and the Activity's webview is Chromium, so the modern one is enough here.
+  wide.addEventListener('change', onCross);
+}
+
+/**
+ * Bring the drum to the current `--hopper-px`, or latch the attempt for later.
+ *
+ * `force` is for the events that CHANGE the size (the breakpoint, the race class coming off);
+ * without it this only retries a crossing that was previously refused. A sim that does not exist
+ * yet leaves the latch set rather than clearing it — it will be built at the right size, but a
+ * later real refusal must not look already-handled.
+ */
+function flushDrumResize(force = false): void {
+  if (!force && !pendingDrumResize) return;
+  if (!hopperSim) {
+    pendingDrumResize = true;
+    return;
+  }
+  pendingDrumResize = !hopperSim.ensureSize(drumSizePx());
 }
 
 /**
@@ -457,6 +500,12 @@ function applyStageLayout(): void {
   // and keeps the cozy centered frame — same reasoning that left the machine out of it.
   document.body.classList.toggle('race', racing);
   if (wheeling) wheel().ensureSize();
+  // `.race` is the SECOND input to --hopper-px — the wide rule is `body:not(.race)` — and toggling
+  // a class fires no matchMedia event, so a race ending on a wide screen would otherwise leave the
+  // drum stretched from 254 into a 334px box for the rest of the session (#267). The wheel counts
+  // as "not racing" here: it leaves `.race` off, so the drum's box really is the wide one even
+  // though the drum is hidden, and it has to be right before the machine is ever shown again.
+  if (!racing) flushDrumResize(true);
 }
 
 // Ceremony sound (#216) — silent until the viewer arms it; the callback keeps the 🔊 pill honest
@@ -1178,15 +1227,23 @@ interface FlipAnchor {
 /**
  * FLIP handoff: the drop ball starts at the chute exit (where the pulled ball just arrived) and
  * springs to its resting spot — the pull and the reveal read as one continuous motion.
+ *
+ * Returns a promise that settles when the spring is **done**, timed from the frame the transition
+ * actually starts on rather than from the call (#269). The two rAFs below are the reason that
+ * distinction matters: a caller starting its own FLIP_MS timer here finishes a couple of frames
+ * early, which is enough for the finale's dim to begin over a ball still in motion.
+ *
+ * Always settles. rAF does not run in a hidden tab, and a promise that never resolves would strand
+ * the envelope — and anything else chained off the exit — for the life of the page.
  */
-function flipFromChute(ball: HTMLElement, from: FlipAnchor): void {
+function flipFromChute(ball: HTMLElement, from: FlipAnchor): Promise<void> {
   // The clone carries the previous reveal's flip/fall classes — strip them so the start
   // transform below is applied instantly, by intent rather than by insertion semantics.
   ball.classList.remove('flip', 'fall');
   const to = ball.getBoundingClientRect();
   if (!to.width || !Number.isFinite(from.cx) || !Number.isFinite(from.cy)) {
     ball.classList.add('fall'); // measurement failed — fall back to the plain drop-in
-    return;
+    return Promise.resolve(); // nothing springs, so there is nothing to wait out
   }
   const dx = from.cx - (to.left + to.width / 2);
   const dy = from.cy - (to.top + to.height / 2);
@@ -1197,11 +1254,17 @@ function flipFromChute(ball: HTMLElement, from: FlipAnchor): void {
   // The spring's length is the planner's FLIP_MS, not a number typed into the stylesheet — the
   // budget is only honest while the phase it bills actually lasts that long.
   ball.style.setProperty('--flip-ms', `${FLIP_MS}ms`);
-  // Double rAF: the start transform must paint before the transition begins.
-  requestAnimationFrame(() => {
+  return new Promise<void>((resolve) => {
+    // The frames never come in a hidden tab; settle on the nominal length rather than hang.
+    const unpainted = setTimeout(resolve, FLIP_MS);
+    // Double rAF: the start transform must paint before the transition begins.
     requestAnimationFrame(() => {
-      ball.classList.add('flip');
-      ball.style.transform = '';
+      requestAnimationFrame(() => {
+        ball.classList.add('flip');
+        ball.style.transform = '';
+        clearTimeout(unpainted);
+        setTimeout(resolve, FLIP_MS); // the spring starts NOW, so time it from here
+      });
     });
   });
 }
@@ -1213,6 +1276,9 @@ function renderDrum(pick: number, remaining: string[], windowMs?: number): void 
   byId('drum').classList.remove('hidden');
   applyStageLayout();
   byId('drum-now').textContent = `Drawing pick #${pick}…`;
+  // Between reveals: the safest moment to apply a crossing the sim refused mid-flight, and the
+  // path that catches the ones the choreography's early returns would otherwise have dropped.
+  flushDrumResize();
   const win = windowMs ?? currentStart?.delayMs ?? 4000;
   if (activeVisual() === 'wheel') {
     // The wheel's drum roll is simply the spin — it free-runs until the reveal names a wedge.
@@ -1261,7 +1327,7 @@ async function runExitChoreography(
    * would then decline to open one, leaving pick #1 with neither.
    */
   mode: PlaybackKind,
-): Promise<void> {
+): Promise<boolean> {
   const token = ++choreoToken;
   exitInFlight = reveal.pick;
   // Whatever the run we just superseded left at the mouth is the PREVIOUS pick's ball. Its own
@@ -1285,7 +1351,10 @@ async function runExitChoreography(
           new Promise<boolean>((resolve) => setTimeout(() => resolve(false), EXTRACT_CAP_MS)),
         ])
       : false;
-  if (token !== choreoToken) return hideHold();
+  if (token !== choreoToken) {
+    hideHold();
+    return false; // superseded: this run no longer owns the screen
+  }
   // Re-plan against what the extraction ACTUALLY cost. It is the one phase whose length this side
   // cannot dictate — a throttled tab can spend the whole EXTRACT_CAP_MS in there — and spending a
   // hold out of a budget that was already blown is how the drop card gets wiped mid-spring.
@@ -1306,14 +1375,20 @@ async function runExitChoreography(
     void tube.offsetWidth; // restart the CSS animation for this transit
     tube.classList.add('transit');
     await new Promise((resolve) => setTimeout(resolve, budget.transitMs));
-    if (token !== choreoToken) return hideHold();
+    if (token !== choreoToken) {
+      hideHold();
+      return false; // superseded: this run no longer owns the screen
+    }
     // The envelope pick (#243) gets no hold: the envelope is chained off this promise and runs
     // 3600ms inside the same gap, so a hold there is 600ms taken straight out of the finale, and
     // that pick already has the better showcase. Asked through the shared predicate, so a reveal
     // that will NOT actually get an envelope — a catch-up, a hidden tab — keeps its hold.
     if (budget.mode === 'full' && !willEnvelope(reveal.pick, mode)) {
       await presentAtMouth(reveal, num, hue, budget.holdMs);
-      if (token !== choreoToken) return hideHold();
+      if (token !== choreoToken) {
+        hideHold();
+        return false; // superseded: this run no longer owns the screen
+      }
     }
   }
   exitInFlight = null;
@@ -1350,10 +1425,33 @@ async function runExitChoreography(
   applyDropFace(ball, reveal.team, num !== null ? hue : undefined);
   replaceNode('drop-team').textContent = reveal.team;
   replaceNode('drop-odds').textContent = oddsText;
-  flipFromChute(ball, fromAnchor);
-  // After the FLIP has measured its start, so retiring the hold cannot make the ball vanish
-  // before the drop card has taken its place.
+  // Started, not awaited yet: `hideHold` has to run in this same synchronous block, once the FLIP
+  // has measured its start, or retiring the hold would make the ball vanish before the drop card
+  // has taken its place.
+  const landing = flipFromChute(ball, fromAnchor);
   hideHold();
+  // Resolve when the reveal has LANDED, not when the spring starts (#269).
+  //
+  // The only thing chained off this promise is the pick-#1 envelope, and it adds a small settle
+  // before dimming the screen. Measured from the start of a 620ms spring that settle put the dim
+  // at ~90% opacity over the ball-#N face the envelope exists to showcase.
+  //
+  // This is NOT the same as `exitBudget.totalMs`, and nothing should be scheduled as if it were:
+  // the envelope pick skips the hold, a reveal with no ball number never flies at all, and every
+  // superseded return above resolves with no FLIP. `totalMs` is the planner's worst case; this is
+  // what the run actually spent. What the two do share is a ceiling — see ENVELOPE_LEAD_MS.
+  await landing;
+  // The ball is out of the drum and its card has settled, so a breakpoint crossing the sim refused
+  // mid-flight can land now (#267) — otherwise resizing during a reveal keeps the old drum for the
+  // whole ceremony. This is the calmest moment in the beat: rescaling the pile mid-spring would
+  // hitch the very animation #269 waits out. Unconditional, before the ownership check, because a
+  // superseded run still leaves the drum sized for a viewport that no longer exists.
+  flushDrumResize();
+  // Whether this run still owns the screen. Waiting out the spring turned a window that used to be
+  // one tick into most of a second, and an abort landing inside it tears the stage down WITHOUT
+  // clearing `lastDropPick` — that reset only runs for idle/lobby/waiting — so the caller's guard
+  // alone would still queue a finale over the abort screen.
+  return token === choreoToken;
 }
 
 /**
@@ -1544,15 +1642,19 @@ function renderDrop(reveal: LotteryReveal): void {
     audio.stopRoll();
     audio.hit();
     show('drop', false); // the drop ball appears when the ball actually comes out
-    // Pick #1's envelope (#243) waits for the exit choreography to land its FLIP, so the dim
-    // never swallows the ball-#N extraction — the auditable moment. The choreography is itself
-    // time-capped (#215), so this settles promptly even in a hidden tab. The lastDropPick guard
-    // keeps a superseded flight from opening a stale envelope over a newer reveal, and the mode
-    // is captured NOW: a catch-up draining during the choreography must not launder its final
-    // compressed reveal into an eligible one.
+    // Pick #1's envelope (#243) waits for the exit choreography to land its FLIP — really land it
+    // now, spring included (#269) — so the dim never swallows the ball-#N extraction, the
+    // auditable moment. The choreography is itself time-capped (#215), so this settles promptly
+    // even in a hidden tab. The mode is captured NOW: a catch-up draining during the choreography
+    // must not launder its final compressed reveal into an eligible one.
+    //
+    // Two guards, because they catch different things. `landed` is the choreography saying it
+    // still owns the screen — an abort tears the stage down without clearing `lastDropPick`, so
+    // that guard alone would open a finale over the abort screen. `lastDropPick` catches a newer
+    // reveal having taken over.
     const modeAtReveal = playbackMode;
-    void runExitChoreography(reveal, num, range?.hue, oddsText, modeAtReveal).then(() => {
-      if (lastDropPick === reveal.pick) {
+    void runExitChoreography(reveal, num, range?.hue, oddsText, modeAtReveal).then((landed) => {
+      if (landed && lastDropPick === reveal.pick) {
         queueEnvelope(reveal, range?.hue, ENVELOPE_LEAD_MS.machine, modeAtReveal);
       }
     });
@@ -2348,6 +2450,7 @@ async function boot(): Promise<void> {
   byId('bulk-btn').addEventListener('click', () => void sendBulk());
   byId('audit-mode').addEventListener('change', () => void sendAuditMode());
   byId('setup-btn').addEventListener('click', () => void sendSetupRequest());
+  watchDrumSize();
   // Default the season picker to the year the page loaded — draft season in practice.
   (byId('setup-season') as HTMLInputElement).value = String(new Date().getFullYear());
   byId('sound-btn').addEventListener('click', () => audio.toggle());

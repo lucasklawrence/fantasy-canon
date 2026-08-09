@@ -12,16 +12,28 @@
 export const ENVELOPE_MS = 3600;
 
 /**
- * Extra beat before the overlay opens, per visual: the machine waits for the exit choreography's
- * FLIP separately (a promise, not a timer), then this small settle; the race needs the winning
- * cross/fall park (~900ms lock) to land on screen before the dim swallows it; the wheel needs its
- * landing ease plus the rest on the winner.
+ * Extra beat before the overlay opens, per visual. The keys are measured from different places,
+ * which is why they differ by an order of magnitude:
  *
- * None of them may exceed FINISH_LEAD_MS — past that the finish has already sealed the board and
- * the overlay dims a finale nobody is looking at any more. Asserted in envelopePlan.test.ts over
- * the whole key set, because naming visuals one at a time is how the wheel shipped at 2400ms.
+ * - `machine` is a settle **after** the payoff has landed. `runExitChoreography` waits out the
+ *   drop ball's FLIP before resolving (#269), and this is added on top. It used to be measured
+ *   from the spring's *start*, which put the dim at roughly 90% opacity over the ball-#N face it
+ *   exists to showcase.
+ * - `race` and `wheel` are timers that have to **cover** their payoff: the winning cross/fall park
+ *   (~900ms lock) and the landing ease plus its rest on the winner have no promise to wait on, so
+ *   the lead spans the payoff rather than following it.
+ *
+ * None of them is free to grow. On the last reveal the whole gap is {@link FINISH_LEAD_MS}, past
+ * which the finish has already sealed the board and the overlay dims a finale nobody is looking at
+ * any more; `envelopePlan.test.ts` pins that over the whole key set, because naming visuals one at
+ * a time is how the wheel shipped at 2400ms against an 1800ms gap.
+ *
+ * The machine is tighter still, because it is the composition of two independently-tuned things:
+ * the exit budget is sized to consume nearly the whole gap, so `exitBudget(FINISH_LEAD_MS).totalMs
+ * + machine` must ALSO stay inside it. That is the same mis-timed handoff, just inverted, and it
+ * has its own assertion.
  */
-export const ENVELOPE_LEAD_MS = { machine: 250, race: 1100, wheel: 1500 } as const;
+export const ENVELOPE_LEAD_MS = { machine: 100, race: 1100, wheel: 1500 } as const;
 
 export type PlaybackKind = 'catchup' | 'replay' | null;
 
