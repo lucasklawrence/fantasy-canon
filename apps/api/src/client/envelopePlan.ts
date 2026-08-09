@@ -13,7 +13,7 @@ export const ENVELOPE_MS = 3600;
 
 /**
  * Extra beat before the overlay opens, per visual. The keys are measured from different places,
- * which is why they differ by an order of magnitude:
+ * which is why they differ:
  *
  * - `machine` is a settle **after** the payoff has landed. `runExitChoreography` waits out the
  *   drop ball's FLIP before resolving (#269), and this is added on top. It used to be measured
@@ -23,17 +23,35 @@ export const ENVELOPE_MS = 3600;
  *   (~900ms lock) and the landing ease plus its rest on the winner have no promise to wait on, so
  *   the lead spans the payoff rather than following it.
  *
- * None of them is free to grow. On the last reveal the whole gap is {@link FINISH_LEAD_MS}, past
- * which the finish has already sealed the board and the overlay dims a finale nobody is looking at
- * any more; `envelopePlan.test.ts` pins that over the whole key set, because naming visuals one at
- * a time is how the wheel shipped at 2400ms against an 1800ms gap.
+ * The machine's value used to be boxed in at 100ms, because the exit chain's 1640ms floor plus the
+ * lead had to finish inside the 1800ms {@link FINISH_LEAD_MS} gap or the overlay dimmed a board the
+ * ball had already left. Live feedback was that 100ms reads as no pause at all — the card lands and
+ * the screen is dimming in the same glance. The finish now WAITS for the finale instead of racing
+ * it ({@link finaleHoldMs}), which takes the ceiling off and lets this be a real beat.
  *
- * The machine is tighter still, because it is the composition of two independently-tuned things:
- * the exit budget is sized to consume nearly the whole gap, so `exitBudget(FINISH_LEAD_MS).totalMs
- * + machine` must ALSO stay inside it. That is the same mis-timed handoff, just inverted, and it
- * has its own assertion.
+ * The bound that remains is hygiene rather than correctness: a lead longer than a natural reveal
+ * gap means the ceremony is sitting on its hands. `envelopePlan.test.ts` pins it over the whole key
+ * set, because naming visuals one at a time is how the wheel shipped at 2400ms against 1800.
  */
-export const ENVELOPE_LEAD_MS = { machine: 100, race: 1100, wheel: 1500 } as const;
+export const ENVELOPE_LEAD_MS = { machine: 500, race: 1100, wheel: 1500 } as const;
+
+/**
+ * How long the pick-#1 finale may hold the finish off the screen, measured from the reveal that
+ * triggers it (#243 live feedback).
+ *
+ * The board used to sweep in behind the overlay: the bot posts the finish as soon as its PNG
+ * renders, which lands mid-ceremony, so the finale played over a stage that had already moved on.
+ * The client defers the sweep instead — it is the only side that knows an envelope is coming, since
+ * per ADR 0008 nothing about the visual rides the wire.
+ *
+ * A DEADLINE rather than an open-ended latch, deliberately. A finale can fail to open after it has
+ * been promised — the tab goes hidden between the queue and the open, a superseded choreography
+ * never resolves — and an un-cleared latch would strand the final board for the life of the page.
+ * Late is recoverable; never is not.
+ */
+export function finaleHoldMs(leadMs: number, exitMs: number): number {
+  return Math.max(0, exitMs) + Math.max(0, leadMs) + ENVELOPE_MS;
+}
 
 export type PlaybackKind = 'catchup' | 'replay' | null;
 

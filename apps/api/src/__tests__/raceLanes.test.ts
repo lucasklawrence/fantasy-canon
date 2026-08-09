@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { assignBallRanges } from '../client/ballAssignments.js';
 import {
   assignLanes,
+  FALL_ZONE_END,
   FALL_ZONE_START,
   fallPosition,
   laneMetrics,
   lockKind,
+  PACK_FLOOR,
   PACK_MIN,
 } from '../client/raceLanes.js';
 
@@ -101,10 +103,51 @@ describe('fallPosition', () => {
     }
   });
 
-  it('clamps huge fields under the pack band instead of marching into it', () => {
-    // 30 teams would walk past the pack at the raw spacing — the clamp keeps every straggler
-    // (and therefore the whole parked order) left of the live racers.
-    expect(fallPosition(2, 30)).toBeLessThan(PACK_MIN);
+  it('keeps huge fields inside the standings zone instead of marching into the pack', () => {
+    expect(fallPosition(2, 30)).toBeLessThanOrEqual(FALL_ZONE_END);
     expect(fallPosition(2, 30)).toBeGreaterThanOrEqual(fallPosition(30, 30));
+  });
+
+  /**
+   * The live-feedback bug (#244 follow-up): the order was *there* — worst pick furthest back, each
+   * better pick a step ahead — but the step was a fixed 1.8% of the track, about 21px against a
+   * 28px ball. Neighbours overlapped, so the parked field read as a clump and the commissioner's
+   * report was that position on the board did not mean anything.
+   *
+   * A ball diameter is the honest floor: below it, two adjacent places are not visibly ordered.
+   */
+  it('separates adjacent places by more than a ball, at every league size', () => {
+    const BALL_DIAMETER_FRAC = 28 / 1200; // widest ball, widest track — the least forgiving case
+    for (const teamCount of [4, 8, 12, 14]) {
+      for (let pick = teamCount; pick > 2; pick -= 1) {
+        const gap = fallPosition(pick - 1, teamCount) - fallPosition(pick, teamCount);
+        expect(gap, `${teamCount} teams, picks ${pick} and ${pick - 1}`).toBeGreaterThan(
+          BALL_DIAMETER_FRAC,
+        );
+      }
+    }
+  });
+
+  it('uses the whole standings zone, so a small league is as legible as a big one', () => {
+    // A fixed step would leave a 4-team draw huddled at the back of a zone sized for 12.
+    for (const teamCount of [4, 8, 12]) {
+      expect(fallPosition(teamCount, teamCount)).toBeCloseTo(FALL_ZONE_START, 6);
+      expect(fallPosition(2, teamCount)).toBeGreaterThan(
+        FALL_ZONE_START + (FALL_ZONE_END - FALL_ZONE_START) * 0.6,
+      );
+    }
+  });
+
+  /**
+   * The second half of the same complaint. A racer still in contention could drift to 0.14 while a
+   * team already drawn sat parked at 0.21 — the live pack's floor reached into the parked field, so
+   * the board could show an eliminated team ahead of a contender. The zones must not touch.
+   */
+  it('never lets the live pack drift back into the parked order', () => {
+    expect(FALL_ZONE_END).toBeLessThan(PACK_FLOOR);
+    expect(PACK_FLOOR).toBeLessThanOrEqual(PACK_MIN);
+    for (const teamCount of [4, 12, 30]) {
+      expect(fallPosition(2, teamCount)).toBeLessThan(PACK_FLOOR);
+    }
   });
 });

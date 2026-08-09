@@ -21,12 +21,29 @@ export interface RaceLane {
   lane: number;
 }
 
-/** Track geometry as fractions of the drawable width, shared by the sim and its tests. */
+/**
+ * Track geometry as fractions of the drawable width, shared by the sim and its tests.
+ *
+ * The back of the track is the standings board: every team that has been drawn parks there in pick
+ * order, so by the finish the field reads bottom-to-top as the draft order itself. That zone needs
+ * real estate — the first cut gave it the leftmost 18% with a fixed 1.8%-per-place step, about 21px
+ * between neighbours against a 28px ball, so the parked field read as a clump and the ordering was
+ * invisible. It now owns everything behind the pack.
+ */
 export const FALL_ZONE_START = 0.03;
+/** Front of the standings zone. The pack never comes back past this, so the order stays readable. */
+export const FALL_ZONE_END = 0.42;
+/**
+ * How far back a still-racing team may drift. Strictly ahead of {@link FALL_ZONE_END}: the old
+ * wander floor (`PACK_MIN - 0.1` = 0.14) reached deep INTO the parked field, so a team still in
+ * contention could sit behind one already eliminated — which is precisely the reading the parked
+ * order is supposed to give.
+ */
+export const PACK_FLOOR = 0.45;
 /** Left edge of the band the un-locked pack jockeys inside. */
-export const PACK_MIN = 0.24;
+export const PACK_MIN = 0.48;
 /** Right edge of the jockeying band — nobody drifts across the line uninvited. */
-export const PACK_MAX = 0.68;
+export const PACK_MAX = 0.76;
 /** The finish line. */
 export const FINISH_X = 0.86;
 /** Where a winner parks, just past the line. */
@@ -86,9 +103,14 @@ export function lockKind(pick: number, lockedPicks: number[], teamCount: number)
 /**
  * Where a fallen racer parks, as a fraction of the drawable width. The worst pick sits furthest
  * back and each better pick a step ahead, so the dropped-off field reads as the order so far.
- * Clamped under {@link PACK_MIN} — the parked stragglers never mix back into the live pack.
+ *
+ * Spread across the whole standings zone rather than stepped by a fixed amount, so the gap between
+ * neighbours is as large as the league size allows and a 4-team draw is as legible as a 12-team
+ * one. The last pick to fall is #2 — pick #1 always crosses the line — so the front of the zone is
+ * left for it and the arithmetic runs over `teamCount - 1` places.
  */
 export function fallPosition(pick: number, teamCount: number): number {
-  const stepsAhead = Math.max(0, teamCount - pick);
-  return Math.min(PACK_MIN - 0.03, FALL_ZONE_START + stepsAhead * 0.018);
+  const places = Math.max(1, teamCount - 1);
+  const stepsAhead = Math.min(places, Math.max(0, teamCount - pick));
+  return FALL_ZONE_START + (stepsAhead / places) * (FALL_ZONE_END - FALL_ZONE_START);
 }
