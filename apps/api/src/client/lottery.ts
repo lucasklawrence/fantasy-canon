@@ -53,6 +53,9 @@ import {
   type CatchUpContext,
 } from './replayTimeline.js';
 import { configuredMaxTeamBalls, runHandshake } from './sdk.js';
+// EXTRACT_CAP_MS is the extraction race cap — the sim's rAF loop never resolves in a hidden tab
+// (#215). It lives with the planner, which has to know the worst case it may re-plan around (#265).
+import { exitBudget, EXTRACT_CAP_MS, FINISH_LEAD_MS, FLIP_MS } from './exitBudget.js';
 import { apiPath, isDiscordActivity, proxyBase, wsUrl } from './transport.js';
 
 function byId(id: string): HTMLElement {
@@ -272,6 +275,15 @@ function ensureLogos(rows: LotteryOddsRow[]): void {
       raceSim?.reface();
       hopperSim?.reface();
       redressDropBall();
+      // A logo that lands mid-hold still makes it onto the ball being held up (#265) — the beat
+      // exists for the logo, so catching up here matters more than it does for the drop ball.
+      if (holdFace) {
+        const hold = document.getElementById('tube-hold');
+        if (hold) {
+          paintBallFace(hold, holdFace.team, holdFace.hue);
+          if (hold.classList.contains('logo-face')) hold.textContent = '';
+        }
+      }
     };
     img.onerror = () => logoImages.set(teamId, { url, img: 'failed' });
     // `v` rides the proxy URL so a *changed* logo escapes the hour-long browser/proxy cache the
@@ -339,6 +351,23 @@ function openEnvelope(reveal: LotteryReveal, hue: number | undefined, token: num
 }
 
 /**
+ * Will this reveal get the envelope? The rule itself lives in `envelopePlan` — this only gathers
+ * the browser-side inputs. Both the queueing and the exit choreography ask it, so "which pick owns
+ * the finale" stays a single decision: #265 first spelled `pick === 1` inline in the choreography,
+ * which quietly disagreed with this predicate for a catch-up or a hidden tab and would have had to
+ * be edited in two files the day the finale pick changes.
+ *
+ * Both callers must pass the SAME `mode` — see `queueEnvelope` — or they can reach opposite
+ * answers and leave pick #1 with neither a hold nor an envelope.
+ */
+function willEnvelope(pick: number, mode: PlaybackKind): boolean {
+  const reducedMotion =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return envelopeEligible(pick, mode, document.visibilityState === 'hidden', reducedMotion);
+}
+
+/**
  * Queue the envelope behind the visual's own reveal moment — the machine's extraction FLIP and
  * the race's winning park must land on screen before the dim swallows them. Token-guarded: any
  * later reveal, phase change, or playback start silently retires a queued open.
@@ -354,12 +383,7 @@ function queueEnvelope(
   leadMs: number,
   mode: PlaybackKind,
 ): void {
-  const reducedMotion =
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (!envelopeEligible(reveal.pick, mode, document.visibilityState === 'hidden', reducedMotion)) {
-    return;
-  }
+  if (!willEnvelope(reveal.pick, mode)) return;
   const token = ++envelopeToken;
   envelopeTimer = window.setTimeout(() => openEnvelope(reveal, hue, token), leadMs);
 }
@@ -1048,8 +1072,8 @@ function renderWaiting(start: LotteryStart, drawn: { pick: number; team: string 
 
 /** Chute-glow lead before the reveal is due — the drum-roll's "something's coming" cue. */
 const CHUTE_GLOW_LEAD_MS = 1150;
-/** Tube descent duration; a fixed timer rather than animationend so it settles even when hidden. */
-const TUBE_MS = 420;
+/** The face the hold currently wears, so a late-decoding logo can repaint it (#242's rule). */
+let holdFace: { team: string; hue: number | undefined } | null = null;
 /** Diameter of the ball sliding the chute — must match `#tube-ball` in the page CSS (#258). */
 function tubeBallPx(): number {
   return cssPx('--tube-ball-px', 18);
@@ -1099,8 +1123,9 @@ function resetChute(): void {
   exitInFlight = null;
   resetGlow();
   const tube = byId('tube-ball');
-  tube.classList.remove('transit');
+  tube.classList.remove('transit', 'logo-face');
   tube.style.background = '';
+  hideHold();
 }
 
 /** Swap a node for a bare clone — the only way to retrigger its CSS animations. */
@@ -1111,10 +1136,18 @@ function replaceNode(id: string): HTMLElement {
   return fresh;
 }
 
-/** Where the drop ball's FLIP starts: the tube ball's centre, in viewport coordinates (#258). */
+/**
+ * Where the drop ball's FLIP starts, in viewport coordinates (#258) — and at what diameter (#265).
+ *
+ * The size travels with the position because the two anchors are no longer the same ball: a plain
+ * exit hands off from the 18px chute ball, a held one from the 56px ball at the mouth. Scaling
+ * both from the chute ball's diameter would shrink the held ball ~3x in the single frame between
+ * `hideHold` and the spring — a pop at precisely the handoff this choreography exists to smooth.
+ */
 interface FlipAnchor {
   cx: number;
   cy: number;
+  px: number;
 }
 
 /**
@@ -1132,10 +1165,13 @@ function flipFromChute(ball: HTMLElement, from: FlipAnchor): void {
   }
   const dx = from.cx - (to.left + to.width / 2);
   const dy = from.cy - (to.top + to.height / 2);
-  // Scale follows the tube ball's real diameter (#258) rather than the old hardcoded `.14`,
-  // which was tuned when that ball was 14px.
-  const scale = Math.min(1, tubeBallPx() / to.width);
+  // Scale follows the real diameter of whatever the ball is handed off FROM (#258/#265) rather
+  // than the old hardcoded `.14`, which was tuned when the chute ball was 14px.
+  const scale = Math.min(1, from.px / to.width);
   ball.style.transform = `translate(${dx}px, ${dy}px) scale(${scale.toFixed(3)})`;
+  // The spring's length is the planner's FLIP_MS, not a number typed into the stylesheet — the
+  // budget is only honest while the phase it bills actually lasts that long.
+  ball.style.setProperty('--flip-ms', `${FLIP_MS}ms`);
   // Double rAF: the start transform must paint before the transition begins.
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
@@ -1189,44 +1225,93 @@ async function runExitChoreography(
   num: number | null,
   hue: number | undefined,
   oddsText: string,
+  /**
+   * The playback mode AS OF THE REVEAL, passed in for the same reason `queueEnvelope` takes it:
+   * this function reads it from behind its awaits, by which point a catch-up may have drained and
+   * flipped the global to live. Reading it live here made the hold and the envelope disagree —
+   * the choreography would suppress the hold believing an envelope was coming, and `queueEnvelope`
+   * would then decline to open one, leaving pick #1 with neither.
+   */
+  mode: PlaybackKind,
 ): Promise<void> {
   const token = ++choreoToken;
   exitInFlight = reveal.pick;
+  // Whatever the run we just superseded left at the mouth is the PREVIOUS pick's ball. Its own
+  // cleanup only happens when its hold timer wakes, which is up to a full hold too late — by then
+  // the headline, chips and board all read pick N+1 with pick N's logo still held up beside them.
+  hideHold();
+  // What actually fits before the next event supersedes this one (#265). Everything below reads
+  // from the plan rather than from constants, so the chain can never outlast its own gap.
+  const gapMs = revealGapMs(reveal);
+  const planned = exitBudget(gapMs);
+  const startedAt = performance.now();
   // Glow through the exit even when the reveal outran the glow's lead timer.
   byId('chute').classList.add('active');
   // The extraction resolves from the sim's rAF loop — which never runs in a hidden tab. The race
   // keeps the reveal bounded regardless: setTimeout fires even hidden (clamped, but it fires), so
   // a backgrounded viewer still has the correct drop state waiting when they return.
   const flew =
-    num !== null
+    num !== null && planned.mode !== 'skip'
       ? await Promise.race([
           hopper().extractBall(num),
-          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1800)),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), EXTRACT_CAP_MS)),
         ])
       : false;
-  if (token !== choreoToken) return;
-  if (flew) {
+  if (token !== choreoToken) return hideHold();
+  // Re-plan against what the extraction ACTUALLY cost. It is the one phase whose length this side
+  // cannot dictate — a throttled tab can spend the whole EXTRACT_CAP_MS in there — and spending a
+  // hold out of a budget that was already blown is how the drop card gets wiped mid-spring.
+  const budget = flew ? exitBudget(gapMs, performance.now() - startedAt) : planned;
+  // Whether the ball actually SLID THE TUBE, which is not the same as whether it left the pile: a
+  // re-plan can find the gap already spent and drop the descent. The FLIP anchor below keys off
+  // this rather than off `flew`, because a tube ball that never got `.transit` is parked ~44px
+  // above the mouth at opacity 0 — springing the card from there is the one thing that made
+  // skipping the descent look broken.
+  const descended = flew && budget.transitMs > 0;
+  if (descended) {
     const tube = byId('tube-ball');
     // The real face, not just the hue (#258) — same helper the drop ball uses, so the pile, the
     // tube and the drop ball are unmistakably one ball.
     paintBallFace(tube, reveal.team, hue);
+    tube.style.setProperty('--tube-ms', `${budget.transitMs}ms`);
     tube.classList.remove('transit');
     void tube.offsetWidth; // restart the CSS animation for this transit
     tube.classList.add('transit');
-    await new Promise((resolve) => setTimeout(resolve, TUBE_MS));
-    if (token !== choreoToken) return;
+    await new Promise((resolve) => setTimeout(resolve, budget.transitMs));
+    if (token !== choreoToken) return hideHold();
+    // The envelope pick (#243) gets no hold: the envelope is chained off this promise and runs
+    // 3600ms inside the same gap, so a hold there is 600ms taken straight out of the finale, and
+    // that pick already has the better showcase. Asked through the shared predicate, so a reveal
+    // that will NOT actually get an envelope — a catch-up, a hidden tab — keeps its hold.
+    if (budget.mode === 'full' && !willEnvelope(reveal.pick, mode)) {
+      await presentAtMouth(reveal, num, hue, budget.holdMs);
+      if (token !== choreoToken) return hideHold();
+    }
   }
   exitInFlight = null;
   const tube = byId('tube-ball');
   // Measure BEFORE tearing the transit down, and measure the BALL, not the chute: while
   // `transit` is applied the ball's own rect is exactly where it parked, so the FLIP needs no
   // constant tracking the keyframe's end or the ball's diameter — the two numbers this PR had
-  // to correct once already. A ball that never flew is still sitting above the mouth at opacity
-  // 0, so there the chute is the honest anchor.
-  const fromRect = flew ? tube.getBoundingClientRect() : byId('chute').getBoundingClientRect();
-  const fromAnchor: FlipAnchor = flew
-    ? { cx: fromRect.left + fromRect.width / 2, cy: fromRect.top + fromRect.height / 2 }
-    : { cx: fromRect.left + fromRect.width / 2, cy: fromRect.bottom - tubeBallPx() / 2 };
+  // to correct once already. A ball that did not descend — never extracted, or extracted into a
+  // gap the re-plan found already spent — is still parked above the mouth at opacity 0, so there
+  // the chute is the honest anchor: the card springs from the mouth, which is the last place the
+  // viewer saw the ball either way.
+  const held = holdRect();
+  const fromRect =
+    held ?? (descended ? tube.getBoundingClientRect() : byId('chute').getBoundingClientRect());
+  const fromAnchor: FlipAnchor =
+    held || descended
+      ? {
+          cx: fromRect.left + fromRect.width / 2,
+          cy: fromRect.top + fromRect.height / 2,
+          px: fromRect.width || tubeBallPx(),
+        }
+      : {
+          cx: fromRect.left + fromRect.width / 2,
+          cy: fromRect.bottom - tubeBallPx() / 2,
+          px: tubeBallPx(),
+        };
   tube.classList.remove('transit', 'logo-face');
   tube.style.background = '';
   byId('chute').classList.remove('active');
@@ -1238,6 +1323,100 @@ async function runExitChoreography(
   replaceNode('drop-team').textContent = reveal.team;
   replaceNode('drop-odds').textContent = oddsText;
   flipFromChute(ball, fromAnchor);
+  // After the FLIP has measured its start, so retiring the hold cannot make the ball vanish
+  // before the drop card has taken its place.
+  hideHold();
+}
+
+/**
+ * The hold (#265): once the ball clears the chute's clip it is handed to a bigger element that
+ * grows to camera size wearing the team's face, and stays there for `holdMs`. Only reached when
+ * the budget said the gap can afford it.
+ *
+ * Everything is a plain timer and every wait is bounded, so a hidden tab lands in the right end
+ * state. Retiring a superseded hold is the caller's job — its `choreoToken` check runs the moment
+ * this returns, with nothing in between that could change the answer.
+ */
+async function presentAtMouth(
+  reveal: LotteryReveal,
+  num: number | null,
+  hue: number | undefined,
+  holdMs: number,
+): Promise<void> {
+  const chute = byId('chute');
+  const hold = byId('tube-hold');
+  // Size comes from `--hold-px` (stepped with the drum at #256's breakpoint) read by the
+  // stylesheet itself, so there is no third copy of the number here to drift.
+  hold.style.setProperty('--hold-grow', `${Math.min(260, Math.round(holdMs * 0.45))}ms`);
+  hold.style.setProperty('--hold-top', `${chute.offsetTop + chute.offsetHeight - 20}px`);
+  hold.style.left = `${chute.offsetLeft + chute.offsetWidth / 2}px`;
+  holdFace = { team: reveal.team, hue };
+  paintBallFace(hold, reveal.team, hue);
+  // The logo is the point, so the ball number does not sit on top of it — the drop ball leads
+  // with `#N` a beat later anyway. Without a logo the number is the ball's only identity.
+  hold.textContent = hold.classList.contains('logo-face') || num === null ? '' : `#${num}`;
+  hold.classList.remove('present');
+  void hold.offsetWidth; // restart the grow for this pick
+  hold.classList.add('present');
+  await new Promise((resolve) => setTimeout(resolve, holdMs));
+}
+
+/** The hold ball's rect while it is on screen, so the FLIP starts from what the viewer sees. */
+function holdRect(): DOMRect | null {
+  const hold = document.getElementById('tube-hold');
+  if (!hold || !hold.classList.contains('present')) return null;
+  const rect = hold.getBoundingClientRect();
+  return rect.width > 0 ? rect : null;
+}
+
+/**
+ * Retire the hold. Safe at any time — every superseded path calls it on the way out, and a fresh
+ * reveal clears it in its prologue before anything else can look at it.
+ *
+ * Unconditional on purpose. A superseded run cannot blank a successor's ball by calling this late:
+ * its own hold timer runs at most HOLD_MAX_MS, while a successor needs EXTRACT_MS + TUBE_MIN_MS
+ * before it has a ball to stage — so the stale wake-up always lands first, on an already-cleared
+ * element. An ownership token here would be a second mechanism guarding a race the timings
+ * already rule out.
+ */
+function hideHold(): undefined {
+  holdFace = null;
+  const hold = document.getElementById('tube-hold');
+  if (!hold) return;
+  hold.classList.remove('present', 'logo-face');
+  hold.style.background = '';
+  hold.textContent = '';
+}
+
+/**
+ * The gap this reveal has before the next event supersedes it (#265).
+ *
+ * - During replay or catch-up the cursor is the authority, and it is asked FIRST: it holds the
+ *   real next step — including the finish that follows the last reveal — and `nextDelayMs` applies
+ *   `catchUpPace`'s sprint compression itself, so this never re-derives a pace it could get wrong.
+ *   It must be `nextDelayMs`, not `remainingMs`: the cursor nulls its timer handle before
+ *   dispatching a step, so a reveal handler reading `remainingMs` gets 0 every single time — an
+ *   earlier revision did exactly that and silently planned every replay against the live pacing.
+ * - Live, `delayMs` is the bot's beat→reveal pacing, and that is also the reveal→reveal gap this
+ *   wants: the ceremony loop posts the next beat immediately after a reveal (no sleep between
+ *   them), so the next event that supersedes this exit — the next REVEAL — lands one `delayMs`
+ *   away. The intervening beat is expected to overlap the exit and does not wipe the drop card;
+ *   see `armChute`.
+ * - A drained cursor or an older api with no pacing falls back to the finish lead, the tightest
+ *   gap that still animates: guessing generously would overrun a gap that turned out to be short.
+ */
+function revealGapMs(reveal: LotteryReveal): number {
+  if (playbackMode !== null && cursor) {
+    // Never fall through to the live pacing from here. `delayMs` is 5000–30000 while a replay runs
+    // at a compressed cadence, so treating "the cursor has nothing queued" as "unknown" would hand
+    // the planner a runway several times the real one. Nothing queued means the finish is next.
+    const next = cursor.nextDelayMs();
+    return next > 0 ? next : FINISH_LEAD_MS;
+  }
+  // No next pick at all — only the finish. Read from the payload's own `remaining` because that is
+  // direction-agnostic (#258 assumed pick #1 was last, which `first-to-last` inverts).
+  if (reveal.remaining.length === 0) return FINISH_LEAD_MS;
+  return currentStart?.delayMs ?? FINISH_LEAD_MS;
 }
 
 function renderDrop(reveal: LotteryReveal): void {
@@ -1307,7 +1486,7 @@ function renderDrop(reveal: LotteryReveal): void {
     // is captured NOW: a catch-up draining during the choreography must not launder its final
     // compressed reveal into an eligible one.
     const modeAtReveal = playbackMode;
-    void runExitChoreography(reveal, num, range?.hue, oddsText).then(() => {
+    void runExitChoreography(reveal, num, range?.hue, oddsText, modeAtReveal).then(() => {
       if (lastDropPick === reveal.pick) {
         queueEnvelope(reveal, range?.hue, ENVELOPE_LEAD_MS.machine, modeAtReveal);
       }

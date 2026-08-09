@@ -189,13 +189,14 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
      hopperSim as the scene size, and the canvas fills the padding box — 3px of border on each
      side smaller than the element — so .hopper adds the border back rather than the sim being
      handed a value 6px too large for what it actually draws into. */
-  body { --hopper-px: 254px; --tube-ball-px: 18px; --chute-px: 20px; }
-  /* One step, at the same breakpoint the layout uses. The chute and its ball scale WITH the drum
-     (#256 review): the pile's ball radius is packing-fit to the canvas (#211), so growing only
-     the drum would make the ball that leaves the pile visibly shrink as it enters the tube —
-     the same identity break #258 just closed at the other end of the handoff. */
+  body { --hopper-px: 254px; --tube-ball-px: 18px; --chute-px: 20px; --hold-px: 56px; }
+  /* One step, at the same breakpoint the layout uses. The chute, its ball and the ball held at
+     the mouth (#265) all scale WITH the drum (#256 review): the pile's ball radius is packing-fit
+     to the canvas (#211), so growing only the drum would make the ball that leaves the pile
+     visibly shrink as it enters the tube — the same identity break #258 just closed at the other
+     end of the handoff. */
   @media (min-width: 1500px) {
-    body:not(.race) { --hopper-px: 334px; --tube-ball-px: 23px; --chute-px: 26px; }
+    body:not(.race) { --hopper-px: 334px; --tube-ball-px: 23px; --chute-px: 26px; --hold-px: 72px; }
   }
   .hopper { position: relative; width: calc(var(--hopper-px) + 6px);
     height: calc(var(--hopper-px) + 6px); margin: 10px auto 0; border-radius: 50%;
@@ -210,6 +211,32 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     background: linear-gradient(180deg, rgba(43,53,80,.28), rgba(43,53,80,.55));
     border: 1px solid #2b3550; border-top: none; border-radius: 0 0 10px 10px;
     transition: box-shadow .3s, border-color .3s; }
+  /* The hold (#265). The chute is ~20px wide and clips, so the ball can never be READ inside it;
+     once it clears the mouth it is handed to this, which lives outside the clip and grows to
+     camera size. Absolutely positioned so the drum above it never reflows mid-reveal, and only
+     ever shown when exitBudget says the gap affords the beat. */
+  .machine-left { position: relative; }
+  #tube-hold { position: absolute; left: 50%; top: var(--hold-top, 0px);
+    width: var(--hold-px); height: var(--hold-px);
+    margin-left: calc(var(--hold-px) / -2); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 15px; color: #14181f; letter-spacing: -.3px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.55), 0 0 26px rgba(245,214,123,.22);
+    opacity: 0; transform: scale(.18); transform-origin: 50% 0;
+    pointer-events: none; z-index: 3; }
+  /* Grow, then hold: forwards-filled so the ball simply STAYS at full size for the rest of the
+     beat — no second animation, and a hidden tab still ends in the right state. */
+  #tube-hold.present { animation: holdgrow var(--hold-grow, 240ms)
+    cubic-bezier(.2,.9,.3,1.25) forwards; }
+  @keyframes holdgrow { from { opacity: 0; transform: scale(.18) }
+    to { opacity: 1; transform: scale(1) } }
+  /* Reserve the overhang: the hold is absolutely positioned so it adds no height, and on the
+     phone stack the drum panel is followed directly by the reveal column. The ball is placed
+     20px up into the mouth, so it hangs (--hold-px - 20) below it; 4px of clearance on top of
+     that. Derived rather than a fixed 40px, which was tuned for the 56px ball and left the wide
+     breakpoint's 72px one hanging 12px out of the panel. */
+  body:not(.race) .machine-left { padding-bottom: calc(var(--hold-px) - 16px); }
+
   .chute.active { border-color: rgba(245,214,123,.5);
     box-shadow: 0 0 14px rgba(245,214,123,.28), inset 0 0 8px rgba(245,214,123,.18); }
 
@@ -240,7 +267,11 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   #tube-ball { width: var(--tube-ball-px); height: var(--tube-ball-px);
     left: calc(50% - var(--tube-ball-px) / 2); top: calc(var(--tube-ball-px) * -1);
     background-size: cover; background-position: center; }
-  #tube-ball.transit { animation: tube .4s cubic-bezier(.45,0,.85,.6) forwards; }
+  /* Duration comes from the exit planner via --tube-ms (#265), not from a number typed here: the
+     budget decides how much of the gap the descent may spend, and a fixed .4s turned every extra
+     millisecond it granted into a frozen ball parked in the tube. The literal is the floor the
+     planner never goes below, kept only as the pre-first-reveal fallback. */
+  #tube-ball.transit { animation: tube var(--tube-ms, .4s) cubic-bezier(.45,0,.85,.6) forwards; }
   #drum .now { font-size: 22px; font-weight: 800; text-align: center; color: #f5d67b;
     animation: pulse 0.9s ease-in-out infinite; margin: 8px 0 12px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
@@ -291,7 +322,9 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     font-size: 34px; box-shadow: 0 10px 30px rgba(0,0,0,.55); will-change: transform; }
   /* Handoff from the chute exit: the client sets a translate+scale start transform, then clears
      it under this transition (FLIP). .fall is the fallback when the chute can't be measured. */
-  #drop .dropball.flip { transition: transform .62s cubic-bezier(.22,1.35,.36,1); }
+  /* --flip-ms is written from the planner's FLIP_MS (#265) — this phase is the one the budget
+     most often gets billed for, so the stylesheet must not hold a second opinion about it. */
+  #drop .dropball.flip { transition: transform var(--flip-ms, .62s) cubic-bezier(.22,1.35,.36,1); }
   #drop .dropball.fall { animation: drop .8s cubic-bezier(.22,1.4,.36,1); }
   /* Logo face (#242): the ball number now sits on artwork, so it needs its own contrast. */
   #drop .dropball.logo-face { color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.9),
@@ -352,6 +385,11 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     .hopper.spinning, .pullball, #drop .dropball, #drop .team, #drop .odds,
     .confetti, #waiting .pulse, #drum .now { animation: none !important; transition: none !important; }
     #drop .dropball.flip { transition: none !important; }
+    /* The hold is currently unreachable under reduced motion — extractBall resolves false, so the
+       choreography never flies and presentAtMouth is never called — but the sheet should not
+       depend on a guard in another module. If it ever does render, it appears at full size with
+       no grow rather than animating. */
+    #tube-hold.present { animation: none !important; opacity: 1; transform: scale(1); }
     /* The backdrop stays — it is atmosphere, not motion — but it stops drifting (#256). */
     .ambient span { animation: none !important; }
     /* The canvas pile honors this too — hopperSim renders a settled still frame, no loop. */
@@ -445,6 +483,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
       <div class="machine-left" id="machine-left">
         <div class="hopper" id="hopper"><canvas id="hopper-canvas"></canvas></div>
         <div class="chute" id="chute"><div class="pullball" id="tube-ball"></div></div>
+        <div id="tube-hold" aria-hidden="true"></div>
         <div class="racetrack hidden" id="racetrack"><canvas id="race-canvas"></canvas></div>
       </div>
       <div>

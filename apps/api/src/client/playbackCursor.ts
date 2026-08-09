@@ -50,6 +50,18 @@ export interface PlaybackCursor {
   peek(): PendingStep | undefined;
   /** Milliseconds left before the head step fires. Frozen while paused. */
   remainingMs(): number;
+  /**
+   * **For step handlers:** how long until the next event, read from inside `onStep` — scale
+   * included, exactly what the cursor is about to arm. 0 when this step is the last.
+   *
+   * It is the only reading that works there. `arm` nulls the timer handle before dispatching, so
+   * {@link remainingMs} returns 0 for the whole duration of a step; a handler that asks it gets a
+   * plausible-looking zero rather than an answer.
+   *
+   * Outside a handler this reads the *armed* step instead, because the head stays queued until its
+   * timer fires — ask {@link remainingMs} there.
+   */
+  nextDelayMs(): number;
   /** True between `start()` and the queue draining (or `stop()`), paused or not. */
   isRunning(): boolean;
   /** True while frozen by {@link pause}. */
@@ -91,6 +103,20 @@ export function createPlaybackCursor(
     if (paused) return bankedMs;
     if (timer === null) return 0;
     return Math.max(0, armedDelayMs - (clock.now() - armedAt));
+  }
+
+  /**
+   * Mirrors what `schedule` will arm with. Read during `onStep` the head has already been shifted,
+   * so `queue[0]` is the next event and `queue.length` is the depth `scaleDelay` will see.
+   */
+  function nextDelayMs(): number {
+    // Paused, the head has not fired and resume re-arms it from `bankedMs`, not from its own
+    // delay — so the honest answer about "the next step" is that it is frozen and unknowable
+    // from here. Returning the unbanked delay would hand a planner a runway that does not exist.
+    if (!running || paused) return 0;
+    const next = queue[0];
+    if (!next) return 0;
+    return scaleDelay ? scaleDelay(next.delayMs, queue.length) : next.delayMs;
   }
 
   function arm(delayMs: number): void {
@@ -179,6 +205,7 @@ export function createPlaybackCursor(
     pending: () => [...queue],
     peek: () => queue[0],
     remainingMs,
+    nextDelayMs,
     isRunning: () => running,
     isPaused: () => paused,
   };
