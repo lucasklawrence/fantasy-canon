@@ -61,6 +61,25 @@ function Get-Health {
     }
 }
 
+# Config is checked on whichever side answered. Both are worth running: the local check proves the
+# process is configured, the public one proves the tunnel is reaching THAT process and not a stale
+# instance left over from an earlier session.
+function Test-HealthConfig {
+    param($Health, [string]$Label)
+    # A missing bundle is this stack's quietest failure: the Activity loads and then 503s fetching
+    # its own script, which from a phone looks exactly like a dead tunnel.
+    if ($Health.config.lotteryBundle) { Report PASS "lottery bundle ($Label)" 'built' }
+    else { Report FAIL "lottery bundle ($Label)" 'missing -- run: pnpm -C apps/api run build:client, then restart the api' }
+    # The dashboard bundle is not cosmetic either: the Activity opens at the root, which serves the
+    # dashboard while the stage is idle, and that page carries the "Start a lottery" doorway (#253).
+    if ($Health.config.dashboardBundle) { Report PASS "dashboard bundle ($Label)" 'built' }
+    else { Report FAIL "dashboard bundle ($Label)" 'missing -- the idle Activity, and #253 start-from-idle, land on a 503' }
+    if ($Health.config.stageKey) { Report PASS "stage key ($Label)" 'configured' }
+    else { Report FAIL "stage key ($Label)" 'EMPTY -- /api/lottery/* is unauthenticated on a public hostname' }
+    if ($Health.config.clientId) { Report PASS "client id ($Label)" 'configured' }
+    else { Report FAIL "client id ($Label)" 'empty -- the Activity SDK handshake needs it' }
+}
+
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Write-Host ''
 Write-Host "fantasy-canon preflight  ($RepoRoot)" -ForegroundColor Cyan
@@ -142,14 +161,7 @@ if (-not $SkipLocal) {
     }
     else {
         Report PASS 'api /healthz (local)' "phase=$($local.stage.phase) uptime=$([int]$local.uptimeSec)s"
-        # A missing bundle is this stack's quietest failure: the Activity loads and then 503s
-        # fetching its own script, which from a phone looks exactly like a dead tunnel.
-        if ($local.config.lotteryBundle) { Report PASS 'lottery client bundle' 'built' }
-        else { Report FAIL 'lottery client bundle' 'missing -- run: pnpm -C apps/api run build:client, then restart the api' }
-        if ($local.config.stageKey) { Report PASS 'stage key (api side)' 'configured' }
-        else { Report FAIL 'stage key (api side)' 'EMPTY -- /api/lottery/* is unauthenticated on a public hostname' }
-        if ($local.config.clientId) { Report PASS 'client id (api side)' 'configured' }
-        else { Report FAIL 'client id (api side)' 'empty -- the Activity SDK handshake needs it' }
+        Test-HealthConfig $local 'local'
     }
 
     # --- State ------------------------------------------------------------------------------------
@@ -189,6 +201,10 @@ if ($PublicUrl) {
     }
     else {
         Report PASS 'api /healthz (public)' "phase=$($public.stage.phase) uptime=$([int]$public.uptimeSec)s"
+        # Re-checked through the tunnel, not just locally: this is the only evidence that the
+        # hostname reaches the process you think it does. It is also the ONLY config check that
+        # runs under -SkipLocal, which is how you check from the road.
+        Test-HealthConfig $public 'public'
         # A doorbell nobody answered is the #250 failure mode: the Activity records the press and
         # the bot never acts, so the commissioner sees a stuck button and no explanation.
         $stuck = @()

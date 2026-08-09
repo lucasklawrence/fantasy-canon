@@ -1,23 +1,38 @@
 # cloudflared NAMED tunnel -- stable hostname for the Activity's URL mapping (#246).
 #
-# Copy to %USERPROFILE%\.cloudflared\config.yml and fill in the two placeholders.
-#
 # Why named and not a quick tunnel: a quick tunnel gets a random *.trycloudflare.com hostname that
 # changes every restart and dies silently. The Discord portal URL mapping is set ONCE and cannot
 # be updated from a phone, so a rotating hostname is disqualifying for an unattended window.
 # A named tunnel keeps the same hostname across restarts and reboots.
 #
-# Requires a domain on Cloudflare -- that is what a public hostname is attached to. Setup, once:
+# Requires a domain on Cloudflare -- that is what a public hostname is attached to.
+#
+# Setup, once, in an ELEVATED PowerShell:
 #
 #   cloudflared tunnel login                       # browser, pick the zone
 #   cloudflared tunnel create fantasy-canon        # prints the UUID + writes the credentials json
 #   cloudflared tunnel route dns fantasy-canon lottery.example.com
-#   cloudflared service install                    # runs it as a Windows service, survives reboot
+#
+#   # THE STEP THAT IS EASY TO MISS. `cloudflared service install` runs the service as LocalSystem,
+#   # which does NOT read your user profile -- it looks in its own service profile. Leave the
+#   # config and credentials under C:\Users\<you>\.cloudflared and the service starts, finds
+#   # nothing, and the tunnel is silently down. Copy BOTH files across first:
+#   $svc = "C:\Windows\System32\config\systemprofile\.cloudflared"
+#   New-Item -ItemType Directory -Force $svc
+#   Copy-Item "$env:USERPROFILE\.cloudflared\<TUNNEL-UUID>.json" $svc
+#   Copy-Item .\scripts\ops\cloudflared-config.example.yml "$svc\config.yml"   # then edit it there
+#
+#   cloudflared service install                    # survives reboot
+#   Get-Service cloudflared                        # expect Running
 #
 # Then set the Discord portal URL mapping to https://lottery.example.com and leave it alone.
+#
+# Verify the service is actually serving, not merely running:
+#   Invoke-WebRequest https://lottery.example.com/healthz -UseBasicParsing
 
 tunnel: REPLACE-WITH-TUNNEL-UUID
-credentials-file: C:\Users\REPLACE-WITH-USER\.cloudflared\REPLACE-WITH-TUNNEL-UUID.json
+# Must be the SERVICE profile copy, not the one under C:\Users -- see the note above.
+credentials-file: C:\Windows\System32\config\systemprofile\.cloudflared\REPLACE-WITH-TUNNEL-UUID.json
 
 # Keep the connection warm so the first request of the evening is not the one that reconnects.
 originRequest:

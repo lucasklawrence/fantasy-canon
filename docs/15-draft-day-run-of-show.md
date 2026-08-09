@@ -15,9 +15,15 @@ Do this once, well before the window. Details in
 [`scripts/ops/cloudflared-config.example.yml`](../scripts/ops/cloudflared-config.example.yml).
 
 1. **Named tunnel.** `cloudflared tunnel login` → `tunnel create fantasy-canon` →
-   `tunnel route dns fantasy-canon <hostname>` → `cloudflared service install`. A named tunnel keeps
-   its hostname across restarts; a quick tunnel does not, and the portal mapping cannot be changed
-   from a phone.
+   `tunnel route dns fantasy-canon <hostname>` → **copy config + credentials into the service
+   profile** → `cloudflared service install`. A named tunnel keeps its hostname across restarts; a
+   quick tunnel does not, and the portal mapping cannot be changed from a phone.
+
+   The copy step is not optional and is the easiest thing here to get wrong: the service runs as
+   LocalSystem and reads `C:\Windows\System32\config\systemprofile\.cloudflared\`, **not** your
+   user profile. Skip it and the service starts, finds no credentials, and the tunnel is silently
+   down. Exact commands are in the config template.
+
 2. **Portal URL mapping** → `https://<hostname>`, root mapping. Set once, then leave it.
 3. **Supervision.** From an elevated PowerShell at the repo root:
    ```powershell
@@ -94,14 +100,16 @@ Diagnose in this order. `https://<hostname>/healthz` answers the first three que
 Chrome Remote Desktop — set one up _before_ you leave; nothing in this repo provides it). Then:
 
 ```powershell
-Restart-ScheduledTask -TaskName FantasyCanon-Api    # or -Bot
+# There is no Restart-ScheduledTask cmdlet -- stop, then start.
+Stop-ScheduledTask  -TaskName FantasyCanon-Api      # or FantasyCanon-Bot
+Start-ScheduledTask -TaskName FantasyCanon-Api
 .\scripts\ops\preflight.ps1 -PublicUrl https://<hostname>
 ```
 
 If you have no remote access and the PC is unreachable, the ceremony cannot run in the Activity.
 **Fall back to the in-channel ceremony** — it needs no api and no tunnel at all:
 
-```
+```text
 /canon draftorder begin delay:10
 ```
 
