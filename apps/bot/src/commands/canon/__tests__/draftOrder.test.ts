@@ -352,6 +352,7 @@ describe('handleDraftOrderBeginSubcommand — abort race', () => {
     // word too, the same trap the adjusted-preview test above calls out.
     expect(begin.channelPosts.some((p) => p.content?.includes('• A ('))).toBe(false);
     expect(begin.lastContent()).toContain('while the launch button was posting');
+    expect(begin.lastContent()).toContain('A newer setup replaced this lottery');
   });
 });
 
@@ -788,7 +789,9 @@ describe('in-Activity ball edits folded in at begin (#210)', () => {
 
     await handleDraftOrderBeginSubcommand(begin.interaction, raced);
 
-    expect(begin.replies.some((r) => r.content?.includes('ceremony changed'))).toBe(true);
+    expect(
+      begin.replies.some((r) => r.content?.includes('A newer setup replaced this lottery')),
+    ).toBe(true);
     expect(begin.channelPosts).toHaveLength(0);
     expect(session.state).toBe('GAME_OPEN');
   });
