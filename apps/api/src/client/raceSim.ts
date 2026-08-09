@@ -26,9 +26,10 @@ import {
   FINISH_X,
   laneMetrics,
   lockKind,
+  paceBand,
   paceFor,
-  PACK_FLOOR,
-  WANDER_MAX,
+  packFloor,
+  type PaceBand,
 } from './raceLanes.js';
 
 export interface RaceSim {
@@ -139,6 +140,8 @@ export function createRaceSim(
   let gutter = MIN_GUTTER;
   let agitating = false;
   let intensity = 1;
+  /** The room the field currently has, re-derived by {@link repace} whenever a racer parks. */
+  let band: PaceBand = paceBand(packFloor([], 0));
   let running = true;
   let rafId: number | null = null;
   let destroyed = false;
@@ -289,16 +292,19 @@ export function createRaceSim(
         // out, every remaining stack is suddenly worth more, and the field should surge forward
         // rather than teleport.
         racer.pace += (racer.paceTarget - racer.pace) * PACE_EASE;
-        // The jockeying: two superimposed sine drifts around that pace, scaled by the drum-roll
-        // surge. Bounded by WANDER_MAX so position keeps meaning something — close stacks can
-        // trade places, a leader can never wander behind a longshot. Clamped ahead of the
-        // standings zone: a team still in contention must never sit behind one already drawn.
-        const wander =
-          racer.amp1 * Math.sin(racer.w1 * t + racer.p1) * intensity +
-          racer.amp2 * Math.sin(racer.w2 * t + racer.p2) * intensity;
+        // The jockeying: two superimposed sine drifts around that pace. The amplitudes are unit
+        // fractions summing to 1, so `swing` is in [-1, 1] and the whole thing scales with the
+        // band's own wander allowance — a wide, loose swing over an empty track early, tightening
+        // as the standings fill and the field's room shrinks. `intensity / SURGE` puts the resting
+        // drift at ~56% of the allowance and the drum roll at 100%, so the surge visibly bites.
+        const swing =
+          racer.amp1 * Math.sin(racer.w1 * t + racer.p1) +
+          racer.amp2 * Math.sin(racer.w2 * t + racer.p2);
+        const drift = swing * band.wander * (intensity / SURGE);
+        // The clamps are backstops; the band is already inset so neither should be reached.
         racer.frac = Math.min(
           FINISH_X - 0.02,
-          Math.max(PACK_FLOOR, racer.pace + Math.max(-WANDER_MAX, Math.min(WANDER_MAX, wander))),
+          Math.max(band.min - band.wander, racer.pace + drift),
         );
       }
     }
@@ -358,11 +364,11 @@ export function createRaceSim(
     if (kind === 'cross') {
       racer.anim = { from: racer.frac, to: CROSS_PARK_X, startedAt, ms: CROSS_MS };
     } else {
-      // Overtaken first, then dropped. Slipping to the floor of the pack puts them behind every
-      // racer still running, whichever end of the field they were at when their name came up.
+      // Overtaken first, then dropped. Slipping to the rear of the current band puts them behind
+      // every racer still running, whichever end of the field they were at when their name came up.
       racer.anim = {
         from: racer.frac,
-        to: PACK_FLOOR,
+        to: band.min - band.wander,
         startedAt,
         ms: SLIP_MS,
         then: { to: fallPosition(pick, racers.length), ms: DROP_MS },
@@ -381,19 +387,24 @@ export function createRaceSim(
    * change when it wasn't my pick".
    */
   function repace(): void {
-    const running_ = racers.filter((racer) => !racer.locked);
-    const leaderBalls = running_.reduce((max, racer) => Math.max(max, racer.balls), 0);
-    for (const racer of running_) racer.paceTarget = paceFor(racer.balls, leaderBalls);
+    // How much track is left to race on, given how far the standings have filled. Early it is
+    // almost all of it — nothing is parked yet, so nothing needs the space.
+    band = paceBand(packFloor(lockedPicks(), racers.length));
+    const stillRunning = racers.filter((racer) => !racer.locked);
+    const leaderBalls = stillRunning.reduce((max, racer) => Math.max(max, racer.balls), 0);
+    for (const racer of stillRunning) racer.paceTarget = paceFor(racer.balls, leaderBalls, band);
   }
 
   function buildField(rows: { team: string; balls: number }[]): void {
     const ballsByTeam = new Map(rows.map((row) => [row.team, row.balls]));
     const leaderBalls = rows.reduce((max, row) => Math.max(max, row.balls), 0);
+    // A fresh field has nothing parked, so it gets the whole track.
+    band = paceBand(packFloor([], rows.length));
     racers = assignLanes(rows).map((lane) => {
       const balls = ballsByTeam.get(lane.team) ?? 0;
       // Start ON the pace rather than scattered: the field's opening arrangement IS the odds, and
       // a viewer who joins before the first beat should already be able to read it.
-      const pace = paceFor(balls, leaderBalls);
+      const pace = paceFor(balls, leaderBalls, band);
       return {
         team: lane.team,
         hue: lane.hue,
@@ -403,12 +414,12 @@ export function createRaceSim(
         frac: pace,
         pace,
         paceTarget: pace,
-        // Sized so amp1 + amp2 stays under WANDER_MAX even at full SURGE — otherwise the drum
-        // roll would flat-top the drift against the clamp and the surge would stop reading.
-        amp1: 0.008 + Math.random() * 0.005,
+        // Unit fractions summing to 1 — the frame loop scales them by the band's wander, so the
+        // swing follows the room available instead of a fixed distance.
+        amp1: 0.72,
         w1: 0.35 + Math.random() * 0.4,
         p1: Math.random() * Math.PI * 2,
-        amp2: 0.003 + Math.random() * 0.003,
+        amp2: 0.28,
         w2: 1.2 + Math.random() * 1.1,
         p2: Math.random() * Math.PI * 2,
         sprite: buildBallSprite(null, lane.hue, ballR, dpr, getLogo(lane.team)),
