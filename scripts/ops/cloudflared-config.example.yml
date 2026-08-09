@@ -1,0 +1,33 @@
+# cloudflared NAMED tunnel -- stable hostname for the Activity's URL mapping (#246).
+#
+# Copy to %USERPROFILE%\.cloudflared\config.yml and fill in the two placeholders.
+#
+# Why named and not a quick tunnel: a quick tunnel gets a random *.trycloudflare.com hostname that
+# changes every restart and dies silently. The Discord portal URL mapping is set ONCE and cannot
+# be updated from a phone, so a rotating hostname is disqualifying for an unattended window.
+# A named tunnel keeps the same hostname across restarts and reboots.
+#
+# Requires a domain on Cloudflare -- that is what a public hostname is attached to. Setup, once:
+#
+#   cloudflared tunnel login                       # browser, pick the zone
+#   cloudflared tunnel create fantasy-canon        # prints the UUID + writes the credentials json
+#   cloudflared tunnel route dns fantasy-canon lottery.example.com
+#   cloudflared service install                    # runs it as a Windows service, survives reboot
+#
+# Then set the Discord portal URL mapping to https://lottery.example.com and leave it alone.
+
+tunnel: REPLACE-WITH-TUNNEL-UUID
+credentials-file: C:\Users\REPLACE-WITH-USER\.cloudflared\REPLACE-WITH-TUNNEL-UUID.json
+
+# Keep the connection warm so the first request of the evening is not the one that reconnects.
+originRequest:
+  connectTimeout: 10s
+  noHappyEyeballs: true
+
+ingress:
+  # Everything the Activity needs is one origin: the page, the client bundle, /api/lottery/*,
+  # the WebSocket, and /healthz. cloudflared proxies WebSocket upgrades without extra config.
+  - hostname: REPLACE-WITH-HOSTNAME
+    service: http://127.0.0.1:4610
+  # Required terminator: anything not matched above is refused rather than forwarded.
+  - service: http_status:404

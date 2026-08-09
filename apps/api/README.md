@@ -37,6 +37,7 @@ Config (env): `FANTASY_LEAGUE_SIZE` (12), `FANTASY_MY_SLOT` (1), `FANTASY_API_PO
 | `POST /api/pick`  | Enter a pick — `{ playerName }` (next overall) or `{ picks: [...] }` (idempotent board). |
 | `POST /api/reset` | Clear the board.                                                                         |
 | `WS /api/ws`      | Push channel — a fresh envelope on connect and on every pick.                            |
+| `GET /healthz`    | Liveness for unattended operation (#246) — see below.                                    |
 
 The lottery-machine stage (#169) adds `/api/lottery/*`. Its POSTs are **bot-only**, guarded by the
 `FANTASY_STAGE_KEY` shared secret (`x-stage-key`) — except the two commissioner routes, which take
@@ -50,6 +51,39 @@ the Activity's own Discord access token as `Authorization: Bearer …` and resol
 | `POST /api/lottery/adjust` | bearer (commissioner) | Nudge one team's ball count in a pre-commitment lobby (#210). |
 | `POST /api/lottery/*`      | `x-stage-key`         | `lobby`/`clear`/`start`/`beat`/`reveal`/`finish`/`abort`.     |
 | `WS /api/lottery/ws`       | public                | Reveal beats and lobby updates, fanned out to every viewer.   |
+
+## `GET /healthz`
+
+For the unattended draft window (#246, [ADR 0009](../../docs/decisions/0009-remote-draft-day-ops.md)):
+the commissioner is away from the host machine, so this is the one URL that answers "is it still up?"
+from a phone, and the one an external uptime monitor can poll.
+
+```json
+{
+  "ok": true,
+  "service": "fantasy-canon-api",
+  "uptimeSec": 3812,
+  "stage": {
+    "phase": "lobby",
+    "reveals": 0,
+    "beginRequested": false,
+    "setupRequested": false,
+    "reimportRequested": false
+  },
+  "config": { "lotteryBundle": true, "dashboardBundle": true, "stageKey": true, "clientId": true }
+}
+```
+
+**Unauthenticated on purpose** — it has to work precisely when the stage key or the SDK handshake is
+what's broken. Nothing here is sensitive: `phase` and `reveals` are already public on
+`/api/lottery/state`, and `config` reports booleans only, so a secret cannot leak through it.
+
+Three fields earn their place operationally. `uptimeSec` is how a crash-loop is spotted — a restarting
+process looks healthy on every individual poll unless you can watch the clock reset. The `config`
+bundle flags catch this stack's quietest failure, where the Activity loads and then 503s fetching its
+own script, which from a phone is indistinguishable from a dead tunnel. And the three `*Requested`
+flags are in-Activity doorbells the bot has not answered yet — a press stuck there is the #250
+failure mode, visible without a laptop.
 
 ## Layout
 

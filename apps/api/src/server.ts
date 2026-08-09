@@ -286,6 +286,7 @@ export function startApiServer(
             lottery,
             lotteryScript: () => cachedLotteryScript,
             stageKey,
+            uptimeSec: () => process.uptime(),
           },
           req.headers,
         )
