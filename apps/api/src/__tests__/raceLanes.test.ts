@@ -6,10 +6,14 @@ import {
   FALL_ZONE_END,
   FALL_ZONE_START,
   fallPosition,
+  FINISH_X,
   laneMetrics,
   lockKind,
+  paceFor,
   PACK_FLOOR,
+  PACK_MAX,
   PACK_MIN,
+  WANDER_MAX,
 } from '../client/raceLanes.js';
 
 const ROWS = [
@@ -87,6 +91,71 @@ describe('laneMetrics', () => {
       expect(laneMetrics(w).gutterCap).toBeLessThan(w / 2);
       expect(laneMetrics(w).gutterCap).toBe(Math.round(w * 0.32));
     }
+  });
+});
+
+/**
+ * Live feedback: "it should be like total distance per ball… someone at the front is chosen and
+ * goes to back". The pack used to jockey around random midpoints, so a racer's position said
+ * nothing — which is exactly why a front-runner being drawn read as a glitch instead of an upset.
+ */
+describe('paceFor', () => {
+  it('distance is the stack: the biggest leads, an empty one sits at the back of the pack', () => {
+    expect(paceFor(12, 12)).toBeCloseTo(PACK_MAX, 6);
+    expect(paceFor(0, 12)).toBeCloseTo(PACK_MIN, 6);
+    // Twice the balls, twice the distance into the band.
+    const half = paceFor(6, 12) - PACK_MIN;
+    const full = paceFor(12, 12) - PACK_MIN;
+    expect(half).toBeCloseTo(full / 2, 6);
+  });
+
+  it('orders the field by stack, strictly', () => {
+    const bag = [12, 9, 7, 4, 2, 1];
+    const places = bag.map((balls) => paceFor(balls, 12));
+    for (let i = 1; i < places.length; i += 1) {
+      expect(places[i]).toBeLessThan(places[i - 1]);
+    }
+  });
+
+  it('promotes the whole field when the leader is drawn out', () => {
+    // Same stack, smaller bag: a 7-ball team is nearer the front once the 12 has gone. This is
+    // the answer to "why did my racer move when it wasn't my pick".
+    expect(paceFor(7, 9)).toBeGreaterThan(paceFor(7, 12));
+  });
+
+  it('never leaves the pack band, whatever the caller passes', () => {
+    const cases: [number, number][] = [
+      [0, 0],
+      [5, 0],
+      [-3, 10],
+      [99, 10],
+      [1, Number.NaN],
+    ];
+    for (const [balls, leader] of cases) {
+      const x = paceFor(balls, leader);
+      expect(x).toBeGreaterThanOrEqual(PACK_MIN);
+      expect(x).toBeLessThanOrEqual(PACK_MAX);
+    }
+  });
+
+  /**
+   * The jockeying is life, not noise. Close stacks trading places is the point; a leader drifting
+   * behind a longshot would undo the thing this whole change is for.
+   */
+  it('the wander cannot reorder the extremes of the field', () => {
+    const leader = paceFor(12, 12) - WANDER_MAX;
+    const longshot = paceFor(1, 12) + WANDER_MAX;
+    expect(leader).toBeGreaterThan(longshot);
+  });
+
+  /**
+   * Both ends by construction, not by the frame loop's clamp. Caught a real one when written: at
+   * the first pass a ball-less racer could wander to 0.43, inside the standings zone #279 cleared
+   * — the clamp would have hidden it by pinning every trailing racer flat against the floor.
+   */
+  it('the wander stays clear of the standings zone and the finish line', () => {
+    expect(paceFor(0, 12) - WANDER_MAX).toBeGreaterThanOrEqual(PACK_FLOOR);
+    expect(paceFor(12, 12) + WANDER_MAX).toBeLessThan(FINISH_X);
   });
 });
 
