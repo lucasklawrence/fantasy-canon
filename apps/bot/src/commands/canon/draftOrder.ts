@@ -45,6 +45,7 @@ import {
   CeremonyIo,
   CeremonyPost,
   type CeremonySession,
+  withSetupClaim,
   clearCeremony,
   createCeremony,
   getCeremony,
@@ -396,6 +397,17 @@ export async function handleDraftOrderSetupSubcommand(
     });
     return;
   }
+  // A re-import is the other operation that replaces the roster and posts its own odds card
+  // (#219). The setup claim below cannot see it — re-import holds no claim, it flags the session —
+  // so without this the two overlap and the channel gets two competing previews, with `begin`
+  // later sealing whichever bag won the race rather than the one the league saw last.
+  if (existing?.reimportActive) {
+    await interaction.reply({
+      content: 'A re-import from ESPN is running — wait for its odds card, then run setup again.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   const season = interaction.options.getInteger('season', true);
   const manualTeams = interaction.options.getString('teams') ?? undefined;
@@ -413,122 +425,147 @@ export async function handleDraftOrderSetupSubcommand(
     return;
   }
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  try {
-    const notes: string[] = [];
-    let resolvedLeagueId: string | undefined;
-    let teams: SetupTeam[];
-    let dressing: Promise<SessionLogoDress>;
-    if (manualTeams) {
-      teams = parseManualTeams(manualTeams).map((team, index) => ({
-        teamId: `team-${index + 1}`,
-        name: team.name,
+  // Held across everything below (#261). The ESPN roster, the standings round-trip and the logo
+  // prefetch run for seconds with no session in the registry to collide on, so without this a
+  // second setup sails through the checks above, posts its own preview, and its `setCeremony`
+  // discards this one along with any lobby joins made against it.
+  //
+  // `deferReply` is INSIDE the claim deliberately. It was outside in the first version, and a
+  // rejection there — 10062 Unknown interaction, which a brief event-loop stall is enough to
+  // cause — escaped before the release and wedged the guild's setup permanently.
+  await withSetupClaim(
+    guildId,
+    async () => {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await runSetup(channel);
+    },
+    async () => {
+      await interaction.reply({
+        content: 'A setup is already running for this server — give it a moment and try again.',
+        flags: MessageFlags.Ephemeral,
+      });
+    },
+  );
+
+  // `channel` is passed rather than closed over: the guard above narrows it out of `undefined`,
+  // and TS does not carry that narrowing across a nested function boundary.
+  async function runSetup(channel: SendableChannel): Promise<void> {
+    try {
+      const notes: string[] = [];
+      let resolvedLeagueId: string | undefined;
+      let teams: SetupTeam[];
+      let dressing: Promise<SessionLogoDress>;
+      if (manualTeams) {
+        teams = parseManualTeams(manualTeams).map((team, index) => ({
+          teamId: `team-${index + 1}`,
+          name: team.name,
+          bonusBalls: team.bonusBalls,
+        }));
+        // Manual rosters carry no logos — this resolves immediately.
+        dressing = fetchSessionLogoDress(teams, context);
+      } else {
+        resolvedLeagueId = await resolveLeagueId(interaction, context);
+        const leagueId = resolvedLeagueId;
+        if (!leagueId) {
+          throw new Error(
+            'League ID is required — set it via /canon config set, ESPN_LEAGUE_ID, or pass a manual `teams` list.',
+          );
+        }
+        teams = await resolveEspnTeams(context, leagueId, season);
+        // Cosmetic only (#242): the Activity's odds table, drop ball, race cars — and, since
+        // #254, the odds/board cards — wear these; the commitment preimage never sees a logo.
+        // Started here so the prefetch overlaps the standings round-trip below, and awaited
+        // BEFORE the re-validation so the check-then-act window never spans it.
+        dressing = fetchSessionLogoDress(teams, context);
+        if (weightsMode === 'standings') {
+          notes.push(...(await applyStandingsWeights(context, leagueId, season, teams)));
+        }
+      }
+      applyBallsOverrides(teams, ballsInput);
+      applyBonusOverrides(teams, bonusInput);
+
+      const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
+        teamId: team.teamId,
+        displayName: team.name,
+        baseBalls: team.baseBalls,
         bonusBalls: team.bonusBalls,
       }));
-      // Manual rosters carry no logos — this resolves immediately.
-      dressing = fetchSessionLogoDress(teams, context);
-    } else {
-      resolvedLeagueId = await resolveLeagueId(interaction, context);
-      const leagueId = resolvedLeagueId;
-      if (!leagueId) {
-        throw new Error(
-          'League ID is required — set it via /canon config set, ESPN_LEAGUE_ID, or pass a manual `teams` list.',
-        );
-      }
-      teams = await resolveEspnTeams(context, leagueId, season);
-      // Cosmetic only (#242): the Activity's odds table, drop ball, race cars — and, since
-      // #254, the odds/board cards — wear these; the commitment preimage never sees a logo.
-      // Started here so the prefetch overlaps the standings round-trip below, and awaited
-      // BEFORE the re-validation so the check-then-act window never spans it.
-      dressing = fetchSessionLogoDress(teams, context);
-      if (weightsMode === 'standings') {
-        notes.push(...(await applyStandingsWeights(context, leagueId, season, teams)));
-      }
-    }
-    applyBallsOverrides(teams, ballsInput);
-    applyBonusOverrides(teams, bonusInput);
-
-    const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
-      teamId: team.teamId,
-      displayName: team.name,
-      baseBalls: team.baseBalls,
-      bonusBalls: team.bonusBalls,
-    }));
-    const names = new Map(teams.map((team) => [team.teamId, team.name]));
-    const session = createCeremony(
-      guildId,
-      `${season} Draft Lottery`,
-      { teams: configTeams, baseBallCount },
-      names,
-    );
-
-    const dress = await dressing;
-
-    // Re-validate after the awaits above (ESPN fetch, logo prefetch): if a ceremony started
-    // running meanwhile, replacing it now would orphan a live draw.
-    if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
-      await interaction.editReply({
-        content: 'A ceremony started running while setup was working — abort it first.',
-      });
-      return;
-    }
-    dressSession(session, dress);
-    const preview = await buildPreviewPost(session);
-    await channelIo(channel).post(preview);
-    markPreviewPosted(session);
-    // Where the odds preview just landed — the audit line for an in-Activity edit (#220) posts
-    // here, since it fires before `begin` has captured `channelId`.
-    session.lobbyChannelId = interaction.channelId;
-    // What an in-Activity re-import (#219) refetches: the exact league + season this setup opened,
-    // and the member allowed to ask for it. A manual `teams:` setup leaves leagueId unset, so a
-    // re-import correctly refuses — there is no ESPN league behind it.
-    session.leagueId = resolvedLeagueId;
-    session.season = season;
-    session.commissionerIds = [interaction.user.id];
-    setCeremony(session);
-    // The Activity's "start a lottery" press (#253) anchors here next time — a doorbell from a
-    // dead-idle stage has no channel of its own.
-    memo.remember(guildId, interaction.channelId);
-
-    // Best-effort: arm the Activity lobby (#198) so members can join before `begin`.
-    // Failures are logged but never propagate — the ceremony state is already committed above.
-    // `commissionerIds` is what makes the lobby editable from inside the Activity (#210): the
-    // member who ran this command, which `denyUnlessCommissioner` already gated on Manage Server.
-    // No `keepAdjustments` — this is a brand-new bag, so edits to the previous one are meaningless.
-    const lobbyRows = oddsRows(session);
-    const armStage = stageFromEnv();
-    void armStage
-      .lobby({
-        title: session.title,
-        teamCount: session.config.teams.length,
-        totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
-        rows: lobbyRows,
+      const names = new Map(teams.map((team) => [team.teamId, team.name]));
+      const session = createCeremony(
         guildId,
-        commissionerIds: [interaction.user.id],
-      })
-      .then(() => {
-        // Deliver the logos the api can't fetch itself (#249): ESPN-hosted art needs the league's
-        // cookies, stock logos need rasterizing. Strictly AFTER the lobby claimed the stage — a
-        // rejected arm (another guild's ceremony owns it) must not seed the shared cache with
-        // this guild's art under colliding ESPN team ids.
-        pushSessionLogos(session, context, armStage);
-      })
-      .catch((error: unknown) => {
-        console.error('[draftorder] failed to arm the Activity lobby:', error);
-      });
+        `${season} Draft Lottery`,
+        { teams: configTeams, baseBallCount },
+        names,
+      );
 
-    await interaction.editReply({
-      content: [
-        `Odds preview posted — the bag is frozen at ${teams.length} teams. ` +
-          'Run `/canon draftorder begin` to post the commitment and start the reveal. ' +
-          'Changing teams/balls means re-running setup (fresh public preview) first. ' +
-          'Build the countdown with `/canon draftorder hype`.',
-        ...notes,
-      ].join('\n'),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await interaction.editReply({ content: `Setup failed: ${message}` });
+      const dress = await dressing;
+
+      // Re-validate after the awaits above (ESPN fetch, logo prefetch): if a ceremony started
+      // running meanwhile, replacing it now would orphan a live draw.
+      if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
+        await interaction.editReply({
+          content: 'A ceremony started running while setup was working — abort it first.',
+        });
+        return;
+      }
+      dressSession(session, dress);
+      const preview = await buildPreviewPost(session);
+      await channelIo(channel).post(preview);
+      markPreviewPosted(session);
+      // Where the odds preview just landed — the audit line for an in-Activity edit (#220) posts
+      // here, since it fires before `begin` has captured `channelId`.
+      session.lobbyChannelId = interaction.channelId;
+      // What an in-Activity re-import (#219) refetches: the exact league + season this setup opened,
+      // and the member allowed to ask for it. A manual `teams:` setup leaves leagueId unset, so a
+      // re-import correctly refuses — there is no ESPN league behind it.
+      session.leagueId = resolvedLeagueId;
+      session.season = season;
+      session.commissionerIds = [interaction.user.id];
+      setCeremony(session);
+      // The Activity's "start a lottery" press (#253) anchors here next time — a doorbell from a
+      // dead-idle stage has no channel of its own.
+      memo.remember(guildId, interaction.channelId);
+
+      // Best-effort: arm the Activity lobby (#198) so members can join before `begin`.
+      // Failures are logged but never propagate — the ceremony state is already committed above.
+      // `commissionerIds` is what makes the lobby editable from inside the Activity (#210): the
+      // member who ran this command, which `denyUnlessCommissioner` already gated on Manage Server.
+      // No `keepAdjustments` — this is a brand-new bag, so edits to the previous one are meaningless.
+      const lobbyRows = oddsRows(session);
+      const armStage = stageFromEnv();
+      void armStage
+        .lobby({
+          title: session.title,
+          teamCount: session.config.teams.length,
+          totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
+          rows: lobbyRows,
+          guildId,
+          commissionerIds: [interaction.user.id],
+        })
+        .then(() => {
+          // Deliver the logos the api can't fetch itself (#249): ESPN-hosted art needs the league's
+          // cookies, stock logos need rasterizing. Strictly AFTER the lobby claimed the stage — a
+          // rejected arm (another guild's ceremony owns it) must not seed the shared cache with
+          // this guild's art under colliding ESPN team ids.
+          pushSessionLogos(session, context, armStage);
+        })
+        .catch((error: unknown) => {
+          console.error('[draftorder] failed to arm the Activity lobby:', error);
+        });
+
+      await interaction.editReply({
+        content: [
+          `Odds preview posted — the bag is frozen at ${teams.length} teams. ` +
+            'Run `/canon draftorder begin` to post the commitment and start the reveal. ' +
+            'Changing teams/balls means re-running setup (fresh public preview) first. ' +
+            'Build the countdown with `/canon draftorder hype`.',
+          ...notes,
+        ].join('\n'),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await interaction.editReply({ content: `Setup failed: ${message}` });
+    }
   }
 }
 
@@ -1302,6 +1339,11 @@ export function performActivitySetup(
     if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
       return release('a ceremony is already running — abort it first');
     }
+    // Same reason as the slash door: a re-import replaces the roster and posts its own odds card,
+    // and it flags the session rather than taking the setup claim, so the claim cannot see it.
+    if (getCeremony(guildId)?.reimportActive) {
+      return release('a re-import from ESPN is running — wait for its odds card, then try again');
+    }
 
     const channelId = memo.recall(guildId);
     if (!channelId) {
@@ -1323,87 +1365,105 @@ export function performActivitySetup(
       return release('no ESPN league is configured for this server — use /canon draftorder setup');
     }
 
-    try {
-      const teams = await resolveEspnTeams(context, leagueId, season);
-      // The logo prefetch (#254) starts now and overlaps the standings round-trip — it needs
-      // only the roster, and it never rejects (per-logo failures are swallowed inside it).
-      const dressing = fetchSessionLogoDress(teams, context);
-      const notes = await applyStandingsWeights(context, leagueId, season, teams);
-      const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
-        teamId: team.teamId,
-        displayName: team.name,
-        baseBalls: team.baseBalls,
-        bonusBalls: team.bonusBalls,
-      }));
-      const names = new Map(teams.map((team) => [team.teamId, team.name]));
-      // Throws on a roster `begin` would later choke on (duplicate names, odds cap) — caught
-      // below and released with the reason, before anything posts.
-      const session = createCeremony(
-        guildId,
-        `${season} Draft Lottery`,
-        { teams: configTeams, baseBallCount: 1 },
-        names,
-      );
-      // Awaited (bounded) before the re-validation below — the check-then-act window must not
-      // span this network wait — and before the preview renders so the card wears them (#254).
-      const dress = await dressing;
+    // Same reservation the slash handler takes (#261). The watcher already serialises presses
+    // per guild, so what this catches is the cross-surface pair: a press landing while a
+    // commissioner's `/canon draftorder setup` is still fetching, or the reverse.
+    return await withSetupClaim(
+      guildId,
+      () => importAndArm(channelId, channel, leagueId),
+      () => release('a setup is already in progress — give it a moment and press again'),
+    );
 
-      // Re-validate after the round-trips above (ESPN, logo prefetch), same as the slash
-      // handler: replacing a session that started running meanwhile would orphan a live draw.
-      if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
-        return release('a ceremony started while the import was running');
-      }
-      dressSession(session, dress);
-
-      // The preview is the public record the whole feature hangs off (ADR 0006). The intro line
-      // names who pressed the button — the same audit slot the slash runner's command invocation
-      // occupies in the channel history. The setup notes ride here too: there is no ephemeral
-      // surface to whisper them through.
-      await channel.send({
-        content: [
-          `🎰 **${session.title}** — <@${requestedBy}> started the lottery from the Activity.`,
-          ...notes,
-        ].join('\n'),
-        allowedMentions: { parse: [] },
-      });
-      await channelIo(channel).post(await buildPreviewPost(session));
-      markPreviewPosted(session);
-      session.lobbyChannelId = channelId;
-      session.leagueId = leagueId;
-      session.season = season;
-      session.commissionerIds = [requestedBy];
-      setCeremony(session);
-      memo.remember(guildId, channelId);
-
-      const lobbyRows = oddsRows(session);
-      await stage
-        .lobby({
-          title: session.title,
-          teamCount: session.config.teams.length,
-          totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
-          rows: lobbyRows,
+    // Narrowed values are passed rather than closed over: the checks above narrow `channel` via
+    // `isSendable()` and `channelId`/`leagueId` via early returns, and TS does not carry that
+    // narrowing across a nested function boundary.
+    async function importAndArm(
+      channelId: string,
+      channel: SendableChannel,
+      leagueId: string,
+    ): Promise<boolean> {
+      try {
+        const teams = await resolveEspnTeams(context, leagueId, season);
+        // The logo prefetch (#254) starts now and overlaps the standings round-trip — it needs
+        // only the roster, and it never rejects (per-logo failures are swallowed inside it).
+        const dressing = fetchSessionLogoDress(teams, context);
+        const notes = await applyStandingsWeights(context, leagueId, season, teams);
+        const configTeams: DraftOrderTeamInput[] = teams.map((team) => ({
+          teamId: team.teamId,
+          displayName: team.name,
+          baseBalls: team.baseBalls,
+          bonusBalls: team.bonusBalls,
+        }));
+        const names = new Map(teams.map((team) => [team.teamId, team.name]));
+        // Throws on a roster `begin` would later choke on (duplicate names, odds cap) — caught
+        // below and released with the reason, before anything posts.
+        const session = createCeremony(
           guildId,
-          commissionerIds: [requestedBy],
-        })
-        .then(() => {
-          pushSessionLogos(session, context, stage);
-        })
-        .catch((error: unknown) => {
-          // The ceremony exists and its preview is public — but the arm is what answers the
-          // doorbell, so a failed arm must still free the idle screens.
-          console.error('[draftorder] Activity setup armed nothing — stage unreachable:', error);
-          release(
-            'the stage is unreachable — the ceremony is set up; continue with /canon draftorder',
-          );
+          `${season} Draft Lottery`,
+          { teams: configTeams, baseBallCount: 1 },
+          names,
+        );
+        // Awaited (bounded) before the re-validation below — the check-then-act window must not
+        // span this network wait — and before the preview renders so the card wears them (#254).
+        const dress = await dressing;
+
+        // Re-validate after the round-trips above (ESPN, logo prefetch), same as the slash
+        // handler: replacing a session that started running meanwhile would orphan a live draw.
+        if (getCeremony(guildId)?.state === 'LOTTERY_RUNNING') {
+          return release('a ceremony started while the import was running');
+        }
+        dressSession(session, dress);
+
+        // The preview is the public record the whole feature hangs off (ADR 0006). The intro line
+        // names who pressed the button — the same audit slot the slash runner's command invocation
+        // occupies in the channel history. The setup notes ride here too: there is no ephemeral
+        // surface to whisper them through.
+        await channel.send({
+          content: [
+            `🎰 **${session.title}** — <@${requestedBy}> started the lottery from the Activity.`,
+            ...notes,
+          ].join('\n'),
+          allowedMentions: { parse: [] },
         });
-      console.log(
-        `[draftorder] Activity setup: ${teams.length} teams for guild ${guildId} by ${requestedBy}`,
-      );
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('[draftorder] in-Activity setup failed:', error);
-      return release(`setup failed: ${message.slice(0, 200)}`);
+        await channelIo(channel).post(await buildPreviewPost(session));
+        markPreviewPosted(session);
+        session.lobbyChannelId = channelId;
+        session.leagueId = leagueId;
+        session.season = season;
+        session.commissionerIds = [requestedBy];
+        setCeremony(session);
+        memo.remember(guildId, channelId);
+
+        const lobbyRows = oddsRows(session);
+        await stage
+          .lobby({
+            title: session.title,
+            teamCount: session.config.teams.length,
+            totalBalls: lobbyRows.reduce((s, r) => s + r.balls, 0),
+            rows: lobbyRows,
+            guildId,
+            commissionerIds: [requestedBy],
+          })
+          .then(() => {
+            pushSessionLogos(session, context, stage);
+          })
+          .catch((error: unknown) => {
+            // The ceremony exists and its preview is public — but the arm is what answers the
+            // doorbell, so a failed arm must still free the idle screens.
+            console.error('[draftorder] Activity setup armed nothing — stage unreachable:', error);
+            release(
+              'the stage is unreachable — the ceremony is set up; continue with /canon draftorder',
+            );
+          });
+        console.log(
+          `[draftorder] Activity setup: ${teams.length} teams for guild ${guildId} by ${requestedBy}`,
+        );
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[draftorder] in-Activity setup failed:', error);
+        return release(`setup failed: ${message.slice(0, 200)}`);
+      }
     }
   };
 }
