@@ -84,3 +84,24 @@ export function ballRadius(count: number, hopperRadius: number): number {
 
 /** Below this radius a ball's number is unreadable, so the sprite skips painting it. */
 export const NUMBER_MIN_RADIUS = 5.5;
+
+/**
+ * Everything about the drum that is a function of its CSS size (#267).
+ *
+ * Pure and exported so the relationships survive a resize: the wall is inset far enough for the
+ * cage segments to sit inside the canvas, and the chute mouth — where an extracted ball is steered
+ * — is the bottom centre. Getting either wrong at the new size sends the ball to the wrong place
+ * or lets the pile escape the wall, neither of which the sim itself can notice.
+ */
+export function drumGeometry(cssSize: number): {
+  center: number;
+  wallRadius: number;
+  chuteMouth: { x: number; y: number };
+} {
+  const center = cssSize / 2;
+  return {
+    center,
+    wallRadius: cssSize / 2 - 4,
+    chuteMouth: { x: center, y: cssSize - 10 },
+  };
+}
