@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ENVELOPE_LEAD_MS, ENVELOPE_MS, envelopeEligible } from '../client/envelopePlan.js';
+import { FINISH_LEAD_MS } from '../client/exitBudget.js';
 
 describe('envelopeEligible (#243)', () => {
   it('plays only for pick #1 — whenever it occurs, so both reveal orders work (#200)', () => {
@@ -29,5 +30,23 @@ describe('envelopeEligible (#243)', () => {
     expect(ENVELOPE_MS).toBeGreaterThanOrEqual(2500);
     expect(ENVELOPE_LEAD_MS.race).toBeGreaterThanOrEqual(900); // the lock park must land first
     expect(ENVELOPE_LEAD_MS.machine).toBeGreaterThanOrEqual(0);
+  });
+
+  /**
+   * #244. Every visual's finale has to open before the finish sweeps the stage, and the amount of
+   * room is the same for all of them — the last reveal is followed by the finish `FINISH_LEAD_MS`
+   * later, full stop.
+   *
+   * Written over the whole key set rather than one visual at a time, because the wheel's lead was
+   * added at 2400ms against an 1800ms gap and nothing complained: the existing checks named
+   * `machine` and `race` explicitly, so a third visual was invisible to them. The `keys` assertion
+   * is the part that matters — adding a fourth visual now fails here until someone states its
+   * budget.
+   */
+  it('every visual opens its finale before the finish sweeps the stage', () => {
+    expect(Object.keys(ENVELOPE_LEAD_MS).sort()).toEqual(['machine', 'race', 'wheel']);
+    for (const [visual, lead] of Object.entries(ENVELOPE_LEAD_MS)) {
+      expect(lead, `${visual} lead must fit the finish gap`).toBeLessThan(FINISH_LEAD_MS);
+    }
   });
 });

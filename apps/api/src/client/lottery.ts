@@ -543,6 +543,7 @@ function renderOddsTable(
       drawn.map((entry) => entry.team),
     );
     raceSim?.sync([], []);
+    wheelSim?.spin(false); // loose animation must not run behind a hidden stage (#235)
   }
 }
 
@@ -1477,6 +1478,17 @@ function renderDrop(reveal: LotteryReveal): void {
       audio.stopRoll();
       audio.hit();
       wheel().land(reveal.team, reveal.pick);
+      // Shed the drawn team here, not in `renderOddsTable`. A live ceremony emits only
+      // beat/reveal/finish over the socket, and reveals route straight to this function —
+      // `renderOddsTable` never runs again after the start, so the wheel a WS viewer sees would
+      // keep all twelve wedges at their opening widths while the card beside it prints shrinking
+      // odds. The sim holds this until the landing has had its moment, then drops the wedge.
+      const wheelRows = currentStart?.rows ?? [];
+      const stillIn = new Set(reveal.remaining);
+      wheel().sync(
+        wheelRows,
+        wheelRows.map((row) => row.team).filter((team) => !stillIn.has(team)),
+      );
       show('drop', true);
       const ball = replaceNode('drop-pick');
       ball.classList.remove('flip');
@@ -1941,6 +1953,7 @@ function onVisibilityChange(): void {
   // outright too: nobody hears a drum roll for a hidden tab, and the next beat re-rolls.
   hopperSim?.setRunning(!document.hidden);
   raceSim?.setRunning(!document.hidden);
+  wheelSim?.setRunning(!document.hidden);
   if (document.hidden) audio.stopRoll();
   if (!cursor || !playbackMode) return;
   if (document.hidden) {
@@ -2034,6 +2047,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
     // clearing the field also parks the race loop, which never sleeps while racers are loose.
     currentStart = undefined;
     raceSim?.sync([], []);
+    wheelSim?.spin(false); // loose animation must not run behind a hidden stage (#235)
     applyStageLayout();
     audio.stopRoll();
   }
@@ -2145,6 +2159,7 @@ function renderSnapshot(snapshot: LotterySnapshot): void {
       // The race is stricter still: loose racers never sleep, so the field is emptied outright.
       hopperSim?.agitate(false);
       raceSim?.sync([], []);
+      wheelSim?.spin(false); // loose animation must not run behind a hidden stage (#235)
       audio.stopRoll();
       show('waiting', false);
       show('stage', false);

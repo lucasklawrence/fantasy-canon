@@ -28,8 +28,23 @@ export interface WheelSim {
 
 /** Free-spin speed during the drum roll, radians per second. */
 const SPIN_SPEED = 4.2;
-/** How long the landing ease takes. Long enough to read as deceleration, short enough to fit. */
-const LAND_MS = 2200;
+/**
+ * How long the landing ease takes.
+ *
+ * Bounded by the tightest gap the wheel gets: the last reveal is followed by the finish
+ * `FINISH_LEAD_MS` later, and `LAND_MS + REST_MS` plus the envelope's lead all have to fit inside
+ * it or the finale opens over a sealed board. `envelopePlan.test.ts` asserts that rather than
+ * leaving it to whoever next retunes these.
+ */
+const LAND_MS = 1150;
+/**
+ * How long the wheel sits on the winner before its wedge is taken away.
+ *
+ * The landing IS the payoff. Removing the wedge on the frame the pointer stops — which is what the
+ * first version did, because the reveal's bag update was applied the instant the ease finished —
+ * deletes the thing the viewer spent the whole spin waiting to see.
+ */
+const REST_MS = 300;
 
 export function createWheelSim(canvas: HTMLCanvasElement, sizePx?: number): WheelSim {
   const reducedMotion =
@@ -55,6 +70,16 @@ export function createWheelSim(canvas: HTMLCanvasElement, sizePx?: number): Whee
    * whatever happens to be under the pointer — the wheel would stop on the wrong team, every time.
    */
   let pendingSync: { rows: { team: string; balls: number }[]; drawnTeams: string[] } | null = null;
+  /** Set while the wheel is showing the winner, before the held bag update takes its wedge away. */
+  let restUntil = 0;
+  /**
+   * A drum roll that arrived while the wheel was still landing.
+   *
+   * The ceremony loop posts the next beat immediately after a reveal, so `spin(true)` lands ~0ms
+   * into an ease that has over a second to run. Applying it there means the wheel accelerates away
+   * on the frame the ease completes and never visibly rests on the winner at all.
+   */
+  let spinAfterLanding = false;
   let running = true;
   let destroyed = false;
   let rafId: number | null = null;
@@ -67,7 +92,20 @@ export function createWheelSim(canvas: HTMLCanvasElement, sizePx?: number): Whee
   applySize();
 
   function idle(): boolean {
-    return !spinning && !landing;
+    return !spinning && !landing && restUntil === 0;
+  }
+
+  /** Everything held back during a landing, released once the winner has had its moment. */
+  function finishRest(): void {
+    restUntil = 0;
+    if (pendingSync) {
+      applyBag(pendingSync.rows, pendingSync.drawnTeams);
+      pendingSync = null;
+    }
+    if (spinAfterLanding) {
+      spinAfterLanding = false;
+      spinning = true;
+    }
   }
 
   /** Re-lay the wheel for a bag. Signature-guarded by the caller; this just does the work. */
@@ -98,13 +136,11 @@ export function createWheelSim(canvas: HTMLCanvasElement, sizePx?: number): Whee
       if (t >= 1) {
         rotation = landing.to;
         landing = null;
-        // The wheel has arrived, so the bag update held back during the ease can land — which is
-        // what removes the wedge it just stopped on.
-        if (pendingSync) {
-          applyBag(pendingSync.rows, pendingSync.drawnTeams);
-          pendingSync = null;
-        }
+        // Arrived. Hold on the winner before anything else happens to the wheel.
+        restUntil = now + REST_MS;
       }
+    } else if (restUntil > 0) {
+      if (now >= restUntil) finishRest();
     } else if (spinning) {
       rotation += SPIN_SPEED * dt;
     }
@@ -181,15 +217,17 @@ export function createWheelSim(canvas: HTMLCanvasElement, sizePx?: number): Whee
 
   return {
     sync(rows, drawnTeams): void {
-      const sig = rows.map((row) => `${row.team}:${row.balls}`).join(',');
-      const drawnKey = [...drawnTeams].sort().join(',');
-      if (sig === bagSig && drawnKey === drawnSig) return;
-      // Mid-landing: hold it. See `pendingSync` — applying now would delete the wedge the wheel
-      // is travelling toward. The newest update wins if several arrive during one ease.
-      if (landing) {
+      // The busy check comes FIRST, before the signature guard. Ordered the other way, a reset
+      // whose signature happened to match the held update — a replay restoring the full field —
+      // returned early without recording anything, and the stale held sync then applied on top of
+      // it once the ease finished.
+      if (landing || restUntil > 0) {
         pendingSync = { rows, drawnTeams };
         return;
       }
+      const sig = rows.map((row) => `${row.team}:${row.balls}`).join(',');
+      const drawnKey = [...drawnTeams].sort().join(',');
+      if (sig === bagSig && drawnKey === drawnSig) return;
       applyBag(rows, drawnTeams);
     },
     spin(on): void {
@@ -198,19 +236,41 @@ export function createWheelSim(canvas: HTMLCanvasElement, sizePx?: number): Whee
         draw();
         return;
       }
-      if (spinning === on) return;
-      spinning = on;
-      if (on) wake();
-      else draw();
+      if (!on) {
+        spinAfterLanding = false;
+        if (!spinning) return;
+        spinning = false;
+        draw();
+        return;
+      }
+      // Committed to a landing: remember the request rather than spinning away from the winner.
+      if (landing || restUntil > 0) {
+        spinAfterLanding = true;
+        return;
+      }
+      if (spinning) return;
+      spinning = true;
+      wake();
     },
     land(team, pick): void {
       spinning = false;
+      spinAfterLanding = false;
+      if (!wedges.some((w) => w.team === team)) {
+        // The wheel's field and the reveal disagree — the wheel would sit on some other team while
+        // the card announces this one. Nothing sensible to animate, so say so rather than play a
+        // silent no-op that looks like a landing.
+        console.error(`[lottery] wheel has no wedge for "${team}" — not landing`);
+        return;
+      }
       const to = landingRotation(wedges, team, pick, rotation);
       if (reducedMotion) {
-        // No spin to watch: snap to the answer, which is the same answer either way.
+        // No spin to watch: snap to the answer, which is the same answer either way. Still rest,
+        // so the held bag update does not take the wedge away in the same tick.
         rotation = to;
         landing = null;
+        restUntil = performance.now() + REST_MS;
         draw();
+        wake();
         return;
       }
       landing = { from: rotation, to, startedAt: performance.now() };

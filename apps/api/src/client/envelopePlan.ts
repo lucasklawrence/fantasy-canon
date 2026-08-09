@@ -14,9 +14,14 @@ export const ENVELOPE_MS = 3600;
 /**
  * Extra beat before the overlay opens, per visual: the machine waits for the exit choreography's
  * FLIP separately (a promise, not a timer), then this small settle; the race needs the winning
- * cross/fall park (~900ms lock) to land on screen before the dim swallows it.
+ * cross/fall park (~900ms lock) to land on screen before the dim swallows it; the wheel needs its
+ * landing ease plus the rest on the winner.
+ *
+ * None of them may exceed FINISH_LEAD_MS — past that the finish has already sealed the board and
+ * the overlay dims a finale nobody is looking at any more. Asserted in envelopePlan.test.ts over
+ * the whole key set, because naming visuals one at a time is how the wheel shipped at 2400ms.
  */
-export const ENVELOPE_LEAD_MS = { machine: 250, race: 1100, wheel: 2400 } as const;
+export const ENVELOPE_LEAD_MS = { machine: 250, race: 1100, wheel: 1500 } as const;
 
 export type PlaybackKind = 'catchup' | 'replay' | null;
 

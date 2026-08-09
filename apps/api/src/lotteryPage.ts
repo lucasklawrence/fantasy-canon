@@ -453,6 +453,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
           <select id="begin-visual" class="picker">
             <option value="machine" selected>the ball machine</option>
             <option value="race">the lane race</option>
+            <option value="wheel">the wheel</option>
           </select>
         </label>
         <label class="pickwrap">Balls
