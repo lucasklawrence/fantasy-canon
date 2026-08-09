@@ -1153,15 +1153,23 @@ interface FlipAnchor {
 /**
  * FLIP handoff: the drop ball starts at the chute exit (where the pulled ball just arrived) and
  * springs to its resting spot — the pull and the reveal read as one continuous motion.
+ *
+ * Returns a promise that settles when the spring is **done**, timed from the frame the transition
+ * actually starts on rather than from the call (#269). The two rAFs below are the reason that
+ * distinction matters: a caller starting its own FLIP_MS timer here finishes a couple of frames
+ * early, which is enough for the finale's dim to begin over a ball still in motion.
+ *
+ * Always settles. rAF does not run in a hidden tab, and a promise that never resolves would strand
+ * the envelope — and anything else chained off the exit — for the life of the page.
  */
-function flipFromChute(ball: HTMLElement, from: FlipAnchor): void {
+function flipFromChute(ball: HTMLElement, from: FlipAnchor): Promise<void> {
   // The clone carries the previous reveal's flip/fall classes — strip them so the start
   // transform below is applied instantly, by intent rather than by insertion semantics.
   ball.classList.remove('flip', 'fall');
   const to = ball.getBoundingClientRect();
   if (!to.width || !Number.isFinite(from.cx) || !Number.isFinite(from.cy)) {
     ball.classList.add('fall'); // measurement failed — fall back to the plain drop-in
-    return;
+    return Promise.resolve(); // nothing springs, so there is nothing to wait out
   }
   const dx = from.cx - (to.left + to.width / 2);
   const dy = from.cy - (to.top + to.height / 2);
@@ -1172,11 +1180,17 @@ function flipFromChute(ball: HTMLElement, from: FlipAnchor): void {
   // The spring's length is the planner's FLIP_MS, not a number typed into the stylesheet — the
   // budget is only honest while the phase it bills actually lasts that long.
   ball.style.setProperty('--flip-ms', `${FLIP_MS}ms`);
-  // Double rAF: the start transform must paint before the transition begins.
-  requestAnimationFrame(() => {
+  return new Promise<void>((resolve) => {
+    // The frames never come in a hidden tab; settle on the nominal length rather than hang.
+    const unpainted = setTimeout(resolve, FLIP_MS);
+    // Double rAF: the start transform must paint before the transition begins.
     requestAnimationFrame(() => {
-      ball.classList.add('flip');
-      ball.style.transform = '';
+      requestAnimationFrame(() => {
+        ball.classList.add('flip');
+        ball.style.transform = '';
+        clearTimeout(unpainted);
+        setTimeout(resolve, FLIP_MS); // the spring starts NOW, so time it from here
+      });
     });
   });
 }
@@ -1233,7 +1247,7 @@ async function runExitChoreography(
    * would then decline to open one, leaving pick #1 with neither.
    */
   mode: PlaybackKind,
-): Promise<void> {
+): Promise<boolean> {
   const token = ++choreoToken;
   exitInFlight = reveal.pick;
   // Whatever the run we just superseded left at the mouth is the PREVIOUS pick's ball. Its own
@@ -1257,7 +1271,10 @@ async function runExitChoreography(
           new Promise<boolean>((resolve) => setTimeout(() => resolve(false), EXTRACT_CAP_MS)),
         ])
       : false;
-  if (token !== choreoToken) return hideHold();
+  if (token !== choreoToken) {
+    hideHold();
+    return false; // superseded: this run no longer owns the screen
+  }
   // Re-plan against what the extraction ACTUALLY cost. It is the one phase whose length this side
   // cannot dictate — a throttled tab can spend the whole EXTRACT_CAP_MS in there — and spending a
   // hold out of a budget that was already blown is how the drop card gets wiped mid-spring.
@@ -1278,14 +1295,20 @@ async function runExitChoreography(
     void tube.offsetWidth; // restart the CSS animation for this transit
     tube.classList.add('transit');
     await new Promise((resolve) => setTimeout(resolve, budget.transitMs));
-    if (token !== choreoToken) return hideHold();
+    if (token !== choreoToken) {
+      hideHold();
+      return false; // superseded: this run no longer owns the screen
+    }
     // The envelope pick (#243) gets no hold: the envelope is chained off this promise and runs
     // 3600ms inside the same gap, so a hold there is 600ms taken straight out of the finale, and
     // that pick already has the better showcase. Asked through the shared predicate, so a reveal
     // that will NOT actually get an envelope — a catch-up, a hidden tab — keeps its hold.
     if (budget.mode === 'full' && !willEnvelope(reveal.pick, mode)) {
       await presentAtMouth(reveal, num, hue, budget.holdMs);
-      if (token !== choreoToken) return hideHold();
+      if (token !== choreoToken) {
+        hideHold();
+        return false; // superseded: this run no longer owns the screen
+      }
     }
   }
   exitInFlight = null;
@@ -1322,10 +1345,27 @@ async function runExitChoreography(
   applyDropFace(ball, reveal.team, num !== null ? hue : undefined);
   replaceNode('drop-team').textContent = reveal.team;
   replaceNode('drop-odds').textContent = oddsText;
-  flipFromChute(ball, fromAnchor);
-  // After the FLIP has measured its start, so retiring the hold cannot make the ball vanish
-  // before the drop card has taken its place.
+  // Started, not awaited yet: `hideHold` has to run in this same synchronous block, once the FLIP
+  // has measured its start, or retiring the hold would make the ball vanish before the drop card
+  // has taken its place.
+  const landing = flipFromChute(ball, fromAnchor);
   hideHold();
+  // Resolve when the reveal has LANDED, not when the spring starts (#269).
+  //
+  // The only thing chained off this promise is the pick-#1 envelope, and it adds a small settle
+  // before dimming the screen. Measured from the start of a 620ms spring that settle put the dim
+  // at ~90% opacity over the ball-#N face the envelope exists to showcase.
+  //
+  // This is NOT the same as `exitBudget.totalMs`, and nothing should be scheduled as if it were:
+  // the envelope pick skips the hold, a reveal with no ball number never flies at all, and every
+  // superseded return above resolves with no FLIP. `totalMs` is the planner's worst case; this is
+  // what the run actually spent. What the two do share is a ceiling — see ENVELOPE_LEAD_MS.
+  await landing;
+  // Whether this run still owns the screen. Waiting out the spring turned a window that used to be
+  // one tick into most of a second, and an abort landing inside it tears the stage down WITHOUT
+  // clearing `lastDropPick` — that reset only runs for idle/lobby/waiting — so the caller's guard
+  // alone would still queue a finale over the abort screen.
+  return token === choreoToken;
 }
 
 /**
@@ -1479,15 +1519,19 @@ function renderDrop(reveal: LotteryReveal): void {
     audio.stopRoll();
     audio.hit();
     show('drop', false); // the drop ball appears when the ball actually comes out
-    // Pick #1's envelope (#243) waits for the exit choreography to land its FLIP, so the dim
-    // never swallows the ball-#N extraction — the auditable moment. The choreography is itself
-    // time-capped (#215), so this settles promptly even in a hidden tab. The lastDropPick guard
-    // keeps a superseded flight from opening a stale envelope over a newer reveal, and the mode
-    // is captured NOW: a catch-up draining during the choreography must not launder its final
-    // compressed reveal into an eligible one.
+    // Pick #1's envelope (#243) waits for the exit choreography to land its FLIP — really land it
+    // now, spring included (#269) — so the dim never swallows the ball-#N extraction, the
+    // auditable moment. The choreography is itself time-capped (#215), so this settles promptly
+    // even in a hidden tab. The mode is captured NOW: a catch-up draining during the choreography
+    // must not launder its final compressed reveal into an eligible one.
+    //
+    // Two guards, because they catch different things. `landed` is the choreography saying it
+    // still owns the screen — an abort tears the stage down without clearing `lastDropPick`, so
+    // that guard alone would open a finale over the abort screen. `lastDropPick` catches a newer
+    // reveal having taken over.
     const modeAtReveal = playbackMode;
-    void runExitChoreography(reveal, num, range?.hue, oddsText, modeAtReveal).then(() => {
-      if (lastDropPick === reveal.pick) {
+    void runExitChoreography(reveal, num, range?.hue, oddsText, modeAtReveal).then((landed) => {
+      if (landed && lastDropPick === reveal.pick) {
         queueEnvelope(reveal, range?.hue, ENVELOPE_LEAD_MS.machine, modeAtReveal);
       }
     });
