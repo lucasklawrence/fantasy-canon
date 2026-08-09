@@ -1326,6 +1326,17 @@ async function runExitChoreography(
   // After the FLIP has measured its start, so retiring the hold cannot make the ball vanish
   // before the drop card has taken its place.
   hideHold();
+  // Resolve when the reveal has LANDED, not when the spring starts (#269).
+  //
+  // The only thing chained off this promise is the pick-#1 envelope, and it adds a small settle
+  // before dimming the screen. Measured from the start of a 620ms spring that settle put the dim
+  // at ~90% opacity over the ball-#N face the envelope exists to showcase. The budget already
+  // bills FLIP_MS as part of the exit (`exitBudget.totalMs`), so waiting it out here is also what
+  // makes the promise's duration and the planned duration the same number.
+  //
+  // No token check: a superseding reveal is handled by the caller's `lastDropPick` guard, and
+  // there is nothing to tear down — the spring is CSS on an element the next reveal replaces.
+  await new Promise((resolve) => setTimeout(resolve, FLIP_MS));
 }
 
 /**

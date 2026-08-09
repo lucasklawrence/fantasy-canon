@@ -12,9 +12,16 @@
 export const ENVELOPE_MS = 3600;
 
 /**
- * Extra beat before the overlay opens, per visual: the machine waits for the exit choreography's
- * FLIP separately (a promise, not a timer), then this small settle; the race needs the winning
- * cross/fall park (~900ms lock) to land on screen before the dim swallows it.
+ * Extra beat before the overlay opens, per visual, measured from the moment the visual's own
+ * payoff has LANDED — not from when it started.
+ *
+ * The machine's landing is the drop ball finishing its FLIP, which `runExitChoreography` now waits
+ * out before resolving (#269). That distinction was the bug: the promise used to resolve when the
+ * spring *started*, so a 250ms settle measured from there put the dim at roughly 90% opacity over
+ * the ball-#N face it exists to showcase — the exact handoff this lead was written to protect.
+ *
+ * The race's landing is the winning cross/fall park (~900ms lock), which has no promise, so its
+ * lead is a timer covering the whole thing.
  */
 export const ENVELOPE_LEAD_MS = { machine: 250, race: 1100 } as const;
 
