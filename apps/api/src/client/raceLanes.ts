@@ -34,24 +34,29 @@ export const FALL_ZONE_START = 0.03;
 /** Front of the standings zone. The pack never comes back past this, so the order stays readable. */
 export const FALL_ZONE_END = 0.42;
 /**
- * How far back a still-racing team may drift. Strictly ahead of {@link FALL_ZONE_END}: the old
- * wander floor (`PACK_MIN - 0.1` = 0.14) reached deep INTO the parked field, so a team still in
- * contention could sit behind one already eliminated — which is precisely the reading the parked
- * order is supposed to give.
- */
-export const PACK_FLOOR = 0.45;
-/**
- * The band a still-racing team's pace maps into: no balls at {@link PACK_MIN}, the biggest stack
- * left at {@link PACK_MAX}.
+ * Rear of the track while the standings are still empty.
  *
- * Both ends leave {@link WANDER_MAX} of clearance — PACK_MIN above PACK_FLOOR, PACK_MAX below the
- * line — so the jockeying is bounded by construction rather than by the frame loop's clamp. That
- * clamp still exists as a backstop, but relying on it would flat-top every trailing racer against
- * the floor and quietly delete their wobble.
+ * The first cut reserved the whole standings zone from the opening frame, which left the field
+ * penned into the front third of a track that was mostly empty — the commissioner's "they barely
+ * oscillate… there is much more room to move". Nothing is parked at the start, so nothing needs
+ * that space yet: the field gets all of it and gives it back as teams fill the zone.
  */
-export const PACK_MIN = 0.5;
+export const RACE_FLOOR = 0.08;
+/** Clearance kept between the frontmost parked racer and anything still running. */
+export const PARK_GAP = 0.03;
 /** Right edge of the pace band — nobody drifts across the line uninvited. */
 export const PACK_MAX = 0.79;
+/**
+ * Share of the available track each racer may wander, either side of its pace.
+ *
+ * A FRACTION rather than a fixed distance, because the space the field has shrinks as the standings
+ * fill: the same 0.18 is a wide, loose swing over an empty track and a tight one late on, which is
+ * the shape asked for — big movement early, and progressively less as teams drop off.
+ *
+ * Under 0.5 by definition, so the two extremes of the field can never cross: close stacks trade
+ * places, a leader never drifts behind a longshot.
+ */
+export const WANDER_FRAC = 0.18;
 /** The finish line. */
 export const FINISH_X = 0.86;
 /** Where a winner parks, just past the line. */
@@ -108,12 +113,42 @@ export function lockKind(pick: number, lockedPicks: number[], teamCount: number)
   return 'fall';
 }
 
+/** The pace band, and how far either side of it a racer may wander. */
+export interface PaceBand {
+  /** Where a ball-less team sits. */
+  min: number;
+  /** Where the biggest stack left in the bag sits. */
+  max: number;
+  /** Wander allowance either side, already inset from the floor and the line. */
+  wander: number;
+}
+
 /**
- * How far a racer may drift from its pace. Bounded so the track keeps meaning what it says: the
- * jockeying is life, not noise, and two racers can only trade places when their stacks are close
- * enough that the outcome really is close. A leader cannot wander behind a longshot.
+ * The rear limit for anything still racing: clear of however much of the standings zone is filled.
+ *
+ * Starts at {@link RACE_FLOOR} and walks forward as teams park, so the field keeps exactly the room
+ * it still has a use for. Takes the frontmost PARKED position rather than a count, because picks
+ * are placed by slot, not by the order they were drawn.
  */
-export const WANDER_MAX = 0.035;
+export function packFloor(parkedPicks: readonly number[], teamCount: number): number {
+  let front = -Infinity;
+  for (const pick of parkedPicks) front = Math.max(front, fallPosition(pick, teamCount));
+  return front > -Infinity ? Math.max(RACE_FLOOR, front + PARK_GAP) : RACE_FLOOR;
+}
+
+/**
+ * The band available above a given floor, inset at both ends by the wander it allows.
+ *
+ * Inset by construction so the jockeying can never reach the parked field or the finish line. The
+ * frame loop still clamps as a backstop, but leaning on that clamp would pin every trailing racer
+ * flat against the floor and quietly delete their wobble — which is how the first version of this
+ * ended up with a field that barely moved.
+ */
+export function paceBand(floor: number): PaceBand {
+  const span = Math.max(0, PACK_MAX - floor);
+  const wander = span * WANDER_FRAC;
+  return { min: floor + wander, max: PACK_MAX - wander, wander };
+}
 
 /**
  * A still-racing team's place on the track: distance is its stack measured against the biggest one
@@ -126,10 +161,10 @@ export const WANDER_MAX = 0.035;
  * Measured against the REMAINING leader, so eliminating the front-runner promotes everyone behind
  * it: your stack is worth more once a bigger one leaves the bag, and the field surges to show it.
  */
-export function paceFor(balls: number, leaderBalls: number): number {
-  if (!(leaderBalls > 0)) return PACK_MIN;
+export function paceFor(balls: number, leaderBalls: number, band: PaceBand): number {
+  if (!(leaderBalls > 0)) return band.min;
   const ratio = Math.min(1, Math.max(0, balls / leaderBalls));
-  return PACK_MIN + ratio * (PACK_MAX - PACK_MIN);
+  return band.min + ratio * (band.max - band.min);
 }
 
 /**
@@ -140,6 +175,9 @@ export function paceFor(balls: number, leaderBalls: number): number {
  * neighbours is as large as the league size allows and a 4-team draw is as legible as a 12-team
  * one. The last pick to fall is #2 — pick #1 always crosses the line — so the front of the zone is
  * left for it and the arithmetic runs over `teamCount - 1` places.
+ *
+ * {@link packFloor} reads this: how much room the field has left is a function of how far forward
+ * the standings have filled.
  */
 export function fallPosition(pick: number, teamCount: number): number {
   const places = Math.max(1, teamCount - 1);
