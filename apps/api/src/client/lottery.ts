@@ -413,6 +413,9 @@ function closeEnvelope(): void {
 function openEnvelope(team: string, hue: number | undefined, token: number): void {
   if (token !== envelopeToken || document.visibilityState === 'hidden') return;
   paintEnvelope(team, hue);
+  // The moment worth celebrating, in either reveal order. The finish keeps a fallback for viewers
+  // who never get a finale at all.
+  celebrate();
   envelopeTimer = window.setTimeout(() => {
     if (token === envelopeToken) closeEnvelope();
   }, ENVELOPE_MS);
@@ -1703,9 +1706,16 @@ function renderDrop(reveal: LotteryReveal): void {
   // — which moves on to the next roll the moment the bot posts the next beat — so without this the
   // two disagree by one pick on screen, which is exactly how it was reported.
   byId('drop-slot').textContent = `Pick #${reveal.pick}`;
-  // A later reveal retires the envelope (#243) — reachable in first-to-last, where pick #1 opens
-  // the ceremony and pick #2 follows. Pick #1's own repaints leave it alone.
-  if (rerun && reveal.pick !== 1) closeEnvelope();
+  // A later reveal no longer retires the finale (live feedback: "envelope isnt up long enough").
+  //
+  // Only reachable in first-to-last, where pick #1 opens the ceremony. The overlay wants 3.6s but
+  // opens ~2.1s after its reveal, and pick #2 lands one `delayMs` later — so at delay 5s the
+  // finale was cut to under three seconds, and the shorter the pacing the more of it was lost.
+  //
+  // Letting it run costs at most the tail overlapping pick #2's roll, which the overlay dims
+  // anyway; the reveal underneath still renders, exactly as it does for the hidden-tab case #243
+  // was built around. The dismiss timer always fires, so nothing here needs to enforce an end.
+  // Phase changes and playback starts still retire it — those replace the screen outright.
   if (activeVisual() === 'wheel') {
     // The wheel reveal (#244): ease onto the named wedge. Like the race, the card shows straight
     // away rather than waiting on the animation — cosmetics never block a reveal.
@@ -1906,11 +1916,29 @@ function renderFinish(snapshot: LotterySnapshot): void {
   // the live ceremony genuinely ending — so the phase gate has to be updated here too.
   livePhase = 'finished';
   if (snapshot.reveals.length > 0 || snapshot.finish) updateReplayAffordance();
-  if (!celebrated) {
-    celebrated = true;
-    confetti();
-    audio.fanfare(); // same one-shot gate as the confetti — a poll repaint must not replay it
-  }
+  // The fallback celebration. Normally the finale already fired it — see `celebrate` — but a
+  // viewer who never got one (hidden tab, reduced motion, a catch-up sprint) should not be the
+  // only person who finishes a lottery in silence.
+  celebrate();
+}
+
+/**
+ * Confetti and fanfare, once per ceremony (live feedback).
+ *
+ * Fired by whichever comes first: pick #1's finale, or the finish. It used to be pinned to the
+ * finish alone, which only looked right in worst-to-first — there pick #1 IS the last reveal, so
+ * the celebration landed on it by luck of the ordering. Run `first-to-last` and the same code
+ * congratulated whoever drew the WORST pick, seconds after the actual moment had passed
+ * unremarked.
+ *
+ * So it follows the finale instead, on the same rule the envelope uses (#243): pick #1, whenever
+ * it occurs. `celebrated` is re-armed by `beginPlayback`, so a replay gets its own.
+ */
+function celebrate(): void {
+  if (celebrated) return;
+  celebrated = true;
+  confetti();
+  audio.fanfare();
 }
 
 // --- replay (#197) + mid-reveal catch-up (#203) ---
