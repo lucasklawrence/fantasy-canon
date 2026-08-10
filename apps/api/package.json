@@ -20,7 +20,7 @@
     "@fantasy-canon/shared": "workspace:*",
     "dotenv": "^17.4.2",
     "matter-js": "^0.20.0",
-    "ws": "^8.21.1"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/matter-js": "^0.20.2",
