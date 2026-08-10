@@ -356,7 +356,11 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
     animation: flash 1.1s .3s ease-out backwards; }
 
   /* results board + replay (#197) */
-  .board-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .board-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    flex-wrap: wrap; }
+  /* The replay controls travel together and wrap as a unit, so a narrow board never strands a
+     picker on its own line away from the button it belongs to (#255). */
+  .board-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
   .replay { font: inherit; font-size: 12px; font-weight: 700; color: #f5d67b; background: #1b2233;
     border: 1px solid rgba(245,214,123,.35); border-radius: 999px; padding: 5px 14px;
     cursor: pointer; transition: background .2s, box-shadow .2s; }
@@ -536,8 +540,27 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
   <section class="card hidden" id="board">
     <div class="board-head">
       <h2>The order so far</h2>
-      <button id="envelope-btn" class="replay hidden" type="button">&#9993; Open the envelope</button>
-      <button id="replay-btn" class="replay hidden" type="button">&#8635; Replay the reveal</button>
+      <!-- Replay options (#255): a sealed replay decides nothing, so these are per-viewer. Both
+           default to "as it happened" — the ceremony as broadcast is always one click away. -->
+      <div class="board-tools">
+        <label class="pickwrap hidden" id="replay-visual-wrap">Replay as
+          <select id="replay-visual" class="picker">
+            <option value="" selected>as it happened</option>
+            <option value="machine">the ball machine</option>
+            <option value="race">the lane race</option>
+            <option value="wheel">the wheel</option>
+          </select>
+        </label>
+        <label class="pickwrap hidden" id="replay-order-wrap">Order
+          <select id="replay-order" class="picker">
+            <option value="as-recorded" selected>as it happened</option>
+            <option value="worst-to-first">last pick &rarr; pick #1</option>
+            <option value="first-to-last">pick #1 &rarr; last pick</option>
+          </select>
+        </label>
+        <button id="envelope-btn" class="replay hidden" type="button">&#9993; Open the envelope</button>
+        <button id="replay-btn" class="replay hidden" type="button">&#8635; Replay the reveal</button>
+      </div>
     </div>
     <ol id="board-list"></ol>
   </section>

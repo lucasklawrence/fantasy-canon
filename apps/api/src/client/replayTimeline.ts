@@ -15,7 +15,12 @@
  *     here and pure so the merge rules are testable without a DOM.
  */
 
-import type { LotteryEvent, LotteryFinish, LotterySnapshot } from '../lotteryTypes.js';
+import type {
+  LotteryEvent,
+  LotteryFinish,
+  LotteryReveal,
+  LotterySnapshot,
+} from '../lotteryTypes.js';
 
 /**
  * Replay pacing cap per drum-roll. The live window (`start.delayMs`) is sized for first-watch
@@ -42,15 +47,62 @@ export function replayStepMs(snapshot: LotterySnapshot): number {
 }
 
 /**
- * Build the full timeline: for each recorded reveal a beat (drum-roll) then the reveal itself,
- * `replayStepMs` apart, with a dwell between picks; the finish (final board + confetti) closes it
- * out. Reveals are replayed in recorded broadcast order — the builder is direction-agnostic, so a
- * future first-to-last ceremony (#196) replays correctly with no change here.
+ * Which way round to replay a sealed ceremony (#255).
+ *
+ * A replay re-renders published data on a client-side timer, so unlike the live ceremony — one
+ * spectacle, one crowd, per ADR 0008 — per-viewer choice is legitimate here. `as-recorded` is the
+ * default and the only option a catch-up ever uses.
  */
-export function buildReplayTimeline(snapshot: LotterySnapshot): ReplayStep[] {
+export type ReplayOrder = 'as-recorded' | 'worst-to-first' | 'first-to-last';
+
+export interface ReplayOptions {
+  order?: ReplayOrder;
+}
+
+/**
+ * The reveals in playback order, with `remaining` re-derived for the sequence actually being shown.
+ *
+ * Re-deriving is the whole difficulty. Each recorded `remaining` describes the hopper as it was in
+ * the ORIGINAL broadcast, so replaying worst-to-first as first-to-last and keeping those lists
+ * would show the chips draining in one direction while the picks came out in the other — and the
+ * race, the wheel and the exit planner all read `remaining` too. Recomputed here from the bag, so
+ * every consumer stays consistent with the order on screen.
+ *
+ * `balls` and `oddsPct` are deliberately left as recorded. They describe the odds that team really
+ * had at that slot; recomputing them for a hypothetical sequence would invent numbers that were
+ * never true of the draw.
+ */
+function sequenceReveals(snapshot: LotterySnapshot, order: ReplayOrder): LotteryReveal[] {
+  const recorded = snapshot.reveals;
+  if (order === 'as-recorded' || recorded.length === 0) return [...recorded];
+  const sorted = [...recorded].sort((a, b) =>
+    order === 'first-to-last' ? a.pick - b.pick : b.pick - a.pick,
+  );
+  // The bag as it stood before the first pick. Falling back to the recorded reveals covers a
+  // snapshot with no `start` (an older api, or a catch-up source built without one).
+  let pool = snapshot.start?.rows.map((row) => row.team) ?? recorded.map((reveal) => reveal.team);
+  return sorted.map((reveal) => {
+    pool = pool.filter((team) => team !== reveal.team);
+    return { ...reveal, remaining: [...pool] };
+  });
+}
+
+/**
+ * Build the full timeline: for each reveal a beat (drum-roll) then the reveal itself,
+ * `replayStepMs` apart, with a dwell between picks; the finish (final board + confetti) closes it
+ * out.
+ *
+ * Reveals play in recorded broadcast order by default — direction-agnostic, so either live order
+ * (#196) replays correctly with no change here — or resequenced when the viewer picks a direction
+ * (#255).
+ */
+export function buildReplayTimeline(
+  snapshot: LotterySnapshot,
+  options: ReplayOptions = {},
+): ReplayStep[] {
   const stepMs = replayStepMs(snapshot);
   const steps: ReplayStep[] = [];
-  const reveals = snapshot.reveals;
+  const reveals = sequenceReveals(snapshot, options.order ?? 'as-recorded');
   let t = 0;
   for (let i = 0; i < reveals.length; i += 1) {
     const reveal = reveals[i];

@@ -80,6 +80,60 @@ describe('buildReplayTimeline', () => {
     expect(beats[2].remaining).toEqual(['C']);
   });
 
+  /**
+   * #255. A replay re-renders published data on a local timer and decides nothing, so a viewer may
+   * watch a worst-to-first ceremony the other way round.
+   *
+   * The trap is `remaining`: each recorded list describes the hopper as it was in the ORIGINAL
+   * broadcast, so replaying them verbatim in a new sequence would drain the chips one way while
+   * the picks came out the other — and the race, the wheel and the exit planner all read it too.
+   */
+  it('replays in the recorded order by default, and resequences on request', () => {
+    const picks = (order?: 'as-recorded' | 'worst-to-first' | 'first-to-last'): number[] =>
+      buildReplayTimeline(FINISHED, order ? { order } : {}).flatMap((s) =>
+        s.event.type === 'lottery-reveal' ? [s.event.reveal.pick] : [],
+      );
+    expect(picks()).toEqual([3, 2, 1]); // as broadcast
+    expect(picks('as-recorded')).toEqual([3, 2, 1]);
+    expect(picks('worst-to-first')).toEqual([3, 2, 1]);
+    expect(picks('first-to-last')).toEqual([1, 2, 3]);
+  });
+
+  it('re-derives remaining for the order actually shown, not the one recorded', () => {
+    const steps = buildReplayTimeline(FINISHED, { order: 'first-to-last' });
+    const revealed = steps.flatMap((s) =>
+      s.event.type === 'lottery-reveal' ? [s.event.reveal] : [],
+    );
+    // Reversed, the hopper empties C then A then B — nothing like the recorded lists.
+    expect(revealed.map((r) => r.remaining)).toEqual([['B', 'A'], ['B'], []]);
+    // The beat before each pick still includes the team about to be drawn.
+    const beats = steps.flatMap((s) => (s.event.type === 'lottery-beat' ? [s.event.beat] : []));
+    expect(beats.map((b) => b.remaining)).toEqual([['C', 'B', 'A'], ['B', 'A'], ['B']]);
+  });
+
+  it('keeps each pick’s recorded odds — a replay must not invent numbers', () => {
+    const revealed = buildReplayTimeline(FINISHED, { order: 'first-to-last' }).flatMap((s) =>
+      s.event.type === 'lottery-reveal' ? [s.event.reveal] : [],
+    );
+    // Pick 1 really was C at 100%; showing it first does not change what happened at that slot.
+    expect(revealed[0]).toMatchObject({ pick: 1, team: 'C', balls: 3, oddsPct: 100 });
+    expect(revealed[2]).toMatchObject({ pick: 3, team: 'B', balls: 2, oddsPct: 33.3 });
+  });
+
+  it('resequences without a start block, falling back to the reveals for the bag', () => {
+    const noStart: LotterySnapshot = {
+      phase: 'finished',
+      reveals: REVEALS,
+      finish: FINISHED.finish,
+    };
+    const steps = buildReplayTimeline(noStart, { order: 'first-to-last' });
+    const revealed = steps.flatMap((s) =>
+      s.event.type === 'lottery-reveal' ? [s.event.reveal] : [],
+    );
+    expect(revealed.map((r) => r.pick)).toEqual([1, 2, 3]);
+    expect(revealed[revealed.length - 1].remaining).toEqual([]);
+  });
+
   it('compresses the live drum-roll window but never stretches a faster one', () => {
     const steps = buildReplayTimeline(FINISHED); // live delayMs 8000 → capped
     expect(steps[1].atMs - steps[0].atMs).toBe(REPLAY_MAX_STEP_MS);

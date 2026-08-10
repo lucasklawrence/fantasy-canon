@@ -54,6 +54,7 @@ import {
   sameFinishOrder,
   toPendingSteps,
   type CatchUpContext,
+  type ReplayOrder,
 } from './replayTimeline.js';
 import { configuredMaxTeamBalls, runHandshake } from './sdk.js';
 // EXTRACT_CAP_MS is the extraction race cap — the sim's rAF loop never resolves in a hidden tab
@@ -562,11 +563,27 @@ function redressDropBall(): void {
   if (ball) applyDropFace(ball, lastDropFace.team, lastDropFace.hue);
 }
 
+export type Visual = 'machine' | 'race' | 'wheel';
+
+/**
+ * Per-viewer visual for a REPLAY only (#255), or null to watch it as it was broadcast.
+ *
+ * Live, the visual is fixed by `start` because a ceremony is one spectacle for one crowd (ADR
+ * 0008). A replay re-renders published data on a local timer and decides nothing, so choosing your
+ * own here costs the ceremony nothing — and lets a viewer see the same sealed draw as the machine,
+ * the race and the wheel without the commissioner running it three times.
+ */
+let replayVisual: Visual | null = null;
+
 /**
  * The ceremony's reveal visualization (#235), fixed by `start` so every viewer renders the same
  * spectacle. The lobby has no start yet — it always shows the machine's loaded hopper.
+ *
+ * The override applies only while a REPLAY is actually running: a catch-up is a live ceremony seen
+ * late and must render as broadcast, and once the replay ends the screen belongs to the real one.
  */
-function activeVisual(): 'machine' | 'race' | 'wheel' {
+function activeVisual(): Visual {
+  if (replayVisual !== null && playbackMode === 'replay') return replayVisual;
   const visual = currentStart?.visual;
   return visual === 'race' || visual === 'wheel' ? visual : 'machine';
 }
@@ -591,6 +608,28 @@ function applyStageLayout(): void {
   // as "not racing" here: it leaves `.race` off, so the drum's box really is the wide one even
   // though the drum is hidden, and it has to be right before the machine is ever shown again.
   if (!racing) flushDrumResize(true);
+  quiesceHiddenSims(visual);
+}
+
+/** The visual the stage is currently laid out for, so the swap below runs once per change. */
+let laidVisual: Visual | null = null;
+
+/**
+ * Park whatever is no longer on screen (#235's rule, generalised for #255).
+ *
+ * The panels hide, but a canvas sim behind a hidden panel keeps its rAF loop: loose racers never
+ * sleep, and the wheel spins until told not to. That was manageable while the visual was fixed for
+ * the whole ceremony — now a replay can switch it mid-session, so the swap needs an owner.
+ *
+ * Guarded on a change rather than run on every call: `applyStageLayout` fires on every drum roll
+ * and every reveal, and `raceSim.sync([], [])` rebuilds a field.
+ */
+function quiesceHiddenSims(visual: Visual): void {
+  if (laidVisual === visual) return;
+  laidVisual = visual;
+  if (visual !== 'machine') hopperSim?.agitate(false);
+  if (visual !== 'race') raceSim?.sync([], []);
+  if (visual !== 'wheel') wheelSim?.spin(false);
 }
 
 // Ceremony sound (#216) — silent until the viewer arms it; the callback keeps the 🔊 pill honest
@@ -1998,13 +2037,21 @@ function handOffToLive(): void {
   updateReplayAffordance();
 }
 
-function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
-  const timeline = buildReplayTimeline(source);
+function beginPlayback(
+  mode: PlaybackMode,
+  source: LotterySnapshot,
+  // Per-viewer replay choices (#255). A catch-up never passes them: it is a live ceremony seen
+  // late, and must render as broadcast.
+  options: { visual?: Visual | null; order?: ReplayOrder } = {},
+): void {
+  const timeline = buildReplayTimeline(source, { order: options.order ?? 'as-recorded' });
   if (timeline.length === 0) return;
   // A lingering finale envelope belongs to the run being replayed over (#243); the replay's own
   // pick-#1 step re-opens it at the right moment (a catch-up never does).
   closeEnvelope();
   playbackMode = mode;
+  // Before the sim reset below, which asks `activeVisual()` which field to refill.
+  replayVisual = mode === 'replay' ? (options.visual ?? null) : null;
   cursor = createPlaybackCursor(
     toPendingSteps(timeline),
     applyReplayStep,
@@ -2046,7 +2093,16 @@ function beginPlayback(mode: PlaybackMode, source: LotterySnapshot): void {
 function startReplay(): void {
   const source = finishedSnapshot;
   if (!source || isPlaying() || document.hidden) return;
-  beginPlayback('replay', source);
+  const picked = (byId('replay-visual') as HTMLSelectElement).value;
+  const order = (byId('replay-order') as HTMLSelectElement).value;
+  beginPlayback('replay', source, {
+    // Empty means "as it happened" — fall through to the ceremony's own visual.
+    visual: picked === 'machine' || picked === 'race' || picked === 'wheel' ? picked : null,
+    order:
+      order === 'worst-to-first' || order === 'first-to-last'
+        ? order
+        : ('as-recorded' as ReplayOrder),
+  });
 }
 
 /**
@@ -2082,6 +2138,10 @@ function stopPlayback(options: { keepPull?: boolean } = {}): void {
   cursor?.stop();
   cursor = null;
   playbackMode = null;
+  // The screen goes back to the real ceremony's visual (#255). Cleared here rather than only on
+  // the next replay: `activeVisual()` is asked by every repaint, and leaving a stale override set
+  // would repaint a live board in a visual nobody else is watching.
+  replayVisual = null;
   catchUpCommitment = undefined;
   catchUpBeatPick = undefined;
   show('replay-skip', false);
@@ -2178,6 +2238,11 @@ function updateReplayAffordance(): void {
   // offered to late joiners too, which is why the subject comes from the ORDER rather than from
   // having witnessed the ceremony.
   show('envelope-btn', !isPlaying() && livePhase === 'finished' && finaleTeam !== null);
+  // The replay options (#255) belong to a sealed replay only — never over a running playback, and
+  // never beside the "catch up" offer, which must render the ceremony as broadcast.
+  const sealed = !isPlaying() && livePhase === 'finished' && finishedSnapshot !== null;
+  show('replay-visual-wrap', sealed);
+  show('replay-order-wrap', sealed);
   if (isPlaying()) {
     show('replay-btn', false);
     return;
