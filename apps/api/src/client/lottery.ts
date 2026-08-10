@@ -1357,7 +1357,12 @@ function flipFromChute(ball: HTMLElement, from: FlipAnchor): Promise<void> {
 function renderDrum(pick: number, remaining: string[], windowMs?: number): void {
   show('waiting', false);
   show('stage', true);
-  show('drop', false);
+  // The last pick's card deliberately STAYS through this roll (live feedback: "it should stay for
+  // a couple seconds, its kinda quick"). It used to be hidden here, which had two consequences:
+  // the bot posts the next beat immediately after each reveal, so a card that took ~1.6s of exit
+  // choreography to arrive was wiped almost at once — and the 2s poll re-ran this on every tick,
+  // so even the surviving window kept getting cut. `renderDrop` hides it when the NEXT ball
+  // actually starts coming out, which is the moment it stops being the current result.
   byId('drum').classList.remove('hidden');
   applyStageLayout();
   byId('drum-now').textContent = `Drawing pick #${pick}…`;
@@ -1655,6 +1660,10 @@ function renderDrop(reveal: LotteryReveal): void {
   clear(chips);
   for (const team of reveal.remaining) chips.appendChild(el('span', 'chip', team));
   byId('drum-now').textContent = `Pick #${reveal.pick}: ${reveal.team}!`;
+  // The card names its own slot, for every visual and every branch below. It outlives the headline
+  // — which moves on to the next roll the moment the bot posts the next beat — so without this the
+  // two disagree by one pick on screen, which is exactly how it was reported.
+  byId('drop-slot').textContent = `Pick #${reveal.pick}`;
   // A later reveal retires the envelope (#243) — reachable in first-to-last, where pick #1 opens
   // the ceremony and pick #2 follows. Pick #1's own repaints leave it alone.
   if (rerun && reveal.pick !== 1) closeEnvelope();

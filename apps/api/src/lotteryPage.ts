@@ -332,6 +332,11 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
 
   /* the drop */
   #drop { text-align: center; }
+  /* Which pick this card is (live feedback). The card now survives into the NEXT pick's drum roll,
+     so the headline above it has already moved on — without its own label the two read as an
+     off-by-one. The ball below shows the BALL number; this is the slot it won. */
+  #drop .slot { font-size: 11px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+    color: #8fa0c4; }
   #drop .dropball { width: 120px; height: 120px; margin: 6px auto 10px; border-radius: 50%;
     background: radial-gradient(circle at 32% 28%, #fff 0%, #f5d67b 30%, #c8912e 100%);
     display: flex; align-items: center; justify-content: center; color: #201a08; font-weight: 900;
@@ -519,6 +524,7 @@ export function lotteryHtml(clientId: string, maxTeamBalls: number = MAX_TEAM_BA
           <div class="chips" id="drum-remaining"></div>
         </div>
         <div id="drop" class="hidden">
+          <div class="slot" id="drop-slot"></div>
           <div class="dropball" id="drop-pick"></div>
           <div class="team" id="drop-team"></div>
           <div class="odds" id="drop-odds"></div>
