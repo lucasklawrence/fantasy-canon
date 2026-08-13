@@ -404,7 +404,13 @@ export async function handleDraftOrderSetupSubcommand(
     return;
   }
 
-  const season = interaction.options.getInteger('season', true);
+  // Defaults to this year (#255-era papercut): the draft season is almost always the current one,
+  // and a required integer is one more thing to get right while twelve people wait. The Activity's
+  // own start button already defaults the same way, so the two surfaces now agree.
+  //
+  // Note this is the DRAFT's season, not the one the weights come from — `applyStandingsWeights`
+  // reads `season - 1`, so a 2026 lottery is seeded by the 2025 final standings.
+  const season = interaction.options.getInteger('season') ?? new Date().getFullYear();
   const manualTeams = interaction.options.getString('teams') ?? undefined;
   const bonusInput = interaction.options.getString('bonus') ?? undefined;
   const ballsInput = interaction.options.getString('balls') ?? undefined;

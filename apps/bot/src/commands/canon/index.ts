@@ -638,7 +638,7 @@ export const canonCommand = new SlashCommandBuilder()
           .setName('setup')
           .setDescription('Freeze the bag and post the public odds preview')
           .addIntegerOption((opt) =>
-            opt.setName('season').setDescription('Season year (e.g., 2026)').setRequired(true),
+            opt.setName('season').setDescription('Draft season (default: this year)'),
           )
           .addStringOption((opt) =>
             opt
