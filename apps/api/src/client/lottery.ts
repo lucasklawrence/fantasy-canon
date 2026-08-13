@@ -1550,6 +1550,10 @@ async function runExitChoreography(
   tube.classList.remove('transit', 'logo-face');
   tube.style.background = '';
   byId('chute').classList.remove('active');
+  // The ball has finished the tube and is about to become the card, so this is the honest moment
+  // for the chips and the board to name it (live feedback). Painted here rather than after the
+  // FLIP's spring: the answer arrives with the ball, not a beat behind it.
+  paintRevealInfo(reveal);
   show('drop', true);
   const ball = replaceNode('drop-pick');
   ball.textContent = num !== null ? `#${num}` : `#${reveal.pick}`;
@@ -1677,6 +1681,17 @@ function revealGapMs(reveal: LotteryReveal): number {
   return currentStart?.delayMs ?? FINISH_LEAD_MS;
 }
 
+/**
+ * Everything on screen that names the drawn team: the "still in the hopper" chips and the running
+ * board. Idempotent — both are rebuilt wholesale — so the deferred path can call it more than once.
+ */
+function paintRevealInfo(reveal: LotteryReveal): void {
+  const chips = byId('drum-remaining');
+  clear(chips);
+  for (const team of reveal.remaining) chips.appendChild(el('span', 'chip', team));
+  renderBoard(reveals);
+}
+
 function renderDrop(reveal: LotteryReveal): void {
   show('stage', true);
   applyStageLayout();
@@ -1696,11 +1711,20 @@ function renderDrop(reveal: LotteryReveal): void {
       ? drawnBallFor(currentStart?.commitment ?? '', reveal.pick, range)
       : null;
   const oddsText = `${num !== null ? `ball #${num} · ` : ''}${reveal.balls} ball${reveal.balls === 1 ? '' : 's'} · ${reveal.oddsPct.toFixed(1)}% chance at this slot`;
-  // The reveal's *information* is public the moment the event lands — headline, board, chips all
-  // update immediately. Only the drop ball's appearance waits for the exit choreography.
-  const chips = byId('drum-remaining');
-  clear(chips);
-  for (const team of reveal.remaining) chips.appendChild(el('span', 'chip', team));
+  // The chips and the running board name the drawn team, so on the machine they wait for the ball
+  // (live feedback: "before the ball reaches end of tube, pick is revealed on right").
+  //
+  // The exit takes ~1.6s — extract, tube, FLIP — and painting the answer at t=0 spoiled every one
+  // of them: the pick was on the board while its ball was still sliding down the chute. The race
+  // and the wheel have no such gap (their payoff runs beside the card, not before it), so only the
+  // machine defers.
+  //
+  // This narrows the old "information is public immediately" rule to what it was really protecting:
+  // the ceremony must never be BLOCKED by an animation. It still isn't — `paintRevealInfo` runs off
+  // the choreography's own bounded promise on every path including its early returns, and the 2s
+  // poll repaints from the snapshot regardless, so a stalled exit costs a beat, never a pick.
+  const holdInfo = activeVisual() === 'machine' && rerun;
+  if (!holdInfo) paintRevealInfo(reveal);
   byId('drum-now').textContent = `Pick #${reveal.pick}: ${reveal.team}!`;
   // The card names its own slot, for every visual and every branch below. It outlives the headline
   // — which moves on to the next roll the moment the bot posts the next beat — so without this the
@@ -1801,6 +1825,10 @@ function renderDrop(reveal: LotteryReveal): void {
     // reveal having taken over.
     const modeAtReveal = playbackMode;
     void runExitChoreography(reveal, num, range?.hue, oddsText, modeAtReveal).then((landed) => {
+      // The backstop for the held chips and board. The synced paint happens inside, the moment the
+      // ball becomes the card; this covers every early return — a superseded run, an extraction
+      // that never flew — where there is no ball to sync with and the answer should simply appear.
+      paintRevealInfo(reveal);
       if (landed && lastDropPick === reveal.pick) {
         queueEnvelope(reveal, range?.hue, ENVELOPE_LEAD_MS.machine, modeAtReveal);
       }
@@ -2568,8 +2596,9 @@ function applyEvent(event: LotteryEvent): void {
       livePhase = 'revealing';
       livePendingBeat = null; // the reveal consumes the beat
       reveals.push(event.reveal);
+      // `renderDrop` owns the board now: on the machine it holds it until the ball lands, so that
+      // the pick does not appear on the right while its ball is still in the tube.
       renderDrop(event.reveal);
-      renderBoard(reveals);
       // A late joiner now has history worth catching up on (#203).
       updateReplayAffordance();
       break;
