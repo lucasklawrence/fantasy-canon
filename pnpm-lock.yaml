@@ -15,8 +15,8 @@ importers:
         specifier: ^26.2.0
         version: 26.2.0
       dotenv:
-        specifier: ^17.4.2
-        version: 17.4.2
+        specifier: ^18.0.0
+        version: 18.0.0
       eslint:
         specifier: ^10.8.1
         version: 10.8.1
@@ -63,8 +63,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       dotenv:
-        specifier: ^17.4.2
-        version: 17.4.2
+        specifier: ^18.0.0
+        version: 18.0.0
       matter-js:
         specifier: ^0.20.0
         version: 0.20.0
@@ -103,8 +103,8 @@ importers:
         specifier: ^14.27.0
         version: 14.27.0
       dotenv:
-        specifier: ^17.4.2
-        version: 17.4.2
+        specifier: ^18.0.0
+        version: 18.0.0
       ws:
         specifier: ^8.21.3
         version: 8.21.3
@@ -981,9 +981,10 @@ packages:
     resolution: {integrity: sha512-qHbFlFG2N7y3LjPySYsL6A1+BnX6bkTVgo842EX0CqVPk/KTMwZkojPHEXKsQUpWZNyz5BISNHK1cPpQw0+m4A==}
     engines: {node: '>=18'}
 
-  dotenv@17.4.2:
-    resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
+  dotenv@18.0.0:
+    resolution: {integrity: sha512-16YSUvsKtKbwrTbESvtTSZzzJUug6jdFdqiBFg9Q6Bk1JY9r0hAtrtTiWxdI9YrsgOTmkjZRdgU0n3LnwGpECw==}
     engines: {node: '>=12'}
+    hasBin: true
 
   esbuild@0.21.5:
     resolution: {integrity: sha512-mg3OPMV4hXywwpoDxu3Qda5xCKQi+vCTZq8S9J/EpkhB2HzKXq4SNFZE3+NK93JYxc8VMSep+lOUSC/RVKaBqw==}
@@ -2194,7 +2195,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  dotenv@17.4.2: {}
+  dotenv@18.0.0: {}
 
   esbuild@0.21.5:
     optionalDependencies:
