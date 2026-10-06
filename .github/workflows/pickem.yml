@@ -1,0 +1,47 @@
+name: pickem
+
+# CI for the Python pick'em project (pickem/). Runs only when pickem code changes; the TS
+# workflow (ci.yml) ignores pickem/ in turn. The scheduled snapshot commits under
+# pickem/history/ don't trigger this.
+
+on:
+  pull_request:
+    paths:
+      - 'pickem/**'
+      - '!pickem/history/**'
+      - '.github/workflows/pickem*.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'pickem/**'
+      - '!pickem/history/**'
+      - '.github/workflows/pickem*.yml'
+
+concurrency:
+  group: pickem-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: ruff · format · pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: pickem
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Test
+        run: uv run pytest -q
