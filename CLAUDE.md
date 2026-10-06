@@ -97,6 +97,11 @@ committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
   the commissioner is away from the host PC (#246, ADR 0009).
 - **`scripts/`** — `debug-espn.ts`, `archive-draft.ts`, the VS Code workspace, and
   [`scripts/ops/`](scripts/ops/README.md) (named tunnel, process supervision, preflight).
+- **`pickem/`** — a separate uv/Python project: the weekly NFL pick'em briefing (odds, line moves,
+  starter injuries by snap share) and its graded history under `pickem/history/`. Outside the pnpm
+  workspace and the five gates; its own CI is `pickem.yml` (ruff + pytest) and
+  `pickem-snapshot.yml` commits snapshots to `main` on a schedule. See
+  [`pickem/README.md`](pickem/README.md).
 
 ## Conventions
 

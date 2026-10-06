@@ -1,0 +1,415 @@
+<title>Pick'em Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a scouting sheet. Summary board up top for the scan, one card per game below for the read. */
+:root {
+  --bg: #f3f5f2;
+  --surface: #ffffff;
+  --ink: #16212b;
+  --muted: #5d6b66;
+  --line: #d9dfdb;
+  --turf: #2c6150;
+  --turf-soft: #e1ece7;
+  --away: #3b5b8a;
+  --home: #2c6150;
+  --hot: #b93e14;
+  --hot-soft: #fbe9e1;
+  --warn: #9a6a12;
+  --warn-soft: #f7eed9;
+  --calm: #6b7873;
+  --display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1614; --surface: #17201d; --ink: #e5ece8; --muted: #93a29c; --line: #2a3632;
+    --turf: #6fbf9f; --turf-soft: #1d2f29; --away: #8bb0e6; --home: #6fbf9f;
+    --hot: #f08a5d; --hot-soft: #3a2119; --warn: #e2b55a; --warn-soft: #33291a; --calm: #8a9893;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1614; --surface: #17201d; --ink: #e5ece8; --muted: #93a29c; --line: #2a3632;
+  --turf: #6fbf9f; --turf-soft: #1d2f29; --away: #8bb0e6; --home: #6fbf9f;
+  --hot: #f08a5d; --hot-soft: #3a2119; --warn: #e2b55a; --warn-soft: #33291a; --calm: #8a9893;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--body); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 64px; display: grid; gap: 28px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 700; letter-spacing: .01em; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2rem, 6vw, 2.8rem); line-height: 1; text-transform: uppercase; }
+h2 { font-size: 1.5rem; text-transform: uppercase; }
+.num, td.n, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.eyebrow { font: 600 .72rem/1 var(--body); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+header { display: grid; gap: 10px; }
+header p { margin: 0; color: var(--muted); max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted); font-size: .85rem; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { font: 500 .85rem var(--body); color: var(--muted); background: none; border: 0; padding: 7px 12px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--turf); color: var(--surface); }
+.btn { font: 500 .85rem var(--body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--turf); outline-offset: 2px; }
+.tally { font-size: .85rem; color: var(--muted); }
+
+.board { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; }
+.board table { min-width: 720px; }
+th { font: 600 .7rem var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+.board tbody tr { cursor: pointer; }
+.board tbody tr:hover { background: var(--turf-soft); }
+.matchup { font-family: var(--display); font-weight: 700; font-size: 1.15rem; letter-spacing: .02em; white-space: nowrap; }
+.matchup .fav { color: var(--turf); }
+.at { color: var(--muted); font-weight: 600; padding-inline: 4px; }
+.mini { display: block; width: 92px; height: 6px; border-radius: 3px; background: var(--line); position: relative; overflow: hidden; }
+.mini i { position: absolute; inset: 0 auto 0 0; background: var(--turf); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font: 600 .72rem/1 var(--body); padding: 4px 7px; border-radius: 999px; white-space: nowrap; }
+.chip.high { background: var(--hot-soft); color: var(--hot); }
+.chip.med { background: var(--warn-soft); color: var(--warn); }
+.chip.low { background: var(--turf-soft); color: var(--calm); }
+.chip.pick { background: var(--turf); color: var(--surface); }
+.up { color: var(--turf); } .down { color: var(--hot); }
+
+.games { display: grid; gap: 18px; }
+.game { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: grid; gap: 16px; scroll-margin-top: 16px; }
+.game.upset { border-color: var(--hot); }
+.ghead { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: baseline; }
+.ghead h3 { font-size: 1.9rem; line-height: 1; text-transform: uppercase; }
+.ghead .sub { color: var(--muted); font-size: .85rem; }
+.prob { display: grid; gap: 6px; }
+.bar { position: relative; height: 26px; border-radius: 6px; overflow: hidden; display: flex; font: 600 .8rem/26px var(--mono); }
+.bar .a { background: var(--away); color: var(--surface); padding-left: 8px; }
+.bar .h { background: var(--home); color: var(--surface); text-align: right; padding-right: 8px; flex: 1; }
+.tick { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); }
+.tick.open { background: none; border-left: 2px dashed var(--ink); opacity: .55; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .8rem; color: var(--muted); }
+.legend b { color: var(--ink); font-weight: 600; }
+.flags { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.flags li { display: flex; gap: 8px; align-items: baseline; font-size: .9rem; }
+.flags li .chip { flex: none; }
+.flags li.vsfav { font-weight: 600; }
+.teams { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.team { min-width: 0; display: grid; gap: 10px; align-content: start; }
+.team h4 { margin: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font: 700 1.2rem var(--display); text-transform: uppercase; letter-spacing: .02em; }
+.team h4 .side { font: 600 .68rem var(--body); letter-spacing: .1em; color: var(--muted); }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .85rem; color: var(--muted); }
+.facts b { color: var(--ink); font-weight: 600; font-family: var(--mono); }
+.form { display: flex; flex-wrap: wrap; gap: 4px; }
+.form span { font: 500 .72rem var(--mono); padding: 3px 6px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); }
+.form span.W { border-color: var(--turf); color: var(--turf); }
+.form span.L { border-color: var(--hot); color: var(--hot); }
+.inj { overflow-x: auto; }
+.inj table { font-size: .82rem; }
+.inj td, .inj th { padding: 5px 6px; }
+.inj td.n { text-align: right; }
+.st-out { color: var(--hot); font-weight: 600; }
+.st-q { color: var(--warn); font-weight: 600; }
+.new { font: 700 .62rem var(--body); letter-spacing: .06em; color: var(--hot); border: 1px solid var(--hot); border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
+.unit { font: 600 .68rem var(--body); letter-spacing: .06em; color: var(--muted); }
+details summary { cursor: pointer; font-size: .8rem; color: var(--muted); padding-block: 4px; }
+.empty { color: var(--muted); font-size: .85rem; }
+.pickrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--line); padding-top: 14px; }
+.pickrow .lab { font-size: .8rem; color: var(--muted); margin-right: 4px; }
+.pickrow button { font: 700 1rem var(--display); letter-spacing: .03em; text-transform: uppercase; padding: 6px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+.pickrow button[aria-pressed="true"] { background: var(--turf); border-color: var(--turf); color: var(--surface); }
+.pickrow .against { font-size: .8rem; color: var(--hot); font-weight: 600; }
+.pickrow a { margin-left: auto; font-size: .8rem; color: var(--turf); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tabs button { font: 700 1.05rem var(--display); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); background: none; border: 0; border-bottom: 3px solid transparent; padding: 8px 14px; cursor: pointer; margin-bottom: -1px; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--turf); }
+.view { display: grid; gap: 28px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.tile .big { font: 700 2.2rem/1 var(--display); }
+.tile .sub { font-size: .8rem; color: var(--muted); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+.panel h2 { padding: 14px 16px 0; font-size: 1.2rem; }
+.panel p.note { margin: 4px 16px 10px; color: var(--muted); font-size: .82rem; max-width: 70ch; }
+.panel table { min-width: 520px; }
+td.n, th.n { text-align: right; }
+.sync { font-size: .78rem; color: var(--muted); }
+.foot { color: var(--muted); font-size: .8rem; display: grid; gap: 6px; max-width: 75ch; }
+.foot p { margin: 0; }
+@media (max-width: 520px) { .game { padding: 14px; } .ghead h3 { font-size: 1.5rem; } }
+@media (prefers-reduced-motion: no-preference) { .game { transition: border-color .2s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow" id="eyebrow">NFL pick'em</span>
+    <h1 id="h1">Pick sheet</h1>
+    <p>Market odds are the baseline. Each game lists what could make the favorite a bad pick: starters out (judged by snap share), line moves, ESPN's model disagreeing, rest and weather. Bold flags cut against the favorite.</p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" id="tab-week" aria-selected="true" aria-controls="view-week">This week</button>
+    <button type="button" role="tab" id="tab-season" aria-selected="false" aria-controls="view-season">Season</button>
+  </div>
+
+  <div class="view" id="view-week" role="tabpanel" aria-labelledby="tab-week">
+  <div class="toolbar">
+    <div class="seg" role="group" aria-label="Filter games">
+      <button type="button" id="f-all" data-f="all" aria-pressed="true">All games</button>
+      <button type="button" id="f-upset" data-f="upset">Upset case</button>
+      <button type="button" id="f-close" data-f="close">Close (&lt;60%)</button>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="sync" id="sync"></span>
+      <span class="tally" id="tally"></span>
+      <button type="button" class="btn" id="copy">Copy my picks</button>
+    </div>
+  </div>
+
+  <section class="board" aria-label="All games">
+    <table>
+      <thead><tr><th>Kickoff</th><th>Game</th><th>Market</th><th class="n">FPI</th><th>Move since open</th><th>Flags</th><th>My pick</th></tr></thead>
+      <tbody id="board"></tbody>
+    </table>
+  </section>
+
+  <section class="games" id="games"></section>
+  </div>
+
+  <div class="view" id="view-season" role="tabpanel" aria-labelledby="tab-season" hidden>
+    <div class="tiles" id="tiles"></div>
+    <section class="panel"><h2>By week</h2><p class="note">Graded against the last snapshot taken before each kickoff, so nothing uses hindsight.</p><table><thead><tr><th>Week</th><th class="n">Favorites</th><th class="n">You</th><th class="n">Your upsets</th><th class="n">ESPN FPI</th></tr></thead><tbody id="weeks"></tbody></table></section>
+    <section class="panel"><h2>Do the flags work?</h2><p class="note">For each kind of flag that argued against the favorite: how often the favorite actually lost, against how often the market expected it to. A positive edge means the flag found upsets the market missed. Small samples swing wildly, so wait for 20+ games before trusting one.</p><table><thead><tr><th>Flag</th><th class="n">Games</th><th class="n">Favorite lost</th><th class="n">Market expected</th><th class="n">Edge</th></tr></thead><tbody id="flagstats"></tbody></table></section>
+  </div>
+
+  <footer class="foot">
+    <p><b>Market</b> is the DraftKings moneyline with the bookmaker margin removed. <b>FPI</b> is ESPN's own win model. <b>Starter</b> means at least 60% of snaps in their best 3 games this season (nflverse snap counts). <b>NEW</b> means the player was on the field last week, so the market may still be catching up.</p>
+    <p>Practice participation appears once teams file Wednesday reports. Lines and injury statuses change through the week, so regenerate Thursday and again Sunday morning.</p>
+  </footer>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const SEASON = /*__SEASON__*/null || [];
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const pct = p => p == null ? "–" : Math.round(p * 100) + "%";
+const wkId = (season, week) => `${season}-w${String(week).padStart(2, "0")}`;
+const KEY = wkId(DATA.season, DATA.week);
+// Picks live in the page's database (synced across devices, readable for grading) and fall
+// back to this browser's storage when the database isn't available.
+const allPicks = {};
+let db = null;
+try { allPicks[KEY] = JSON.parse(localStorage.getItem("pickem-" + KEY) || "{}"); } catch (e) { allPicks[KEY] = {}; }
+let picks = allPicks[KEY];
+let writing = Promise.resolve();
+const setSync = t => { const el = document.getElementById("sync"); if (el) el.textContent = t; };
+const save = () => {
+  try { localStorage.setItem("pickem-" + KEY, JSON.stringify(picks)); } catch (e) {}
+  if (!db) return;
+  const body = { season: DATA.season, week: DATA.week, picks: { ...picks }, updated: new Date().toISOString() };
+  writing = writing.then(() => db.doc("picks/" + KEY).set(body)).then(
+    () => setSync("Picks saved"),
+    e => setSync(e && e.code === "invalid_argument" ? "Read-only here: picks stay in this browser" : "Couldn't save picks. Tap again to retry."));
+};
+
+const fav = g => (g.market ?? 0.5) >= 0.5 ? "home" : "away";
+const favP = g => g.market == null ? null : Math.max(g.market, 1 - g.market);
+const hasUpset = g => g.flags.some(f => f.vs_fav);
+const kick = iso => new Date(iso).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+const short = n => n.split(" ").slice(-1)[0];
+
+function sevChips(g) {
+  const c = { high: 0, med: 0, low: 0 };
+  g.flags.forEach(f => c[f.sev]++);
+  return ["high", "med", "low"].filter(k => c[k]).map(k => `<span class="chip ${k}">${c[k]} ${k === "med" ? "watch" : k === "high" ? "major" : "minor"}</span>`).join(" ") || '<span class="empty">none</span>';
+}
+
+function move(g) {
+  if (g.market == null || g.market_open == null) return "–";
+  const f = fav(g), now = f === "home" ? g.market : 1 - g.market, open = f === "home" ? g.market_open : 1 - g.market_open;
+  const d = Math.round((now - open) * 100);
+  if (Math.abs(d) < 2) return '<span class="num">steady</span>';
+  return `<span class="num ${d > 0 ? "up" : "down"}">${d > 0 ? "+" : ""}${d} ${g[f].abbr}</span>`;
+}
+
+function injRows(list) {
+  return list.map(i => {
+    const cls = i.out ? "st-out" : i.q ? "st-q" : "";
+    const isNew = i.starter && (i.out || i.q) && i.played_last;
+    return `<tr><td>${esc(i.name)}${isNew ? '<span class="new">NEW</span>' : ""}</td><td class="unit">${esc(i.pos)}</td><td class="${cls}">${esc(i.status)}</td><td>${esc(i.injury)}</td><td class="n">${i.peak != null ? pct(i.peak) : "–"}</td><td>${esc(i.practice || "")}</td></tr>`;
+  }).join("");
+}
+
+function teamCol(g, side) {
+  const t = g[side];
+  const starters = t.injuries.filter(i => i.starter);
+  const rest = t.injuries.filter(i => !i.starter);
+  const head = '<thead><tr><th>Player</th><th>Pos</th><th>Status</th><th>Injury</th><th class="n">Snaps</th><th>Practice</th></tr></thead>';
+  return `<div class="team">
+    <h4><span>${esc(t.name)}</span><span class="side">${side === "home" ? "HOME" : "AWAY"}</span></h4>
+    <div class="facts"><span>Record <b>${esc(t.record || "–")}</b></span><span>Pt diff <b>${t.pd == null ? "–" : (t.pd > 0 ? "+" : "") + t.pd}</b></span><span>Rest <b>${t.rest ?? "–"}d</b></span></div>
+    <div class="form">${t.results.map(r => `<span class="${esc(r.res)}">${esc(r.res)} ${r.at === "@" ? "@" : "v"}${esc(r.opp)} ${esc(r.score)}</span>`).join("") || '<span>no games</span>'}</div>
+    ${starters.length ? `<div class="inj"><table>${head}<tbody>${injRows(starters)}</tbody></table></div>` : '<p class="empty">No starters on the injury report.</p>'}
+    ${rest.length ? `<details><summary>${rest.length} depth player${rest.length > 1 ? "s" : ""} on the report</summary><div class="inj"><table>${head}<tbody>${injRows(rest)}</tbody></table></div></details>` : ""}
+  </div>`;
+}
+
+function render() {
+  const d = DATA;
+  $("#eyebrow").textContent = `NFL pick'em · ${d.season} · straight up`;
+  $("#h1").textContent = `Week ${d.week} pick sheet`;
+  $("#meta").innerHTML = `<span>Generated ${esc(new Date(d.generated).toLocaleString())}</span><span>${d.games.length} games</span><span>${d.practice_available ? "Practice reports included" : "Practice reports not filed yet"}</span>`;
+
+  $("#board").innerHTML = d.games.map(g => {
+    const f = fav(g), p = picks[g.id];
+    return `<tr data-id="${g.id}" data-upset="${hasUpset(g)}" data-close="${(favP(g) ?? 1) < 0.6}">
+      <td class="num">${esc(kick(g.kickoff))}</td>
+      <td class="matchup"><span class="${f === "away" ? "fav" : ""}">${esc(g.away.abbr)}</span><span class="at">@</span><span class="${f === "home" ? "fav" : ""}">${esc(g.home.abbr)}</span></td>
+      <td><div style="display:flex;gap:8px;align-items:center"><span class="num">${esc(g[f].abbr)} ${pct(favP(g))}</span><span class="mini"><i style="width:${Math.round((favP(g) ?? 0.5) * 100)}%"></i></span></div></td>
+      <td class="n">${g.fpi == null ? "–" : esc((g.fpi >= 0.5 ? g.home.abbr : g.away.abbr) + " " + pct(Math.max(g.fpi, 1 - g.fpi)))}</td>
+      <td>${move(g)}</td>
+      <td>${sevChips(g)}</td>
+      <td>${p ? `<span class="chip pick">${esc(g[p].abbr)}</span>${p !== f ? ' <span class="chip high">upset</span>' : ""}` : '<span class="empty">–</span>'}</td>
+    </tr>`;
+  }).join("");
+
+  $("#games").innerHTML = d.games.map(g => {
+    const f = fav(g), a = g.market == null ? 0.5 : 1 - g.market;
+    const w = g.weather || {};
+    const wx = g.indoor ? "Indoors" : (w.temperature != null ? `${w.temperature}°F, gusts ${w.gust ?? "?"} mph, ${w.precipitation ?? 0}% precip` : "Weather n/a");
+    return `<article class="game ${hasUpset(g) ? "upset" : ""}" id="g${g.id}" data-upset="${hasUpset(g)}" data-close="${(favP(g) ?? 1) < 0.6}">
+      <div class="ghead">
+        <h3>${esc(g.away.abbr)} <span class="at">@</span> ${esc(g.home.abbr)}</h3>
+        <span class="sub">${esc(kick(g.kickoff))} · ${esc(g.venue || "")}${g.neutral ? " (neutral)" : ""} · ${esc(wx)}</span>
+      </div>
+      <div class="prob">
+        <div class="bar" role="img" aria-label="Market: ${esc(g.away.abbr)} ${pct(a)}, ${esc(g.home.abbr)} ${pct(1 - a)}">
+          <span class="a" style="width:${(a * 100).toFixed(1)}%">${a >= 0.12 ? esc(g.away.abbr) + " " + pct(a) : ""}</span>
+          <span class="h">${1 - a >= 0.12 ? esc(g.home.abbr) + " " + pct(1 - a) : ""}</span>
+          ${g.fpi != null ? `<span class="tick" style="left:calc(${((1 - g.fpi) * 100).toFixed(1)}% - 1px)" title="ESPN FPI"></span>` : ""}
+          ${g.market_open != null ? `<span class="tick open" style="left:calc(${((1 - g.market_open) * 100).toFixed(1)}% - 1px)" title="Market at open"></span>` : ""}
+        </div>
+        <div class="legend"><span>Spread <b class="num">${esc(g.spread || "–")}</b></span><span>Total <b class="num">${esc(g.total ?? "–")}</b></span><span>Moneyline <b class="num">${esc(g.ml.away.close)} / ${esc(g.ml.home.close)}</b> (opened ${esc(g.ml.away.open)} / ${esc(g.ml.home.open)})</span><span>Solid tick: FPI ${pct(g.fpi == null ? null : (f === "home" ? g.fpi : 1 - g.fpi))} ${esc(g[f].abbr)} · dashed: open</span></div>
+      </div>
+      ${g.flags.length ? `<ul class="flags">${g.flags.map(x => `<li class="${x.vs_fav ? "vsfav" : ""}"><span class="chip ${x.sev}">${x.sev === "med" ? "watch" : x.sev === "high" ? "major" : "minor"}</span><span>${esc(x.text)}</span></li>`).join("")}</ul>` : '<p class="empty">Nothing unusual. Take the favorite.</p>'}
+      <div class="teams">${teamCol(g, "away")}${teamCol(g, "home")}</div>
+      <div class="pickrow">
+        <span class="lab">My pick</span>
+        ${["away", "home"].map(s => `<button type="button" id="p${g.id}${s}" data-g="${g.id}" data-s="${s}" aria-pressed="${picks[g.id] === s}">${esc(g[s].abbr)}</button>`).join("")}
+        ${picks[g.id] && picks[g.id] !== f ? '<span class="against">Against the market</span>' : ""}
+        <a href="${esc(g.link)}" target="_blank" rel="noopener">ESPN game page</a>
+      </div>
+    </article>`;
+  }).join("");
+
+  const made = d.games.filter(g => picks[g.id]).length;
+  const ups = d.games.filter(g => picks[g.id] && picks[g.id] !== fav(g)).length;
+  $("#tally").textContent = `${made}/${d.games.length} picked${ups ? ` · ${ups} upset${ups > 1 ? "s" : ""}` : ""}`;
+  applyFilter();
+}
+
+let filter = "all";
+try { filter = localStorage.getItem("pickem-filter") || "all"; } catch (e) {}
+function applyFilter() {
+  document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.f === filter));
+  document.querySelectorAll("#board tr, .game").forEach(el => {
+    el.hidden = filter === "upset" ? el.dataset.upset !== "true" : filter === "close" ? el.dataset.close !== "true" : false;
+  });
+}
+
+document.addEventListener("click", e => {
+  const seg = e.target.closest(".seg button");
+  if (seg) { filter = seg.dataset.f; try { localStorage.setItem("pickem-filter", filter); } catch (x) {} applyFilter(); return; }
+  const pb = e.target.closest(".pickrow button");
+  if (pb) {
+    const y = window.scrollY;
+    if (picks[pb.dataset.g] === pb.dataset.s) delete picks[pb.dataset.g]; else picks[pb.dataset.g] = pb.dataset.s;
+    save(); render(); window.scrollTo(0, y); return;
+  }
+  const row = e.target.closest("#board tr");
+  if (row) { document.getElementById("g" + row.dataset.id)?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); return; }
+  if (e.target.id === "copy") {
+    const text = DATA.games.map(g => `${g.away.abbr} @ ${g.home.abbr}: ${picks[g.id] ? g[picks[g.id]].abbr : "—"}`).join("\n");
+    const btn = e.target;
+    const done = () => { btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy my picks", 1500); };
+    navigator.clipboard?.writeText(text).then(done).catch(() => { btn.textContent = "Copy blocked"; });
+  }
+});
+
+const FLAG_LABELS = { qb: "QB out or questionable", ol: "O-line starters out", new_starters: "2+ starters newly out", unit: "Position group depleted", move: "Line moved toward underdog", fpi: "ESPN FPI likes underdog", rest: "Underdog has rest edge" };
+const rec = (w, n) => n ? `${w}-${n - w}` : "–";
+const share = (a, b) => b ? Math.round(a / b * 100) + "%" : "–";
+
+function renderSeason() {
+  const weeks = SEASON.map(r => {
+    const done = r.games.filter(g => g.winner && g.winner !== "tie");
+    const mine = allPicks[wkId(r.season, r.week)] || {};
+    const picked = done.filter(g => mine[g.id]);
+    const ups = picked.filter(g => mine[g.id] !== g.fav);
+    const fpi = done.filter(g => g.fpi_fav);
+    return {
+      r, games: done.length, chalk: done.filter(g => g.winner === g.fav).length,
+      picked: picked.length, right: picked.filter(g => mine[g.id] === g.winner).length,
+      chalkOnPicked: picked.filter(g => g.winner === g.fav).length,
+      ups: ups.length, upsHit: ups.filter(g => mine[g.id] === g.winner).length,
+      fpiN: fpi.length, fpiRight: fpi.filter(g => g.fpi_fav === g.winner).length,
+    };
+  });
+  const sum = k => weeks.reduce((a, w) => a + w[k], 0);
+  const picked = sum("picked"), right = sum("right"), edge = right - sum("chalkOnPicked");
+  $("#tiles").innerHTML = SEASON.length ? [
+    ["You", rec(right, picked), picked ? `${share(right, picked)} of ${picked} picks` : "No picks graded yet"],
+    ["Favorites", rec(sum("chalk"), sum("games")), `${share(sum("chalk"), sum("games"))} picking every favorite`],
+    ["You vs. favorites", picked ? (edge > 0 ? "+" : "") + edge : "–", "Your wins minus the favorites' wins on the games you picked"],
+    ["Your upsets", rec(sum("upsHit"), sum("ups")), sum("ups") ? `${share(sum("upsHit"), sum("ups"))} of underdog picks won` : "None taken yet"],
+  ].map(([l, b, s]) => `<div class="tile"><span class="eyebrow">${esc(l)}</span><span class="big num">${esc(b)}</span><span class="sub">${esc(s)}</span></div>`).join("")
+    : `<div class="tile"><span class="eyebrow">Season</span><span class="big">No graded weeks yet</span><span class="sub">Week ${DATA.week} is graded automatically the morning after Monday night's game.</span></div>`;
+
+  $("#weeks").innerHTML = weeks.map(w => `<tr><td>Week ${w.r.week}${w.r.complete ? "" : " (in progress)"}</td><td class="n num">${rec(w.chalk, w.games)}</td><td class="n num">${rec(w.right, w.picked)}</td><td class="n num">${rec(w.upsHit, w.ups)}</td><td class="n num">${rec(w.fpiRight, w.fpiN)}</td></tr>`).join("") || '<tr><td colspan="5" class="empty">Nothing graded yet.</td></tr>';
+
+  const stats = {};
+  SEASON.forEach(r => r.games.filter(g => g.winner && g.winner !== "tie" && g.fav_p != null).forEach(g => {
+    new Set(g.flags.filter(f => f.vs_fav).map(f => f.kind)).forEach(k => {
+      const s = stats[k] || (stats[k] = { n: 0, lost: 0, exp: 0 });
+      s.n++; s.lost += g.winner !== g.fav ? 1 : 0; s.exp += 1 - g.fav_p;
+    });
+  }));
+  $("#flagstats").innerHTML = Object.entries(stats).sort((a, b) => b[1].n - a[1].n).map(([k, s]) => {
+    const e = Math.round((s.lost - s.exp) / s.n * 100);
+    return `<tr><td>${esc(FLAG_LABELS[k] || k)}</td><td class="n num">${s.n}</td><td class="n num">${s.lost} (${share(s.lost, s.n)})</td><td class="n num">${s.exp.toFixed(1)} (${share(s.exp, s.n)})</td><td class="n num ${e > 0 ? "up" : e < 0 ? "down" : ""}">${e > 0 ? "+" : ""}${e} pts</td></tr>`;
+  }).join("") || '<tr><td colspan="5" class="empty">No flagged games graded yet.</td></tr>';
+}
+
+function showTab(which) {
+  ["week", "season"].forEach(t => {
+    $("#tab-" + t).setAttribute("aria-selected", t === which);
+    $("#view-" + t).hidden = t !== which;
+  });
+  try { localStorage.setItem("pickem-tab", which); } catch (e) {}
+}
+$("#tab-week").addEventListener("click", () => showTab("week"));
+$("#tab-season").addEventListener("click", () => showTab("season"));
+try { if (localStorage.getItem("pickem-tab") === "season") showTab("season"); } catch (e) {}
+
+render();
+renderSeason();
+
+(async () => {
+  db = window.claude && window.claude.use ? await window.claude.use("db").catch(() => null) : null;
+  if (!db) { setSync("Picks saved in this browser only"); return; }
+  setSync("Syncing picks…");
+  let first = true;
+  db.collection("picks").onSnapshot(snap => {
+    const local = picks;
+    snap.docs.forEach(d => { const b = d.data(); if (b && b.picks) allPicks[d.id] = { ...b.picks }; });
+    const remote = snap.docs.some(d => d.id === KEY);
+    if (first && !remote && Object.keys(local).length) { allPicks[KEY] = local; picks = local; save(); }
+    picks = allPicks[KEY] || (allPicks[KEY] = {});
+    first = false;
+    const y = window.scrollY; render(); renderSeason(); window.scrollTo(0, y);
+    setSync("Picks synced");
+  }, () => setSync("Picks saved in this browser only"));
+})();
+</script>
