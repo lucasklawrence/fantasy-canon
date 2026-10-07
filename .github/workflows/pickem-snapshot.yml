@@ -1,14 +1,21 @@
 name: pickem-snapshot
 
-# CD for pickem/: on a schedule, grade the finished week and snapshot the upcoming one, then
-# commit the JSON under pickem/history/ straight to main (data only; no PR). The published
-# page is re-rendered from this history on request: `uv run python -m pickem render`.
+# CD for pickem/: on a schedule, grade the finished week, snapshot the upcoming one and log
+# ESPN-vs-usage projections, then commit the JSON under pickem/history/ straight to main (data
+# only; no PR). Runs land just before each kickoff window: the last commit before a game starts
+# is its frozen pregame record, and `pickem verify` (last step) checks that against GitHub's push
+# log. Times are UTC and stay before kickoff in both EDT and EST.
 
 on:
   schedule:
     - cron: '0 14 * * 2' # Tue 14:00 UTC: grade last week, first look at the next
-    - cron: '0 18 * * 4' # Thu 18:00 UTC: Wednesday practice reports are in, before TNF
-    - cron: '0 13 * * 0' # Sun 13:00 UTC (9am ET): final statuses before London/early games
+    - cron: '0 14 * * 4' # Thu 14:00 UTC: grades again (nflverse stats land mid-week), practice reports
+    - cron: '30 22 * * 4' # Thu 22:30 UTC: before Thursday night
+    - cron: '0 12 * * 0' # Sun 12:00 UTC: before London/early games
+    - cron: '20 16 * * 0' # Sun 16:20 UTC: inactives are out, before the 1pm ET games
+    - cron: '40 19 * * 0' # Sun 19:40 UTC: before the 4pm ET games
+    - cron: '30 23 * * 0' # Sun 23:30 UTC: before Sunday night
+    - cron: '30 22 * * 1' # Mon 22:30 UTC: before Monday night
   workflow_dispatch: {}
 
 permissions:
@@ -26,6 +33,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
+          fetch-depth: 0 # verify reads every committed version of the history files
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -46,3 +54,10 @@ jobs:
           git commit -m "chore(pickem): $(tail -n 1 "$RUNNER_TEMP/pickem.log" | cut -d: -f1) snapshot"
           git pull --rebase origin main
           git push origin HEAD:main
+
+      - name: Verify history
+        # Re-grades from committed inputs and checks every frozen row was pushed before kickoff.
+        working-directory: pickem
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run python -m pickem verify

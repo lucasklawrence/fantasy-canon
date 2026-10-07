@@ -143,6 +143,7 @@ td.n, th.n { text-align: right; }
 .roster td { padding: 5px 6px; font-size: .84rem; }
 .roster tr.bench td { color: var(--muted); }
 .roster tr.me td { font-weight: 600; }
+.panel tr.me td { font-weight: 600; border-top: 1px solid var(--line); }
 .gap-up { color: var(--turf); font-weight: 600; }
 .gap-down { color: var(--hot); font-weight: 600; }
 .why { font-size: .74rem; color: var(--muted); }
@@ -196,6 +197,7 @@ td.n, th.n { text-align: right; }
   <div class="view" id="view-season" role="tabpanel" aria-labelledby="tab-season" hidden>
     <div class="tiles" id="tiles"></div>
     <section class="panel"><h2>By week</h2><p class="note">Graded against the last snapshot taken before each kickoff, so nothing uses hindsight.</p><table><thead><tr><th>Week</th><th class="n">Favorites</th><th class="n">You</th><th class="n">Your upsets</th><th class="n">ESPN FPI</th></tr></thead><tbody id="weeks"></tbody></table></section>
+    <section class="panel"><h2>Projections: ESPN vs. usage</h2><p class="note">Average miss in PPR points for about 300 players a week who played, so lower is better. <b>70/30</b> is 70% ESPN + 30% usage, declared before any live week. <b>Fades</b>: usage 3+ points under ESPN, and the player finished under ESPN's number. Compare with <b>base</b>, how often anyone finishes under. <b>Boosts</b>: usage 3+ over, and the player finished over. Backtest weeks were rebuilt after the fact; only live weeks, frozen at kickoff and committed, count as proof (<code>python -m pickem verify</code>).</p><table><thead><tr><th>Week</th><th class="n">Players</th><th class="n">ESPN</th><th class="n">Usage</th><th class="n">70/30</th><th class="n">Last-4 avg</th><th class="n">Fades hit</th><th class="n">Base</th><th class="n">Boosts hit</th></tr></thead><tbody id="projstats"></tbody></table></section>
     <section class="panel"><h2>Do the flags work?</h2><p class="note">For each kind of flag that argued against the favorite: how often the favorite actually lost, against how often the market expected it to. A positive edge means the flag found upsets the market missed. Small samples swing wildly, so wait for 20+ games before trusting one.</p><table><thead><tr><th>Flag</th><th class="n">Games</th><th class="n">Favorite lost</th><th class="n">Market expected</th><th class="n">Edge</th></tr></thead><tbody id="flagstats"></tbody></table></section>
   </div>
 
@@ -209,6 +211,7 @@ td.n, th.n { text-align: right; }
 const DATA = /*__DATA__*/null;
 const SEASON = /*__SEASON__*/null || [];
 const TEAMS = /*__TEAMS__*/null || [];
+const PROJ = /*__PROJ__*/null;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const pct = p => p == null ? "–" : Math.round(p * 100) + "%";
@@ -386,6 +389,17 @@ function renderSeason() {
 
   $("#weeks").innerHTML = weeks.map(w => `<tr><td>Week ${w.r.week}${w.r.complete ? "" : " (in progress)"}</td><td class="n num">${rec(w.chalk, w.games)}</td><td class="n num">${rec(w.right, w.picked)}</td><td class="n num">${rec(w.upsHit, w.ups)}</td><td class="n num">${rec(w.fpiRight, w.fpiN)}</td></tr>`).join("") || '<tr><td colspan="5" class="empty">Nothing graded yet.</td></tr>';
 
+  const projRow = (label, s, cls = "") => {
+    const best = Math.min(...["espn", "usage", "lean", "avg"].map(k => s[k] ?? Infinity));
+    const cell = k => `<td class="n num ${s[k] === best ? "up" : ""}">${s[k] ?? "–"}</td>`;
+    return `<tr class="${cls}"><td>${label}</td><td class="n num">${s.n}</td>${cell("espn")}${cell("usage")}${cell("lean")}${cell("avg")}<td class="n num">${s.fade_hit}/${s.fade} (${share(s.fade_hit, s.fade)})</td><td class="n num">${pct(s.below_rate)}</td><td class="n num">${s.boost_hit}/${s.boost} (${share(s.boost_hit, s.boost)})</td></tr>`;
+  };
+  $("#projstats").innerHTML = PROJ ? [
+    ...PROJ.weeks.map(w => projRow(`Week ${w.week}${w.backtest ? " (backtest)" : ""}`, w)),
+    PROJ.backtest ? projRow("<b>Backtest total</b>", PROJ.backtest, "me") : "",
+    PROJ.live ? projRow("<b>Live total</b>", PROJ.live, "me") : projRow("<b>Live total</b>", { n: 0, fade: 0, fade_hit: 0, boost: 0, boost_hit: 0 }, "me"),
+  ].join("") : '<tr><td colspan="9" class="empty">No projection weeks graded yet.</td></tr>';
+
   const stats = {};
   SEASON.forEach(r => r.games.filter(g => g.winner && g.winner !== "tie" && g.fav_p != null).forEach(g => {
     new Set(g.flags.filter(f => f.vs_fav).map(f => f.kind)).forEach(k => {
@@ -419,7 +433,7 @@ function renderTeams() {
           return `<tr class="${p.slot >= 20 ? "bench" : ""}"><td class="unit">${esc(p.slot_name)}</td><td>${esc(p.name)}${u && u.trend ? `<div class="why">${esc(u.trend)}</div>` : ""}</td><td class="${statusCls(p.status)}">${esc(p.bye ? "bye" : statusTxt(p.status))}</td><td class="n num">${p.proj == null ? "–" : esc(p.proj)}</td><td class="n num ${u && Math.abs(d) >= 3 ? (d > 0 ? "gap-up" : "gap-down") : ""}">${u ? esc(u.proj) : "–"}</td><td class="why">${esc(role)}</td></tr>`;
         }).join("")}</tbody></table></div></div>
         <div style="display:grid;gap:16px;align-content:start">
-        ${t.gaps && t.gaps.length ? `<div><h4>Where usage disagrees with ESPN</h4><ul class="flags">${t.gaps.map(g => `<li><span class="chip ${g.usage > g.espn ? "low" : "med"}">${g.usage > g.espn ? "higher" : "lower"}</span><span>${esc(g.text)}</span></li>`).join("")}</ul></div>` : ""}
+        ${t.gaps && t.gaps.length ? `<div><h4>Where usage disagrees with ESPN</h4>${(() => { const s = PROJ && (PROJ.live && PROJ.live.n >= 200 ? PROJ.live : PROJ.backtest); return s ? `<p class="why">So far, "lower" calls finished under ESPN ${share(s.fade_hit, s.fade)} of the time, against ${pct(s.below_rate)} for everyone. "Higher" calls beat ESPN ${share(s.boost_hit, s.boost)} of the time, against ${pct(1 - s.below_rate)} for everyone (${PROJ.live && PROJ.live.n >= 200 ? "live weeks" : "backtest"}).</p>` : ""; })()}<ul class="flags">${t.gaps.map(g => `<li><span class="chip ${g.usage > g.espn ? "low" : "med"}">${g.usage > g.espn ? "higher" : "lower"}</span><span>${esc(g.text)}</span></li>`).join("")}</ul></div>` : ""}
         ${t.projection_record ? `<div><h4>Projection record</h4><p class="empty">Across ${esc(t.projection_record.n)} player-games, ESPN misses by ${esc(t.projection_record.espn)} points on average and usage by ${esc(t.projection_record.usage)}.</p></div>` : `<div><h4>Projection record</h4><p class="empty">Scored each Tuesday once a week of logged projections is final.</p></div>`}
         ${t.faab ? `<div><h4>FAAB left</h4><div class="inj"><table class="roster"><tbody>${t.faab.map(f => `<tr class="${f.me ? "me" : ""}"><td>${esc(f.team)}</td><td class="n num">$${esc(f.left)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
         <div><h4>Standings</h4><div class="inj"><table class="roster"><tbody>${t.standings.map(r => `<tr class="${r.me ? "me" : ""}"><td class="n num">${esc(r.seed ?? "")}</td><td>${esc(r.team)}</td><td class="n num">${esc(r.record)}</td></tr>`).join("")}</tbody></table></div></div>
