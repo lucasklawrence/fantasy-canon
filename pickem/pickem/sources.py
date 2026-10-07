@@ -36,3 +36,14 @@ def nflverse_csv(name: str, season: int) -> list[dict]:
             return []
         raise
     return list(csv.DictReader(io.StringIO(text)))
+
+
+def player_stats(season: int) -> list[dict]:
+    """nflverse weekly player stats (targets, carries, shares, PPR points). [] before the season starts."""
+    try:
+        text = _get(f"{NFLVERSE}/stats_player/stats_player_week_{season}.csv")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return []
+        raise
+    return list(csv.DictReader(io.StringIO(text)))

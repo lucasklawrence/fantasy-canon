@@ -1,0 +1,86 @@
+name: pickem-alerts
+
+# Posts to Discord through the bot when something changes: a starter's injury status gets worse,
+# a line moves 4+ points or the favorite flips, or one of your fantasy lineups has a problem
+# (bye, out, questionable, a clearly better bench option). Tuesday's run posts the weekly
+# fantasy check-in instead.
+#
+# This repo is public, so league IDs and ESPN cookies are secrets, nothing fantasy-related is
+# committed, and the logs print only counts. Which alerts were already sent lives in the
+# Actions cache.
+#
+# Secrets: DISCORD_TOKEN (the bot's), PICKEM_DISCORD_CHANNEL, and for fantasy: ESPN_S2,
+# ESPN_SWID, PICKEM_LEAGUES ("leagueId:teamId,leagueId:teamId").
+
+on:
+  schedule:
+    - cron: '0 15 * * 2' # Tue: fantasy check-in
+    - cron: '0 15,21 * * 3-6' # Wed-Sat: after practice and injury reports
+    - cron: '0 12-17 * * 0' # Sun 8am-1pm ET hourly: final statuses and inactives
+    - cron: '0 19,23 * * 1' # Mon: before MNF
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: What to post
+        type: choice
+        options: [alerts, checkin]
+        default: alerts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pickem-alerts
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      PICKEM_DISCORD_CHANNEL: ${{ secrets.PICKEM_DISCORD_CHANNEL }}
+      ESPN_S2: ${{ secrets.ESPN_S2 }}
+      ESPN_SWID: ${{ secrets.ESPN_SWID }}
+      PICKEM_LEAGUES: ${{ secrets.PICKEM_LEAGUES }}
+      MODE: ${{ github.event_name == 'schedule' && github.event.schedule == '0 15 * * 2' && 'checkin' || inputs.mode || 'alerts' }}
+    steps:
+      - name: Check configuration
+        id: cfg
+        run: |
+          if [ -z "$DISCORD_TOKEN" ] || [ -z "$PICKEM_DISCORD_CHANNEL" ]; then
+            echo "::notice::PICKEM_DISCORD_CHANNEL (or DISCORD_TOKEN) is not set; skipping."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.cfg.outputs.ready == 'true'
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Install uv
+        if: steps.cfg.outputs.ready == 'true'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Restore sent-alert state
+        if: steps.cfg.outputs.ready == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: pickem/.state
+          key: pickem-alerts-${{ github.run_id }}
+          restore-keys: pickem-alerts-
+
+      - name: Post
+        if: steps.cfg.outputs.ready == 'true'
+        working-directory: pickem
+        run: uv run python -m pickem "$MODE"
+
+      - name: Save sent-alert state
+        if: steps.cfg.outputs.ready == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: pickem/.state
+          key: pickem-alerts-${{ github.run_id }}
