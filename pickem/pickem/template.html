@@ -133,6 +133,19 @@ details summary { cursor: pointer; font-size: .8rem; color: var(--muted); paddin
 .panel p.note { margin: 4px 16px 10px; color: var(--muted); font-size: .82rem; max-width: 70ch; }
 .panel table { min-width: 520px; }
 td.n, th.n { text-align: right; }
+.league { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: grid; gap: 14px; }
+.league .ghead h3 { font-size: 1.6rem; }
+.vs { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; font-size: .9rem; color: var(--muted); }
+.vs .big { font: 700 1.5rem var(--display); color: var(--ink); }
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.split > div { min-width: 0; }
+.split h4 { margin: 0 0 6px; font: 600 .7rem var(--body); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.roster td { padding: 5px 6px; font-size: .84rem; }
+.roster tr.bench td { color: var(--muted); }
+.roster tr.me td { font-weight: 600; }
+.gap-up { color: var(--turf); font-weight: 600; }
+.gap-down { color: var(--hot); font-weight: 600; }
+.why { font-size: .74rem; color: var(--muted); }
 .sync { font-size: .78rem; color: var(--muted); }
 .foot { color: var(--muted); font-size: .8rem; display: grid; gap: 6px; max-width: 75ch; }
 .foot p { margin: 0; }
@@ -151,6 +164,7 @@ td.n, th.n { text-align: right; }
   <div class="tabs" role="tablist">
     <button type="button" role="tab" id="tab-week" aria-selected="true" aria-controls="view-week">This week</button>
     <button type="button" role="tab" id="tab-season" aria-selected="false" aria-controls="view-season">Season</button>
+    <button type="button" role="tab" id="tab-teams" aria-selected="false" aria-controls="view-teams" hidden>My teams</button>
   </div>
 
   <div class="view" id="view-week" role="tabpanel" aria-labelledby="tab-week">
@@ -177,6 +191,8 @@ td.n, th.n { text-align: right; }
   <section class="games" id="games"></section>
   </div>
 
+  <div class="view" id="view-teams" role="tabpanel" aria-labelledby="tab-teams" hidden></div>
+
   <div class="view" id="view-season" role="tabpanel" aria-labelledby="tab-season" hidden>
     <div class="tiles" id="tiles"></div>
     <section class="panel"><h2>By week</h2><p class="note">Graded against the last snapshot taken before each kickoff, so nothing uses hindsight.</p><table><thead><tr><th>Week</th><th class="n">Favorites</th><th class="n">You</th><th class="n">Your upsets</th><th class="n">ESPN FPI</th></tr></thead><tbody id="weeks"></tbody></table></section>
@@ -192,6 +208,7 @@ td.n, th.n { text-align: right; }
 <script>
 const DATA = /*__DATA__*/null;
 const SEASON = /*__SEASON__*/null || [];
+const TEAMS = /*__TEAMS__*/null || [];
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const pct = p => p == null ? "–" : Math.round(p * 100) + "%";
@@ -382,8 +399,38 @@ function renderSeason() {
   }).join("") || '<tr><td colspan="5" class="empty">No flagged games graded yet.</td></tr>';
 }
 
+function renderTeams() {
+  if (!TEAMS.length) return;
+  $("#tab-teams").hidden = false;
+  const statusCls = s => ["OUT", "INJURY_RESERVE", "SUSPENSION", "DOUBTFUL"].includes(s) ? "st-out" : s === "QUESTIONABLE" ? "st-q" : "";
+  const statusTxt = s => s === "ACTIVE" ? "" : s.replace("_", " ").toLowerCase();
+  $("#view-teams").innerHTML = TEAMS.map(t => {
+    const m = t.matchup;
+    const sorted = [...t.roster].sort((a, b) => (a.slot >= 20) - (b.slot >= 20) || a.slot - b.slot);
+    return `<article class="league">
+      <div class="ghead"><h3>${esc(t.team)}</h3><span class="sub">${esc(t.league)} · ${esc(t.size)} teams${t.playoff_spots ? ` · top ${esc(t.playoff_spots)} make the playoffs` : ""}</span></div>
+      <div class="facts"><span>Record <b>${esc(t.record)}</b></span><span>Seed <b>${esc(t.seed ?? "–")}</b></span><span>Points for <b>${esc(t.pf)}</b> (#${esc(t.pf_rank)})</span><span>Points against <b>${esc(t.pa)}</b></span>${t.last ? `<span>Last week <b>${t.last.won ? "W" : "L"} ${esc(t.last.score)}–${esc(t.last.opp_score)}</b> vs ${esc(t.last.opp)}</span>` : ""}</div>
+      ${m ? `<div class="vs"><span>Week ${esc(t.week)} vs <b>${esc(m.opp)}</b> (${esc(m.opp_record)})</span><span>Projected <span class="big num">${esc(m.proj)}</span> to <span class="big num">${esc(m.opp_proj)}</span></span>${m.win_prob != null ? `<span>ESPN win chance <b class="num">${Math.round(m.win_prob)}%</b></span>` : ""}</div>` : ""}
+      ${t.issues.length ? `<ul class="flags">${t.issues.map(i => `<li class="${i.sev === "high" ? "vsfav" : ""}"><span class="chip ${i.sev}">${i.sev === "high" ? "fix" : "check"}</span><span>${esc(i.text)}</span></li>`).join("")}</ul>` : '<p class="empty">Lineup looks set.</p>'}
+      <div class="split">
+        <div><h4>Roster: ESPN vs. usage projection</h4><div class="inj"><table class="roster"><thead><tr><th>Slot</th><th>Player</th><th></th><th class="n">ESPN</th><th class="n">Usage</th><th>Role</th></tr></thead><tbody>${sorted.map(p => {
+          const u = p.usage, d = u ? u.proj - (p.proj || 0) : 0;
+          const role = u ? [u.targets ? `${u.targets} tgt` : "", u.carries ? `${u.carries} car` : "", u.snap != null ? `${Math.round(u.snap * 100)}% snaps` : ""].filter(Boolean).join(" · ") : "";
+          return `<tr class="${p.slot >= 20 ? "bench" : ""}"><td class="unit">${esc(p.slot_name)}</td><td>${esc(p.name)}${u && u.trend ? `<div class="why">${esc(u.trend)}</div>` : ""}</td><td class="${statusCls(p.status)}">${esc(p.bye ? "bye" : statusTxt(p.status))}</td><td class="n num">${p.proj == null ? "–" : esc(p.proj)}</td><td class="n num ${u && Math.abs(d) >= 3 ? (d > 0 ? "gap-up" : "gap-down") : ""}">${u ? esc(u.proj) : "–"}</td><td class="why">${esc(role)}</td></tr>`;
+        }).join("")}</tbody></table></div></div>
+        <div style="display:grid;gap:16px;align-content:start">
+        ${t.gaps && t.gaps.length ? `<div><h4>Where usage disagrees with ESPN</h4><ul class="flags">${t.gaps.map(g => `<li><span class="chip ${g.usage > g.espn ? "low" : "med"}">${g.usage > g.espn ? "higher" : "lower"}</span><span>${esc(g.text)}</span></li>`).join("")}</ul></div>` : ""}
+        ${t.projection_record ? `<div><h4>Projection record</h4><p class="empty">Across ${esc(t.projection_record.n)} player-games, ESPN misses by ${esc(t.projection_record.espn)} points on average and usage by ${esc(t.projection_record.usage)}.</p></div>` : `<div><h4>Projection record</h4><p class="empty">Scored each Tuesday once a week of logged projections is final.</p></div>`}
+        ${t.faab ? `<div><h4>FAAB left</h4><div class="inj"><table class="roster"><tbody>${t.faab.map(f => `<tr class="${f.me ? "me" : ""}"><td>${esc(f.team)}</td><td class="n num">$${esc(f.left)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
+        <div><h4>Standings</h4><div class="inj"><table class="roster"><tbody>${t.standings.map(r => `<tr class="${r.me ? "me" : ""}"><td class="n num">${esc(r.seed ?? "")}</td><td>${esc(r.team)}</td><td class="n num">${esc(r.record)}</td></tr>`).join("")}</tbody></table></div></div>
+        </div>
+      </div>
+    </article>`;
+  }).join("");
+}
+
 function showTab(which) {
-  ["week", "season"].forEach(t => {
+  ["week", "season", "teams"].forEach(t => {
     $("#tab-" + t).setAttribute("aria-selected", t === which);
     $("#view-" + t).hidden = t !== which;
   });
@@ -391,10 +438,12 @@ function showTab(which) {
 }
 $("#tab-week").addEventListener("click", () => showTab("week"));
 $("#tab-season").addEventListener("click", () => showTab("season"));
-try { if (localStorage.getItem("pickem-tab") === "season") showTab("season"); } catch (e) {}
+$("#tab-teams").addEventListener("click", () => showTab("teams"));
 
 render();
 renderSeason();
+renderTeams();
+try { const t = localStorage.getItem("pickem-tab"); if (t === "season" || (t === "teams" && TEAMS.length)) showTab(t); } catch (e) {}
 
 (async () => {
   db = window.claude && window.claude.use ? await window.claude.use("db").catch(() => null) : null;
