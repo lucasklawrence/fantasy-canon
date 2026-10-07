@@ -2,7 +2,10 @@
 
 uv run python -m pickem snapshot [--week N]   fetch, save a snapshot, render out/latest.html
 uv run python -m pickem grade [--week N]      grade finished weeks against their snapshots
-uv run python -m pickem run                   grade, then snapshot (what the schedule runs)
+uv run python -m pickem run                   grade, snapshot, log projections (what the schedule runs)
+uv run python -m pickem project [--week N]    log ESPN vs usage projections for every relevant player
+uv run python -m pickem backtest --week N     rebuild a past week's projection log (marked as backtest)
+uv run python -m pickem verify                prove history was written pregame and grades reproduce
 uv run python -m pickem render                re-render out/latest.html from saved history (+ your teams)
 uv run python -m pickem alerts [--dry-run]    post new injury / line / lineup news to Discord
 uv run python -m pickem checkin [--dry-run]   post the weekly fantasy check-in to Discord
@@ -15,7 +18,7 @@ import sys
 import urllib.error
 from datetime import UTC, datetime
 
-from . import SEASON, alerts, fantasy, history, sources, usage
+from . import SEASON, alerts, fantasy, history, projections, sources, usage, verify
 from .briefing import build, current_week, finals, index_snaps
 
 OUT = history.ROOT / "out"
@@ -44,6 +47,7 @@ def render(data: dict, teams: list[dict] | None = None) -> str:
         ("/*__DATA__*/null", data),
         ("/*__SEASON__*/null", season),
         ("/*__TEAMS__*/null", teams or []),
+        ("/*__PROJ__*/null", projections.season(data["season"])),
     ):
         out = out.replace(token, json.dumps(value, separators=(",", ":")).replace("</", "<\\/"))
     return out
@@ -138,6 +142,72 @@ def cmd_grade(week: int | None) -> None:
         print(f"week {wk}: {state}, favorites {chalk}/{len(done)}")
 
 
+def cmd_project(week: int | None) -> None:
+    week = week or current_week(sources, SEASON)
+    sb = sources.scoreboard(SEASON, week)
+    briefing = week_briefing(week)
+    implied = usage.implied_totals(briefing) if briefing else projections.closing_lines(sb, sources.summary)
+    prev = projections.load(SEASON, week)
+    if prev and any(r.get("backtest") for r in prev["players"]):
+        prev = None  # a live run replaces a backtest
+    data = projections.build_week(
+        projections.parse_pool(sources.espn_pool(SEASON, week), week),
+        sources.player_stats(SEASON),
+        implied,
+        projections.kickoffs_by_abbr(sb),
+        SEASON,
+        week,
+        datetime.now(UTC),
+        prev=prev,
+    )
+    path = projections.save(data)
+    print(f"week {week}: {len(data['players'])} player projections -> {path.relative_to(history.ROOT)}")
+
+
+def cmd_backtest(week: int) -> None:
+    if (prev := projections.load(SEASON, week)) and not all(r.get("backtest") for r in prev["players"]):
+        raise SystemExit(f"week {week} already has a live projection log; not overwriting it")
+    sb = sources.scoreboard(SEASON, week)
+    pool = [
+        {**p, "status": "ACTIVE"}  # today's injury status would leak hindsight; grading skips no-shows
+        for p in projections.parse_pool(sources.espn_pool(SEASON, week), week)
+    ]
+    data = projections.build_week(
+        pool,
+        sources.player_stats(SEASON),
+        projections.closing_lines(sb, sources.summary),
+        projections.kickoffs_by_abbr(sb),
+        SEASON,
+        week,
+        datetime.now(UTC),
+        backtest=True,
+    )
+    projections.save(data)
+    print(f"week {week}: backtest log of {len(data['players'])} players")
+    grade_projections([week])
+
+
+def grade_projections(weeks: list[int] | None = None) -> None:
+    """Score projection logs once nflverse has the week's stats. Results are final once written."""
+    stat_rows = sources.player_stats(SEASON)
+    base = history.HISTORY / str(SEASON)
+    todo = weeks or [
+        int(d.name[1:])
+        for d in sorted(base.glob("w*"))
+        if (d / "projections.json").exists() and not (d / "projection_results.json").exists()
+    ]
+    for wk in todo:
+        res = projections.grade(projections.load(SEASON, wk), stat_rows)
+        if res is None:
+            print(f"week {wk}: projection stats not published yet")
+            continue
+        projections.save(res, "projection_results.json")
+        s = res["summary"]
+        print(
+            f"week {wk}: projections graded, n={s['n']} miss espn {s['espn']} usage {s['usage']} blend {s['blend']}"
+        )
+
+
 def deliver(text: str, dry_run: bool) -> None:
     # Output stays out of CI logs (the repo is public); only counts are printed there.
     if dry_run:
@@ -170,12 +240,18 @@ def cmd_checkin(dry_run: bool) -> None:
         raise SystemExit("No fantasy teams: set ESPN_S2, ESPN_SWID and PICKEM_LEAGUES")
     for t in teams:
         t["projection_record"] = projection_record(t["league_id"], week - 1)
-    deliver(f"**Week {week} fantasy check-in**\n\n" + alerts.format_checkin(teams), dry_run)
+    text = f"**Week {week} fantasy check-in**\n\n" + alerts.format_checkin(teams)
+    if line := alerts.format_projection_record(projections.season(SEASON)):
+        text += "\n\n" + line
+    deliver(text, dry_run)
 
 
 def main() -> None:
     p = argparse.ArgumentParser(prog="pickem")
-    p.add_argument("command", choices=["snapshot", "grade", "run", "render", "alerts", "checkin"])
+    p.add_argument(
+        "command",
+        choices=["snapshot", "grade", "run", "project", "backtest", "verify", "render", "alerts", "checkin"],
+    )
     p.add_argument("--week", type=int)
     p.add_argument("--dry-run", action="store_true", help="print instead of posting to Discord")
     a = p.parse_args()
@@ -183,8 +259,17 @@ def main() -> None:
     load_dotenv()
     if a.command in ("grade", "run"):
         cmd_grade(a.week if a.command == "grade" else None)
+        grade_projections([a.week] if a.command == "grade" and a.week else None)
     if a.command in ("snapshot", "run"):
         cmd_snapshot(a.week if a.command == "snapshot" else None)
+    if a.command in ("project", "run"):
+        cmd_project(a.week if a.command == "project" else None)
+    if a.command == "backtest":
+        if not a.week:
+            raise SystemExit("backtest needs --week")
+        cmd_backtest(a.week)
+    if a.command == "verify":
+        print("\n".join(verify.run(SEASON, sources)))
     if a.command == "render":
         data = history.latest_snapshot()
         if data is None:
