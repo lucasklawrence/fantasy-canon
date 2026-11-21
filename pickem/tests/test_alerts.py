@@ -102,3 +102,12 @@ def test_unsent_dedupes_by_key_and_chunks_respect_discord_limit():
     assert alerts.unsent(a, {"sent": ["k2"]}) == [{"key": "k1"}]
     parts = alerts.chunks("\n".join(["x" * 100] * 50))
     assert len(parts) > 1 and all(len(p) <= 1900 for p in parts)
+
+
+def test_projection_record_line_prefers_live_weeks():
+    s = {"n": 10, "espn": 5.0, "usage": 6.0, "lean": 4.9, "fade_hit": 3, "fade": 4, "below_rate": 0.55,
+         "boost_hit": 1, "boost": 3}  # fmt: skip
+    assert alerts.format_projection_record(None) is None
+    assert "backtest" in alerts.format_projection_record({"live": None, "backtest": s})
+    line = alerts.format_projection_record({"live": {**s, "n": 7}, "backtest": s})
+    assert "live weeks, 7 player-games" in line and "3/4" in line and "base 55%" in line

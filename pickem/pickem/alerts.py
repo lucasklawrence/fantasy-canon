@@ -131,6 +131,20 @@ def format_checkin(teams: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
+def format_projection_record(season: dict | None) -> str | None:
+    """One line on how the public projection log is going (live weeks; backtest until there are any)."""
+    if not season:
+        return None
+    s, label = (season["live"], "live weeks") if season.get("live") else (season.get("backtest"), "backtest")
+    if not s:
+        return None
+    return (
+        f"📈 Projection log ({label}, {s['n']} player-games): average miss ESPN {s['espn']}, usage {s['usage']}, "
+        f"70/30 {s['lean']}. Usage-lower fades finished under ESPN {s['fade_hit']}/{s['fade']} "
+        f"(base {s['below_rate']:.0%}); usage-higher boosts beat ESPN {s['boost_hit']}/{s['boost']}."
+    )
+
+
 # ---------- delivery + dedupe ----------
 
 

@@ -47,3 +47,18 @@ def player_stats(season: int) -> list[dict]:
             return []
         raise
     return list(csv.DictReader(io.StringIO(text)))
+
+
+def espn_pool(season: int, week: int, limit: int = 300) -> dict:
+    """ESPN's public player pool with weekly PPR projections (no login; not tied to any league)."""
+    from .projections import ESPN_POOL, pool_filter
+
+    req = urllib.request.Request(
+        ESPN_POOL.format(season=season, week=week),
+        headers={
+            "User-Agent": "fantasy-canon-pickem/0.1",
+            "x-fantasy-filter": json.dumps(pool_filter(season, week, limit)),
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8"))

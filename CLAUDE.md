@@ -98,7 +98,9 @@ committed, frozen `pnpm-lock.yaml`, and every one blocks merge.
 - **`scripts/`** — `debug-espn.ts`, `archive-draft.ts`, the VS Code workspace, and
   [`scripts/ops/`](scripts/ops/README.md) (named tunnel, process supervision, preflight).
 - **`pickem/`** — a separate uv/Python project: the weekly NFL pick'em briefing (odds, line moves,
-  starter injuries by snap share) and its graded history under `pickem/history/`. Outside the pnpm
+  starter injuries by snap share) and its graded history under `pickem/history/`, plus a public
+  weekly projection log (ESPN vs a usage model, frozen at kickoff, scored on nflverse stats) that
+  `python -m pickem verify` checks against git/GitHub push times. Outside the pnpm
   workspace and the five gates; its own CI is `pickem.yml` (ruff + pytest) and
   `pickem-snapshot.yml` commits snapshots to `main` on a schedule. See
   [`pickem/README.md`](pickem/README.md).
