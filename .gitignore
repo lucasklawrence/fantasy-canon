@@ -27,6 +27,7 @@ tmp-*
 # pickem (Python): local venv and rendered pages; history/ IS committed
 pickem/.venv/
 pickem/out/
+pickem/.state/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
