@@ -2,8 +2,14 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore: # pickem/ has its own workflow (pickem.yml)
+      - 'pickem/**'
+      - '.github/workflows/pickem*.yml'
   push:
     branches: [main]
+    paths-ignore:
+      - 'pickem/**'
+      - '.github/workflows/pickem*.yml'
 
 # Cancel superseded runs on the same ref (e.g. rapid pushes to a PR branch).
 concurrency:

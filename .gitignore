@@ -23,3 +23,10 @@ tmp-*
 .claude/*
 !.claude/commands/
 !.claude/settings.json
+
+# pickem (Python): local venv and rendered pages; history/ IS committed
+pickem/.venv/
+pickem/out/
+__pycache__/
+.pytest_cache/
+.ruff_cache/

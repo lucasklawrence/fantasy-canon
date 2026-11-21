@@ -1,0 +1,48 @@
+name: pickem-snapshot
+
+# CD for pickem/: on a schedule, grade the finished week and snapshot the upcoming one, then
+# commit the JSON under pickem/history/ straight to main (data only; no PR). The published
+# page is re-rendered from this history on request: `uv run python -m pickem render`.
+
+on:
+  schedule:
+    - cron: '0 14 * * 2' # Tue 14:00 UTC: grade last week, first look at the next
+    - cron: '0 18 * * 4' # Thu 18:00 UTC: Wednesday practice reports are in, before TNF
+    - cron: '0 13 * * 0' # Sun 13:00 UTC (9am ET): final statuses before London/early games
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pickem-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Grade and snapshot
+        working-directory: pickem
+        run: uv run python -m pickem run | tee "$RUNNER_TEMP/pickem.log"
+
+      - name: Commit history
+        run: |
+          git add pickem/history
+          if git diff --cached --quiet; then
+            echo "No new history."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(pickem): $(tail -n 1 "$RUNNER_TEMP/pickem.log" | cut -d: -f1) snapshot"
+          git pull --rebase origin main
+          git push origin HEAD:main
