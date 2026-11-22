@@ -4,14 +4,95 @@
  "complete": false,
  "games": [
   {
+   "id": "401873074",
+   "kickoff": "2026-11-22T21:05Z",
+   "away": "NYJ",
+   "home": "LAC",
+   "winner": null,
+   "score": {
+    "away": "10",
+    "home": "3"
+   },
+   "fav": "home",
+   "fav_p": 0.615,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "move",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": true
+    }
+   ],
+   "snapshot": "2026-11-22T19:02+00:00"
+  },
+  {
+   "id": "401873075",
+   "kickoff": "2026-11-22T21:25Z",
+   "away": "LV",
+   "home": "DEN",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "3"
+   },
+   "fav": "home",
+   "fav_p": 0.823,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "rest",
+     "side": "home",
+     "sev": "low",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-22T19:02+00:00"
+  },
+  {
+   "id": "401873069",
+   "kickoff": "2026-11-22T21:25Z",
+   "away": "JAX",
+   "home": "NYG",
+   "winner": null,
+   "score": {
+    "away": "3",
+    "home": "3"
+   },
+   "fav": "away",
+   "fav_p": 0.698,
+   "fpi_fav": "away",
+   "flags": [
+    {
+     "kind": "move",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "fpi",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "weather",
+     "side": "both",
+     "sev": "low",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-22T19:02+00:00"
+  },
+  {
    "id": "401873070",
    "kickoff": "2026-11-22T18:00Z",
    "away": "MIA",
    "home": "BUF",
-   "winner": null,
+   "winner": "home",
    "score": {
-    "away": "3",
-    "home": "13"
+    "away": "9",
+    "home": "26"
    },
    "fav": "home",
    "fav_p": 0.902,
@@ -37,10 +118,10 @@
    "kickoff": "2026-11-22T18:00Z",
    "away": "NO",
    "home": "CHI",
-   "winner": null,
+   "winner": "home",
    "score": {
-    "away": "0",
-    "home": "16"
+    "away": "13",
+    "home": "21"
    },
    "fav": "home",
    "fav_p": 0.829,
@@ -84,10 +165,10 @@
    "kickoff": "2026-11-22T18:00Z",
    "away": "TEN",
    "home": "DAL",
-   "winner": null,
+   "winner": "home",
    "score": {
-    "away": "6",
-    "home": "20"
+    "away": "30",
+    "home": "51"
    },
    "fav": "home",
    "fav_p": 0.75,
@@ -107,10 +188,10 @@
    "kickoff": "2026-11-22T18:00Z",
    "away": "TB",
    "home": "DET",
-   "winner": null,
+   "winner": "home",
    "score": {
-    "away": "0",
-    "home": "7"
+    "away": "21",
+    "home": "31"
    },
    "fav": "home",
    "fav_p": 0.662,
@@ -136,10 +217,10 @@
    "kickoff": "2026-11-22T18:00Z",
    "away": "ARI",
    "home": "KC",
-   "winner": null,
+   "winner": "home",
    "score": {
     "away": "7",
-    "home": "17"
+    "home": "34"
    },
    "fav": "home",
    "fav_p": 0.904,
@@ -183,10 +264,10 @@
    "kickoff": "2026-11-22T18:00Z",
    "away": "PIT",
    "home": "PHI",
-   "winner": null,
+   "winner": "home",
    "score": {
-    "away": "0",
-    "home": "13"
+    "away": "16",
+    "home": "19"
    },
    "fav": "away",
    "fav_p": 0.631,
@@ -224,10 +305,10 @@
    "kickoff": "2026-11-22T18:00Z",
    "away": "BAL",
    "home": "CAR",
-   "winner": null,
+   "winner": "home",
    "score": {
-    "away": "12",
-    "home": "14"
+    "away": "33",
+    "home": "35"
    },
    "fav": "home",
    "fav_p": 0.575,
@@ -273,87 +354,6 @@
    "snapshot": "2026-11-21T22:31+00:00"
   },
   {
-   "id": "401873074",
-   "kickoff": "2026-11-22T21:05Z",
-   "away": "NYJ",
-   "home": "LAC",
-   "winner": null,
-   "score": {
-    "away": "0",
-    "home": "0"
-   },
-   "fav": "home",
-   "fav_p": 0.606,
-   "fpi_fav": "home",
-   "flags": [
-    {
-     "kind": "move",
-     "side": "away",
-     "sev": "med",
-     "vs_fav": true
-    }
-   ],
-   "snapshot": "2026-11-21T22:31+00:00"
-  },
-  {
-   "id": "401873075",
-   "kickoff": "2026-11-22T21:25Z",
-   "away": "LV",
-   "home": "DEN",
-   "winner": null,
-   "score": {
-    "away": "0",
-    "home": "0"
-   },
-   "fav": "home",
-   "fav_p": 0.824,
-   "fpi_fav": "home",
-   "flags": [
-    {
-     "kind": "rest",
-     "side": "home",
-     "sev": "low",
-     "vs_fav": false
-    }
-   ],
-   "snapshot": "2026-11-21T22:31+00:00"
-  },
-  {
-   "id": "401873069",
-   "kickoff": "2026-11-22T21:25Z",
-   "away": "JAX",
-   "home": "NYG",
-   "winner": null,
-   "score": {
-    "away": "0",
-    "home": "0"
-   },
-   "fav": "away",
-   "fav_p": 0.691,
-   "fpi_fav": "away",
-   "flags": [
-    {
-     "kind": "move",
-     "side": "away",
-     "sev": "med",
-     "vs_fav": false
-    },
-    {
-     "kind": "fpi",
-     "side": "away",
-     "sev": "med",
-     "vs_fav": false
-    },
-    {
-     "kind": "weather",
-     "side": "both",
-     "sev": "low",
-     "vs_fav": false
-    }
-   ],
-   "snapshot": "2026-11-21T22:31+00:00"
-  },
-  {
    "id": "401873077",
    "kickoff": "2026-11-23T01:20Z",
    "away": "MIN",
@@ -364,7 +364,7 @@
     "home": "0"
    },
    "fav": "home",
-   "fav_p": 0.608,
+   "fav_p": 0.613,
    "fpi_fav": "home",
    "flags": [
     {
@@ -380,7 +380,7 @@
      "vs_fav": false
     }
    ],
-   "snapshot": "2026-11-21T22:31+00:00"
+   "snapshot": "2026-11-22T19:02+00:00"
   },
   {
    "id": "401873078",
@@ -393,7 +393,7 @@
     "home": "0"
    },
    "fav": "away",
-   "fav_p": 0.723,
+   "fav_p": 0.718,
    "fpi_fav": "away",
    "flags": [
     {
@@ -409,7 +409,7 @@
      "vs_fav": true
     }
    ],
-   "snapshot": "2026-11-21T22:31+00:00"
+   "snapshot": "2026-11-22T19:02+00:00"
   }
  ]
 }
