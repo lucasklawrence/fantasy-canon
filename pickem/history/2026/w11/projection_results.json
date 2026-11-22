@@ -1,0 +1,83 @@
+{
+ "season": 2026,
+ "week": 11,
+ "backtest": false,
+ "summary": {
+  "n": 0,
+  "espn": null,
+  "usage": null,
+  "blend": null,
+  "lean": null,
+  "avg": null,
+  "disagreements": 0,
+  "usage_closer": 0,
+  "below_rate": null,
+  "fade": 0,
+  "fade_hit": 0,
+  "boost": 0,
+  "boost_hit": 0
+ },
+ "by_pos": {
+  "QB": {
+   "n": 0,
+   "espn": null,
+   "usage": null,
+   "blend": null,
+   "lean": null,
+   "avg": null,
+   "disagreements": 0,
+   "usage_closer": 0,
+   "below_rate": null,
+   "fade": 0,
+   "fade_hit": 0,
+   "boost": 0,
+   "boost_hit": 0
+  },
+  "RB": {
+   "n": 0,
+   "espn": null,
+   "usage": null,
+   "blend": null,
+   "lean": null,
+   "avg": null,
+   "disagreements": 0,
+   "usage_closer": 0,
+   "below_rate": null,
+   "fade": 0,
+   "fade_hit": 0,
+   "boost": 0,
+   "boost_hit": 0
+  },
+  "WR": {
+   "n": 0,
+   "espn": null,
+   "usage": null,
+   "blend": null,
+   "lean": null,
+   "avg": null,
+   "disagreements": 0,
+   "usage_closer": 0,
+   "below_rate": null,
+   "fade": 0,
+   "fade_hit": 0,
+   "boost": 0,
+   "boost_hit": 0
+  },
+  "TE": {
+   "n": 0,
+   "espn": null,
+   "usage": null,
+   "blend": null,
+   "lean": null,
+   "avg": null,
+   "disagreements": 0,
+   "usage_closer": 0,
+   "below_rate": null,
+   "fade": 0,
+   "fade_hit": 0,
+   "boost": 0,
+   "boost_hit": 0
+  }
+ },
+ "players": []
+}
