@@ -1,7 +1,7 @@
 {
  "season": 2026,
  "week": 11,
- "generated": "2026-11-23T00:27+00:00",
+ "generated": "2026-11-23T03:55+00:00",
  "players": [
   {
    "id": 4361307,
@@ -2839,7 +2839,7 @@
    "status": "ACTIVE",
    "espn": 25.4,
    "kickoff": "2026-11-24T01:15Z",
-   "usage": 33.8,
+   "usage": 33.7,
    "avg": 28.5,
    "targets": 13.1,
    "carries": 0.0,
@@ -2881,7 +2881,7 @@
    "status": "ACTIVE",
    "espn": 15.6,
    "kickoff": "2026-11-24T01:15Z",
-   "usage": 18.9,
+   "usage": 18.8,
    "avg": 16.2,
    "targets": 6.8,
    "carries": 10.2,
@@ -3007,7 +3007,7 @@
    "status": "QUESTIONABLE",
    "espn": 7.7,
    "kickoff": "2026-11-24T01:15Z",
-   "usage": 10.5,
+   "usage": 10.4,
    "avg": 11.2,
    "targets": 2.8,
    "carries": 9.4,
