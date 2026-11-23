@@ -1,7 +1,7 @@
 {
  "season": 2026,
  "week": 11,
- "generated": "2026-11-22T21:51+00:00",
+ "generated": "2026-11-23T00:27+00:00",
  "players": [
   {
    "id": 4361307,
@@ -2489,11 +2489,11 @@
    "status": "ACTIVE",
    "espn": 20.0,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 18.2,
+   "usage": 17.4,
    "avg": 12.0,
    "targets": 11.0,
    "carries": 0.0,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 14880,
@@ -2503,11 +2503,11 @@
    "status": "ACTIVE",
    "espn": 14.7,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 15.0,
+   "usage": 14.3,
    "avg": 15.4,
    "targets": 0.0,
    "carries": 3.0,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 4036133,
@@ -2517,11 +2517,11 @@
    "status": "ACTIVE",
    "espn": 11.7,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 9.8,
+   "usage": 9.4,
    "avg": 9.6,
    "targets": 5.4,
    "carries": 0.0,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 4360569,
@@ -2531,11 +2531,11 @@
    "status": "ACTIVE",
    "espn": 8.6,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 7.8,
+   "usage": 7.4,
    "avg": 5.2,
    "targets": 1.5,
    "carries": 11.3,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 3042519,
@@ -2545,11 +2545,11 @@
    "status": "ACTIVE",
    "espn": 8.4,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 5.8,
+   "usage": 5.5,
    "avg": 6.3,
    "targets": 1.2,
    "carries": 7.7,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 3886598,
@@ -2559,11 +2559,11 @@
    "status": "ACTIVE",
    "espn": 7.1,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 3.0,
+   "usage": 2.8,
    "avg": 2.6,
    "targets": 2.0,
    "carries": 0.0,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 4430656,
@@ -2573,11 +2573,11 @@
    "status": "ACTIVE",
    "espn": 4.9,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 4.8,
+   "usage": 4.6,
    "avg": 4.4,
    "targets": 2.8,
    "carries": 0.4,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 4429205,
@@ -2591,7 +2591,7 @@
    "avg": 7.4,
    "targets": 4.8,
    "carries": 0.3,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 3917315,
@@ -2605,7 +2605,7 @@
    "avg": 15.9,
    "targets": 0.0,
    "carries": 5.7,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 4708049,
@@ -2615,11 +2615,11 @@
    "status": "ACTIVE",
    "espn": 0.0,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 5.8,
+   "usage": 5.5,
    "avg": 6.2,
    "targets": 3.2,
    "carries": 0.0,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 16733,
@@ -2633,7 +2633,7 @@
    "avg": null,
    "targets": null,
    "carries": null,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 2573079,
@@ -2643,11 +2643,11 @@
    "status": "ACTIVE",
    "espn": 0.0,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 9.6,
+   "usage": 9.1,
    "avg": 7.6,
    "targets": 0.0,
    "carries": 2.6,
-   "implied": 21.5
+   "implied": 20.0
   },
   {
    "id": 3117251,
@@ -2657,11 +2657,11 @@
    "status": "ACTIVE",
    "espn": 19.8,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 22.6,
+   "usage": 22.3,
    "avg": 30.4,
    "targets": 4.9,
    "carries": 13.6,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 4361741,
@@ -2671,11 +2671,11 @@
    "status": "ACTIVE",
    "espn": 17.6,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 21.6,
+   "usage": 21.4,
    "avg": 21.6,
    "targets": 0.0,
    "carries": 3.8,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 3040151,
@@ -2685,25 +2685,25 @@
    "status": "ACTIVE",
    "espn": 13.1,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 18.2,
+   "usage": 18.0,
    "avg": 14.0,
    "targets": 8.5,
    "carries": 0.0,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 16737,
    "name": "Mike Evans",
    "team": "SF",
    "pos": "WR",
-   "status": "QUESTIONABLE",
+   "status": "ACTIVE",
    "espn": 11.5,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 15.6,
+   "usage": 15.4,
    "avg": 15.9,
    "targets": 7.2,
    "carries": 0.0,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 3126486,
@@ -2713,11 +2713,11 @@
    "status": "ACTIVE",
    "espn": 10.3,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 10.9,
+   "usage": 10.8,
    "avg": 15.4,
    "targets": 3.3,
    "carries": 2.6,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 15818,
@@ -2727,11 +2727,11 @@
    "status": "ACTIVE",
    "espn": 7.7,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 12.6,
+   "usage": 12.5,
    "avg": 11.1,
    "targets": 7.0,
    "carries": 0.0,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 4696044,
@@ -2741,11 +2741,11 @@
    "status": "ACTIVE",
    "espn": 6.4,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 9.2,
+   "usage": 9.1,
    "avg": 9.3,
    "targets": 1.5,
    "carries": 10.9,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 4431466,
@@ -2755,11 +2755,11 @@
    "status": "ACTIVE",
    "espn": 0.5,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 8.5,
+   "usage": 8.4,
    "avg": 9.3,
    "targets": 3.7,
    "carries": 0.0,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 4710714,
@@ -2773,21 +2773,21 @@
    "avg": null,
    "targets": null,
    "carries": null,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 3043116,
    "name": "Demarcus Robinson",
    "team": "SF",
    "pos": "WR",
-   "status": "ACTIVE",
+   "status": "OUT",
    "espn": 0.0,
    "kickoff": "2026-11-23T01:20Z",
-   "usage": 7.1,
+   "usage": 0.0,
    "avg": 8.2,
    "targets": 3.4,
    "carries": 0.0,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 4428209,
@@ -2801,7 +2801,7 @@
    "avg": null,
    "targets": null,
    "carries": null,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 3895856,
@@ -2815,21 +2815,21 @@
    "avg": null,
    "targets": null,
    "carries": null,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 4685397,
    "name": "Jordan James",
    "team": "SF",
    "pos": "RB",
-   "status": "QUESTIONABLE",
+   "status": "ACTIVE",
    "espn": 0.0,
    "kickoff": "2026-11-23T01:20Z",
    "usage": 1.0,
    "avg": 1.0,
    "targets": 0.2,
    "carries": 1.1,
-   "implied": 25.0
+   "implied": 24.5
   },
   {
    "id": 4362628,
@@ -2839,7 +2839,7 @@
    "status": "ACTIVE",
    "espn": 25.4,
    "kickoff": "2026-11-24T01:15Z",
-   "usage": 33.7,
+   "usage": 33.8,
    "avg": 28.5,
    "targets": 13.1,
    "carries": 0.0,
@@ -2881,7 +2881,7 @@
    "status": "ACTIVE",
    "espn": 15.6,
    "kickoff": "2026-11-24T01:15Z",
-   "usage": 18.8,
+   "usage": 18.9,
    "avg": 16.2,
    "targets": 6.8,
    "carries": 10.2,
@@ -3007,7 +3007,7 @@
    "status": "QUESTIONABLE",
    "espn": 7.7,
    "kickoff": "2026-11-24T01:15Z",
-   "usage": 10.4,
+   "usage": 10.5,
    "avg": 11.2,
    "targets": 2.8,
    "carries": 9.4,
