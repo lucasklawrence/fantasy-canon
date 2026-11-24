@@ -4,35 +4,6 @@
  "complete": false,
  "games": [
   {
-   "id": "401873077",
-   "kickoff": "2026-11-23T01:20Z",
-   "away": "MIN",
-   "home": "SF",
-   "winner": null,
-   "score": {
-    "away": "10",
-    "home": "35"
-   },
-   "fav": "home",
-   "fav_p": 0.643,
-   "fpi_fav": "home",
-   "flags": [
-    {
-     "kind": "qb",
-     "side": "away",
-     "sev": "med",
-     "vs_fav": false
-    },
-    {
-     "kind": "neutral",
-     "side": "both",
-     "sev": "low",
-     "vs_fav": false
-    }
-   ],
-   "snapshot": "2026-11-23T00:27+00:00"
-  },
-  {
    "id": "401873070",
    "kickoff": "2026-11-22T18:00Z",
    "away": "MIA",
@@ -383,17 +354,46 @@
    "snapshot": "2026-11-22T19:02+00:00"
   },
   {
+   "id": "401873077",
+   "kickoff": "2026-11-23T01:20Z",
+   "away": "MIN",
+   "home": "SF",
+   "winner": "home",
+   "score": {
+    "away": "10",
+    "home": "35"
+   },
+   "fav": "home",
+   "fav_p": 0.643,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "qb",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "neutral",
+     "side": "both",
+     "sev": "low",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-23T00:27+00:00"
+  },
+  {
    "id": "401873078",
    "kickoff": "2026-11-24T01:15Z",
    "away": "CIN",
    "home": "WSH",
-   "winner": null,
+   "winner": "home",
    "score": {
-    "away": "0",
-    "home": "0"
+    "away": "20",
+    "home": "22"
    },
    "fav": "away",
-   "fav_p": 0.718,
+   "fav_p": 0.717,
    "fpi_fav": "away",
    "flags": [
     {
@@ -409,7 +409,7 @@
      "vs_fav": true
     }
    ],
-   "snapshot": "2026-11-23T00:27+00:00"
+   "snapshot": "2026-11-23T03:55+00:00"
   }
  ]
 }
