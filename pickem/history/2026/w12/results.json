@@ -1,0 +1,579 @@
+{
+ "season": 2026,
+ "week": 12,
+ "complete": false,
+ "games": [
+  {
+   "id": "401873079",
+   "kickoff": "2026-11-26T01:00Z",
+   "away": "GB",
+   "home": "LAR",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.551,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "move",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": true
+    },
+    {
+     "kind": "fpi",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873081",
+   "kickoff": "2026-11-26T18:00Z",
+   "away": "CHI",
+   "home": "DET",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "away",
+   "fav_p": 0.571,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "flip",
+     "side": "away",
+     "sev": "high",
+     "vs_fav": false
+    },
+    {
+     "kind": "move",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "fpi",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": true
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873080",
+   "kickoff": "2026-11-26T21:30Z",
+   "away": "PHI",
+   "home": "DAL",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.791,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "qb",
+     "side": "away",
+     "sev": "high",
+     "vs_fav": false
+    },
+    {
+     "kind": "unit",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": true
+    },
+    {
+     "kind": "move",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873082",
+   "kickoff": "2026-11-27T01:20Z",
+   "away": "KC",
+   "home": "BUF",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.576,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "ol",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "weather",
+     "side": "both",
+     "sev": "low",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873083",
+   "kickoff": "2026-11-27T20:00Z",
+   "away": "DEN",
+   "home": "PIT",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "away",
+   "fav_p": 0.584,
+   "fpi_fav": "away",
+   "flags": [
+    {
+     "kind": "move",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "weather",
+     "side": "both",
+     "sev": "low",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873087",
+   "kickoff": "2026-11-29T18:00Z",
+   "away": "NO",
+   "home": "CIN",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.812,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "ol",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "unit",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": true
+    },
+    {
+     "kind": "move",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873088",
+   "kickoff": "2026-11-29T18:00Z",
+   "away": "NYG",
+   "home": "IND",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "away",
+   "fav_p": 0.733,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "flip",
+     "side": "away",
+     "sev": "high",
+     "vs_fav": false
+    },
+    {
+     "kind": "move",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "fpi",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": true
+    },
+    {
+     "kind": "rest",
+     "side": "home",
+     "sev": "low",
+     "vs_fav": true
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873089",
+   "kickoff": "2026-11-29T18:00Z",
+   "away": "NYJ",
+   "home": "MIA",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "away",
+   "fav_p": 0.655,
+   "fpi_fav": "away",
+   "flags": [
+    {
+     "kind": "flip",
+     "side": "away",
+     "sev": "high",
+     "vs_fav": false
+    },
+    {
+     "kind": "unit",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": true
+    },
+    {
+     "kind": "qb",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "move",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873084",
+   "kickoff": "2026-11-29T18:00Z",
+   "away": "ATL",
+   "home": "MIN",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.745,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "qb",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": true
+    },
+    {
+     "kind": "move",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "rest",
+     "side": "away",
+     "sev": "low",
+     "vs_fav": true
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873090",
+   "kickoff": "2026-11-29T18:00Z",
+   "away": "TEN",
+   "home": "JAX",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.888,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "ol",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": true
+    },
+    {
+     "kind": "move",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873085",
+   "kickoff": "2026-11-29T18:00Z",
+   "away": "BAL",
+   "home": "HOU",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.726,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "qb",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "unit",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "move",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "fpi",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873093",
+   "kickoff": "2026-11-29T21:05Z",
+   "away": "NE",
+   "home": "LAC",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.513,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "qb",
+     "side": "away",
+     "sev": "high",
+     "vs_fav": false
+    },
+    {
+     "kind": "qb",
+     "side": "home",
+     "sev": "high",
+     "vs_fav": true
+    },
+    {
+     "kind": "unit",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "fpi",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "rest",
+     "side": "away",
+     "sev": "low",
+     "vs_fav": true
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873092",
+   "kickoff": "2026-11-29T21:25Z",
+   "away": "WSH",
+   "home": "ARI",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "away",
+   "fav_p": 0.769,
+   "fpi_fav": "away",
+   "flags": [
+    {
+     "kind": "qb",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": true
+    },
+    {
+     "kind": "qb",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "move",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "fpi",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": true
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873091",
+   "kickoff": "2026-11-29T21:25Z",
+   "away": "SEA",
+   "home": "SF",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.616,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "qb",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "ol",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "move",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "rest",
+     "side": "away",
+     "sev": "low",
+     "vs_fav": true
+    },
+    {
+     "kind": "weather",
+     "side": "both",
+     "sev": "low",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873086",
+   "kickoff": "2026-11-30T01:20Z",
+   "away": "LV",
+   "home": "CLE",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.662,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "move",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
+     "kind": "rest",
+     "side": "home",
+     "sev": "low",
+     "vs_fav": false
+    },
+    {
+     "kind": "weather",
+     "side": "both",
+     "sev": "low",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  },
+  {
+   "id": "401873094",
+   "kickoff": "2026-12-01T01:15Z",
+   "away": "CAR",
+   "home": "TB",
+   "winner": null,
+   "score": {
+    "away": "0",
+    "home": "0"
+   },
+   "fav": "home",
+   "fav_p": 0.584,
+   "fpi_fav": "home",
+   "flags": [
+    {
+     "kind": "fpi",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    }
+   ],
+   "snapshot": "2026-11-24T06:16+00:00"
+  }
+ ]
+}
