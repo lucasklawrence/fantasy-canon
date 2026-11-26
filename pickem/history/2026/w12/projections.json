@@ -1,7 +1,7 @@
 {
  "season": 2026,
  "week": 12,
- "generated": "2026-11-24T23:23+00:00",
+ "generated": "2026-11-26T22:55+00:00",
  "players": [
   {
    "id": 4701936,
@@ -795,11 +795,11 @@
    "status": "ACTIVE",
    "espn": 18.1,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 21.2,
+   "usage": 20.7,
    "avg": 18.5,
    "targets": 0.0,
    "carries": 3.4,
-   "implied": 25.2
+   "implied": 24.2
   },
   {
    "id": 4379399,
@@ -809,11 +809,11 @@
    "status": "ACTIVE",
    "espn": 14.2,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 21.3,
+   "usage": 20.8,
    "avg": 18.4,
    "targets": 1.6,
    "carries": 22.5,
-   "implied": 25.2
+   "implied": 24.2
   },
   {
    "id": 3915416,
@@ -823,11 +823,11 @@
    "status": "ACTIVE",
    "espn": 12.4,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 16.8,
+   "usage": 16.4,
    "avg": 16.4,
    "targets": 7.5,
    "carries": 0.6,
-   "implied": 25.2
+   "implied": 24.2
   },
   {
    "id": 4373678,
@@ -837,11 +837,11 @@
    "status": "ACTIVE",
    "espn": 8.9,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 13.0,
+   "usage": 12.7,
    "avg": 11.0,
    "targets": 5.9,
    "carries": 1.7,
-   "implied": 25.2
+   "implied": 24.2
   },
   {
    "id": 4385690,
@@ -851,11 +851,11 @@
    "status": "QUESTIONABLE",
    "espn": 8.2,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 9.4,
+   "usage": 9.1,
    "avg": 10.8,
    "targets": 4.1,
    "carries": 0.0,
-   "implied": 25.2
+   "implied": 24.2
   },
   {
    "id": 3915411,
@@ -865,11 +865,11 @@
    "status": "ACTIVE",
    "espn": 5.1,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 8.7,
+   "usage": 8.5,
    "avg": 6.3,
    "targets": 4.2,
    "carries": 1.0,
-   "implied": 25.2
+   "implied": 24.2
   },
   {
    "id": 4635008,
@@ -879,11 +879,11 @@
    "status": "ACTIVE",
    "espn": 4.9,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 8.1,
+   "usage": 7.9,
    "avg": 3.0,
    "targets": 4.0,
    "carries": 0.0,
-   "implied": 25.2
+   "implied": 24.2
   },
   {
    "id": 3930086,
@@ -893,11 +893,11 @@
    "status": "ACTIVE",
    "espn": 4.3,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 5.9,
+   "usage": 5.8,
    "avg": 4.0,
    "targets": 3.3,
    "carries": 0.0,
-   "implied": 25.2
+   "implied": 24.2
   },
   {
    "id": 4429501,
@@ -907,25 +907,11 @@
    "status": "ACTIVE",
    "espn": 1.5,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 3.0,
+   "usage": 2.9,
    "avg": 1.5,
    "targets": 1.0,
    "carries": 2.3,
-   "implied": 25.2
-  },
-  {
-   "id": 4567048,
-   "name": "Kenneth Walker III",
-   "team": "KC",
-   "pos": "RB",
-   "status": "QUESTIONABLE",
-   "espn": 21.4,
-   "kickoff": "2026-11-27T01:20Z",
-   "usage": 21.7,
-   "avg": 21.6,
-   "targets": 4.4,
-   "carries": 18.2,
-   "implied": 22.2
+   "implied": 24.2
   },
   {
    "id": 3139477,
@@ -933,13 +919,27 @@
    "team": "KC",
    "pos": "QB",
    "status": "ACTIVE",
-   "espn": 17.4,
+   "espn": 17.6,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 20.5,
+   "usage": 19.9,
    "avg": 25.6,
    "targets": 0.0,
    "carries": 1.2,
-   "implied": 22.2
+   "implied": 21.2
+  },
+  {
+   "id": 4832955,
+   "name": "Emmett Johnson",
+   "team": "KC",
+   "pos": "RB",
+   "status": "ACTIVE",
+   "espn": 17.6,
+   "kickoff": "2026-11-27T01:20Z",
+   "usage": 19.3,
+   "avg": 23.5,
+   "targets": 4.2,
+   "carries": 17.1,
+   "implied": 21.2
   },
   {
    "id": 15847,
@@ -949,11 +949,11 @@
    "status": "ACTIVE",
    "espn": 11.5,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 11.2,
+   "usage": 10.9,
    "avg": 14.8,
    "targets": 5.3,
    "carries": 0.2,
-   "implied": 22.2
+   "implied": 21.2
   },
   {
    "id": 4428331,
@@ -961,13 +961,13 @@
    "team": "KC",
    "pos": "WR",
    "status": "ACTIVE",
-   "espn": 10.4,
+   "espn": 11.0,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 12.4,
+   "usage": 12.1,
    "avg": 13.2,
    "targets": 6.4,
    "carries": 0.0,
-   "implied": 22.2
+   "implied": 21.2
   },
   {
    "id": 4688813,
@@ -975,27 +975,13 @@
    "team": "KC",
    "pos": "WR",
    "status": "ACTIVE",
-   "espn": 7.6,
+   "espn": 8.3,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 9.8,
+   "usage": 9.5,
    "avg": 12.6,
    "targets": 5.0,
    "carries": 0.0,
-   "implied": 22.2
-  },
-  {
-   "id": 4832955,
-   "name": "Emmett Johnson",
-   "team": "KC",
-   "pos": "RB",
-   "status": "ACTIVE",
-   "espn": 7.5,
-   "kickoff": "2026-11-27T01:20Z",
-   "usage": 19.8,
-   "avg": 23.5,
-   "targets": 4.2,
-   "carries": 17.1,
-   "implied": 22.2
+   "implied": 21.2
   },
   {
    "id": 4683062,
@@ -1003,13 +989,13 @@
    "team": "KC",
    "pos": "WR",
    "status": "ACTIVE",
-   "espn": 5.9,
+   "espn": 6.6,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 6.6,
+   "usage": 6.4,
    "avg": 6.7,
    "targets": 4.3,
    "carries": 0.0,
-   "implied": 22.2
+   "implied": 21.2
   },
   {
    "id": 4912218,
@@ -1017,13 +1003,27 @@
    "team": "KC",
    "pos": "WR",
    "status": "ACTIVE",
-   "espn": 3.4,
+   "espn": 5.2,
    "kickoff": "2026-11-27T01:20Z",
-   "usage": 5.6,
+   "usage": 5.4,
    "avg": 5.6,
    "targets": 3.3,
    "carries": 0.0,
-   "implied": 22.2
+   "implied": 21.2
+  },
+  {
+   "id": 4567048,
+   "name": "Kenneth Walker III",
+   "team": "KC",
+   "pos": "RB",
+   "status": "OUT",
+   "espn": 0.0,
+   "kickoff": "2026-11-27T01:20Z",
+   "usage": 0.0,
+   "avg": 21.6,
+   "targets": 4.4,
+   "carries": 18.2,
+   "implied": 21.2
   },
   {
    "id": 4702555,
@@ -1031,13 +1031,13 @@
    "team": "DEN",
    "pos": "RB",
    "status": "ACTIVE",
-   "espn": 16.0,
+   "espn": 16.9,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 20.2,
+   "usage": 20.5,
    "avg": 20.8,
    "targets": 4.4,
    "carries": 17.8,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4426338,
@@ -1047,11 +1047,11 @@
    "status": "ACTIVE",
    "espn": 14.1,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 15.1,
+   "usage": 15.2,
    "avg": 18.2,
    "targets": 0.0,
    "carries": 5.2,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4372016,
@@ -1059,13 +1059,13 @@
    "team": "DEN",
    "pos": "WR",
    "status": "ACTIVE",
-   "espn": 10.2,
+   "espn": 10.1,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 6.6,
+   "usage": 6.7,
    "avg": 9.0,
    "targets": 4.6,
    "carries": 0.0,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 3128429,
@@ -1073,13 +1073,13 @@
    "team": "DEN",
    "pos": "WR",
    "status": "ACTIVE",
-   "espn": 8.0,
+   "espn": 7.4,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 6.6,
+   "usage": 6.7,
    "avg": 8.1,
    "targets": 4.8,
    "carries": 0.0,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4600981,
@@ -1089,11 +1089,11 @@
    "status": "ACTIVE",
    "espn": 6.6,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 7.4,
+   "usage": 7.5,
    "avg": 11.0,
    "targets": 3.9,
    "carries": 0.0,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 3051876,
@@ -1103,11 +1103,11 @@
    "status": "ACTIVE",
    "espn": 6.6,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 8.2,
+   "usage": 8.3,
    "avg": 5.5,
    "targets": 5.6,
    "carries": 0.0,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4686472,
@@ -1117,25 +1117,25 @@
    "status": "ACTIVE",
    "espn": 3.8,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 4.1,
+   "usage": 4.2,
    "avg": 4.9,
    "targets": 2.2,
    "carries": 1.2,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4241985,
    "name": "J.K. Dobbins",
    "team": "DEN",
    "pos": "RB",
-   "status": "OUT",
-   "espn": 3.4,
+   "status": "SUSPENSION",
+   "espn": 0.0,
    "kickoff": "2026-11-27T20:00Z",
    "usage": 0.0,
    "avg": 3.2,
    "targets": 0.3,
    "carries": 3.6,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4568490,
@@ -1149,7 +1149,7 @@
    "avg": 12.2,
    "targets": 3.2,
    "carries": 4.3,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4569987,
@@ -1159,25 +1159,25 @@
    "status": "ACTIVE",
    "espn": 14.8,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 10.8,
+   "usage": 10.2,
    "avg": 13.0,
    "targets": 3.8,
    "carries": 10.9,
-   "implied": 17.2
+   "implied": 16.0
   },
   {
-   "id": 8439,
-   "name": "Aaron Rodgers",
+   "id": 3116407,
+   "name": "Mason Rudolph",
    "team": "PIT",
    "pos": "QB",
    "status": "ACTIVE",
-   "espn": 14.2,
+   "espn": 14.3,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 12.8,
-   "avg": 12.4,
+   "usage": 1.2,
+   "avg": 0.4,
    "targets": 0.0,
-   "carries": 2.9,
-   "implied": 17.2
+   "carries": 1.3,
+   "implied": 16.0
   },
   {
    "id": 4047650,
@@ -1185,13 +1185,13 @@
    "team": "PIT",
    "pos": "WR",
    "status": "ACTIVE",
-   "espn": 9.6,
+   "espn": 9.9,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 5.9,
+   "usage": 5.6,
    "avg": 6.4,
    "targets": 5.2,
    "carries": 0.0,
-   "implied": 17.2
+   "implied": 16.0
   },
   {
    "id": 4038815,
@@ -1201,11 +1201,11 @@
    "status": "ACTIVE",
    "espn": 8.7,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 7.1,
+   "usage": 6.8,
    "avg": 9.8,
    "targets": 3.2,
    "carries": 7.4,
-   "implied": 17.2
+   "implied": 16.0
   },
   {
    "id": 4361411,
@@ -1213,13 +1213,13 @@
    "team": "PIT",
    "pos": "TE",
    "status": "ACTIVE",
-   "espn": 7.5,
+   "espn": 7.6,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 6.9,
+   "usage": 6.5,
    "avg": 9.0,
    "targets": 3.7,
    "carries": 0.6,
-   "implied": 17.2
+   "implied": 16.0
   },
   {
    "id": 4685261,
@@ -1227,13 +1227,13 @@
    "team": "PIT",
    "pos": "WR",
    "status": "ACTIVE",
-   "espn": 6.5,
+   "espn": 6.7,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 8.2,
+   "usage": 7.8,
    "avg": 6.2,
    "targets": 6.4,
    "carries": 0.3,
-   "implied": 17.2
+   "implied": 16.0
   },
   {
    "id": 4431492,
@@ -1241,13 +1241,13 @@
    "team": "PIT",
    "pos": "WR",
    "status": "ACTIVE",
-   "espn": 6.4,
+   "espn": 6.6,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 6.4,
+   "usage": 6.1,
    "avg": 9.7,
    "targets": 4.5,
    "carries": 0.0,
-   "implied": 17.2
+   "implied": 16.0
   },
   {
    "id": 4430802,
@@ -1255,27 +1255,27 @@
    "team": "PIT",
    "pos": "TE",
    "status": "ACTIVE",
-   "espn": 5.9,
+   "espn": 6.0,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 5.2,
+   "usage": 5.0,
    "avg": 6.6,
    "targets": 3.2,
    "carries": 0.0,
-   "implied": 17.2
+   "implied": 16.0
   },
   {
    "id": 4035687,
    "name": "Michael Pittman Jr.",
    "team": "PIT",
    "pos": "WR",
-   "status": "INJURY_RESERVE",
-   "espn": 4.5,
+   "status": "ACTIVE",
+   "espn": 4.7,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 0.0,
+   "usage": 5.2,
    "avg": 5.3,
    "targets": 4.1,
    "carries": 0.0,
-   "implied": 17.2
+   "implied": 16.0
   },
   {
    "id": 4430807,
@@ -1285,7 +1285,7 @@
    "status": "ACTIVE",
    "espn": 17.7,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 16.4,
+   "usage": 16.5,
    "avg": 17.3,
    "targets": 4.8,
    "carries": 17.9,
@@ -1327,7 +1327,7 @@
    "status": "ACTIVE",
    "espn": 8.3,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.8,
+   "usage": 7.9,
    "avg": 7.0,
    "targets": 5.0,
    "carries": 0.0,
@@ -1338,7 +1338,7 @@
    "name": "Jahan Dotson",
    "team": "ATL",
    "pos": "WR",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 7.4,
    "kickoff": "2026-11-29T18:00Z",
    "usage": 6.6,
@@ -1383,25 +1383,25 @@
    "status": "ACTIVE",
    "espn": 14.6,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 14.9,
+   "usage": 15.1,
    "avg": 8.3,
    "targets": 8.2,
    "carries": 1.0,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 3043078,
    "name": "Derrick Henry",
    "team": "BAL",
    "pos": "RB",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 14.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 13.9,
+   "usage": 14.0,
    "avg": 14.4,
    "targets": 3.7,
    "carries": 12.7,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 2578570,
@@ -1411,11 +1411,11 @@
    "status": "ACTIVE",
    "espn": 11.9,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 14.8,
+   "usage": 15.0,
    "avg": 12.8,
    "targets": 0.0,
    "carries": 2.0,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4038441,
@@ -1425,11 +1425,11 @@
    "status": "ACTIVE",
    "espn": 9.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 10.9,
+   "usage": 11.1,
    "avg": 13.0,
    "targets": 5.5,
    "carries": 5.4,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 3116365,
@@ -1439,11 +1439,11 @@
    "status": "ACTIVE",
    "espn": 6.8,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 6.9,
+   "usage": 7.0,
    "avg": 7.0,
    "targets": 4.4,
    "carries": 0.4,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4360939,
@@ -1453,11 +1453,11 @@
    "status": "ACTIVE",
    "espn": 5.7,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.8,
+   "usage": 7.9,
    "avg": 6.7,
    "targets": 4.6,
    "carries": 0.0,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4870847,
@@ -1467,11 +1467,11 @@
    "status": "ACTIVE",
    "espn": 5.0,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 6.7,
+   "usage": 6.8,
    "avg": 4.2,
    "targets": 5.1,
    "carries": 0.0,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 3916387,
@@ -1485,21 +1485,7 @@
    "avg": 13.5,
    "targets": 0.0,
    "carries": 2.2,
-   "implied": 20.2
-  },
-  {
-   "id": 4035671,
-   "name": "Tyler Huntley",
-   "team": "BAL",
-   "pos": "QB",
-   "status": "INJURY_RESERVE",
-   "espn": 0.0,
-   "kickoff": "2026-11-29T18:00Z",
-   "usage": 0.0,
-   "avg": 12.6,
-   "targets": 0.0,
-   "carries": 2.5,
-   "implied": 20.2
+   "implied": 20.5
   },
   {
    "id": 4362628,
@@ -1509,11 +1495,11 @@
    "status": "ACTIVE",
    "espn": 25.1,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 29.7,
+   "usage": 29.5,
    "avg": 26.2,
    "targets": 11.8,
    "carries": 0.0,
-   "implied": 30.2
+   "implied": 29.8
   },
   {
    "id": 3915511,
@@ -1523,11 +1509,11 @@
    "status": "ACTIVE",
    "espn": 24.3,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 30.6,
+   "usage": 30.4,
    "avg": 30.5,
    "targets": 0.0,
    "carries": 2.0,
-   "implied": 30.2
+   "implied": 29.8
   },
   {
    "id": 4362238,
@@ -1537,11 +1523,11 @@
    "status": "ACTIVE",
    "espn": 16.2,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 18.7,
+   "usage": 18.6,
    "avg": 15.9,
    "targets": 7.4,
    "carries": 8.4,
-   "implied": 30.2
+   "implied": 29.8
   },
   {
    "id": 4239993,
@@ -1551,11 +1537,11 @@
    "status": "ACTIVE",
    "espn": 15.8,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 14.8,
+   "usage": 14.7,
    "avg": 20.4,
    "targets": 5.3,
    "carries": 0.0,
-   "implied": 30.2
+   "implied": 29.8
   },
   {
    "id": 3116389,
@@ -1565,11 +1551,11 @@
    "status": "ACTIVE",
    "espn": 8.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 11.4,
+   "usage": 11.3,
    "avg": 8.7,
    "targets": 2.9,
    "carries": 6.8,
-   "implied": 30.2
+   "implied": 29.8
   },
   {
    "id": 3116164,
@@ -1579,11 +1565,11 @@
    "status": "ACTIVE",
    "espn": 7.6,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 11.8,
+   "usage": 11.7,
    "avg": 8.8,
    "targets": 4.0,
    "carries": 0.0,
-   "implied": 30.2
+   "implied": 29.8
   },
   {
    "id": 4384852,
@@ -1597,7 +1583,7 @@
    "avg": 6.5,
    "targets": 2.3,
    "carries": 0.2,
-   "implied": 30.2
+   "implied": 29.8
   },
   {
    "id": 4432577,
@@ -1611,7 +1597,7 @@
    "avg": 23.2,
    "targets": 0.0,
    "carries": 3.9,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4258173,
@@ -1625,7 +1611,7 @@
    "avg": 14.3,
    "targets": 8.1,
    "carries": 0.0,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4035538,
@@ -1639,7 +1625,7 @@
    "avg": 6.9,
    "targets": 1.8,
    "carries": 15.0,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4366031,
@@ -1653,7 +1639,7 @@
    "avg": 9.2,
    "targets": 4.7,
    "carries": 0.4,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4686422,
@@ -1667,7 +1653,7 @@
    "avg": 10.7,
    "targets": 5.5,
    "carries": 0.2,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4429059,
@@ -1681,35 +1667,35 @@
    "avg": 8.8,
    "targets": 2.1,
    "carries": 15.5,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 3117256,
    "name": "Dalton Schultz",
    "team": "HOU",
    "pos": "TE",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 7.7,
    "kickoff": "2026-11-29T18:00Z",
    "usage": 4.7,
    "avg": 6.5,
    "targets": 2.4,
    "carries": 0.0,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4432708,
    "name": "Marvin Harrison Jr.",
    "team": "HOU",
    "pos": "WR",
-   "status": "QUESTIONABLE",
+   "status": "ACTIVE",
    "espn": 6.9,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.0,
+   "usage": 6.9,
    "avg": 6.0,
    "targets": 3.6,
    "carries": 0.0,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4429022,
@@ -1723,7 +1709,7 @@
    "avg": 11.0,
    "targets": 2.3,
    "carries": 0.0,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4362478,
@@ -1737,7 +1723,7 @@
    "avg": 3.6,
    "targets": 2.0,
    "carries": 5.9,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4586312,
@@ -1751,7 +1737,7 @@
    "avg": 12.4,
    "targets": 3.3,
    "carries": 0.3,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4877706,
@@ -1765,7 +1751,7 @@
    "avg": null,
    "targets": null,
    "carries": null,
-   "implied": 27.2
+   "implied": 27.0
   },
   {
    "id": 4242335,
@@ -1775,11 +1761,25 @@
    "status": "ACTIVE",
    "espn": 14.0,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 12.4,
+   "usage": 12.6,
    "avg": 8.8,
    "targets": 4.7,
    "carries": 12.6,
-   "implied": 17.5
+   "implied": 17.8
+  },
+  {
+   "id": 4429084,
+   "name": "Anthony Richardson Sr.",
+   "team": "IND",
+   "pos": "QB",
+   "status": "ACTIVE",
+   "espn": 13.2,
+   "kickoff": "2026-11-29T18:00Z",
+   "usage": 1.5,
+   "avg": 0.5,
+   "targets": 0.0,
+   "carries": 1.4,
+   "implied": 17.8
   },
   {
    "id": 4431459,
@@ -1789,11 +1789,11 @@
    "status": "ACTIVE",
    "espn": 7.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.0,
+   "usage": 7.1,
    "avg": 5.0,
    "targets": 5.3,
    "carries": 0.3,
-   "implied": 17.5
+   "implied": 17.8
   },
   {
    "id": 3051889,
@@ -1807,7 +1807,7 @@
    "avg": 3.5,
    "targets": 1.7,
    "carries": 0.0,
-   "implied": 17.5
+   "implied": 17.8
   },
   {
    "id": 4360078,
@@ -1821,7 +1821,7 @@
    "avg": 6.1,
    "targets": 3.1,
    "carries": 0.0,
-   "implied": 17.5
+   "implied": 17.8
   },
   {
    "id": 4686468,
@@ -1835,7 +1835,7 @@
    "avg": 7.4,
    "targets": 0.6,
    "carries": 6.5,
-   "implied": 17.5
+   "implied": 17.8
   },
   {
    "id": 4360310,
@@ -1845,11 +1845,11 @@
    "status": "ACTIVE",
    "espn": 23.3,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 27.7,
+   "usage": 28.0,
    "avg": 18.1,
    "targets": 0.0,
    "carries": 2.9,
-   "implied": 31.5
+   "implied": 32.0
   },
   {
    "id": 4882093,
@@ -1859,39 +1859,39 @@
    "status": "QUESTIONABLE",
    "espn": 18.6,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 19.1,
+   "usage": 19.3,
    "avg": 16.9,
    "targets": 2.6,
    "carries": 15.8,
-   "implied": 31.5
+   "implied": 32.0
   },
   {
    "id": 4432620,
    "name": "Parker Washington",
    "team": "JAX",
    "pos": "WR",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 17.8,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 26.6,
+   "usage": 27.0,
    "avg": 16.1,
    "targets": 11.1,
    "carries": 0.1,
-   "implied": 31.5
+   "implied": 32.0
   },
   {
    "id": 3916433,
    "name": "Jakobi Meyers",
    "team": "JAX",
    "pos": "WR",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 12.4,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 16.8,
+   "usage": 17.0,
    "avg": 8.4,
    "targets": 7.3,
    "carries": 0.3,
-   "implied": 31.5
+   "implied": 32.0
   },
   {
    "id": 4430539,
@@ -1901,11 +1901,11 @@
    "status": "ACTIVE",
    "espn": 8.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 6.6,
+   "usage": 6.7,
    "avg": 6.3,
    "targets": 2.7,
    "carries": 0.0,
-   "implied": 31.5
+   "implied": 32.0
   },
   {
    "id": 4362619,
@@ -1915,11 +1915,11 @@
    "status": "ACTIVE",
    "espn": 6.6,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 6.8,
+   "usage": 6.9,
    "avg": 7.4,
    "targets": 0.9,
    "carries": 5.4,
-   "implied": 31.5
+   "implied": 32.0
   },
   {
    "id": 4432773,
@@ -1929,11 +1929,11 @@
    "status": "ACTIVE",
    "espn": 6.0,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 6.6,
+   "usage": 6.7,
    "avg": 5.7,
    "targets": 3.0,
    "carries": 0.0,
-   "implied": 31.5
+   "implied": 32.0
   },
   {
    "id": 4685415,
@@ -1947,7 +1947,7 @@
    "avg": 1.4,
    "targets": 1.3,
    "carries": 0.8,
-   "implied": 31.5
+   "implied": 32.0
   },
   {
    "id": 4711533,
@@ -1957,11 +1957,11 @@
    "status": "ACTIVE",
    "espn": 14.0,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 11.9,
+   "usage": 11.5,
    "avg": 9.6,
    "targets": 3.0,
    "carries": 15.5,
-   "implied": 18.5
+   "implied": 17.5
   },
   {
    "id": 4433971,
@@ -1971,11 +1971,11 @@
    "status": "ACTIVE",
    "espn": 13.6,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 9.7,
+   "usage": 9.4,
    "avg": 7.9,
    "targets": 0.0,
    "carries": 2.0,
-   "implied": 18.5
+   "implied": 17.5
   },
   {
    "id": 4869645,
@@ -1985,11 +1985,11 @@
    "status": "ACTIVE",
    "espn": 10.6,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 12.9,
+   "usage": 12.4,
    "avg": 9.1,
    "targets": 8.6,
    "carries": 0.0,
-   "implied": 18.5
+   "implied": 17.5
   },
   {
    "id": 4569603,
@@ -1999,11 +1999,11 @@
    "status": "ACTIVE",
    "espn": 8.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.0,
+   "usage": 6.7,
    "avg": 9.9,
    "targets": 4.5,
    "carries": 1.0,
-   "implied": 18.5
+   "implied": 17.5
   },
   {
    "id": 4367209,
@@ -2013,11 +2013,11 @@
    "status": "ACTIVE",
    "espn": 7.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 6.4,
+   "usage": 6.1,
    "avg": 3.7,
    "targets": 4.8,
    "carries": 0.0,
-   "implied": 18.5
+   "implied": 17.5
   },
   {
    "id": 4682745,
@@ -2027,11 +2027,11 @@
    "status": "ACTIVE",
    "espn": 5.9,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 2.6,
+   "usage": 2.5,
    "avg": 1.4,
    "targets": 0.9,
    "carries": 3.9,
-   "implied": 18.5
+   "implied": 17.5
   },
   {
    "id": 4869961,
@@ -2041,11 +2041,11 @@
    "status": "ACTIVE",
    "espn": 5.4,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 4.0,
+   "usage": 3.9,
    "avg": 3.6,
    "targets": 3.3,
    "carries": 0.2,
-   "implied": 18.5
+   "implied": 17.5
   },
   {
    "id": 4429160,
@@ -2059,7 +2059,7 @@
    "avg": 8.2,
    "targets": 3.6,
    "carries": 10.4,
-   "implied": 18.5
+   "implied": 17.5
   },
   {
    "id": 4242512,
@@ -2073,7 +2073,7 @@
    "avg": 15.8,
    "targets": 0.0,
    "carries": 3.5,
-   "implied": 18.5
+   "implied": 17.5
   },
   {
    "id": 4262921,
@@ -2083,7 +2083,7 @@
    "status": "ACTIVE",
    "espn": 20.1,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 19.8,
+   "usage": 19.9,
    "avg": 13.3,
    "targets": 10.6,
    "carries": 0.4,
@@ -2164,10 +2164,10 @@
    "name": "Myles Price",
    "team": "MIN",
    "pos": "WR",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 2.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 5.3,
+   "usage": 5.4,
    "avg": 5.6,
    "targets": 2.8,
    "carries": 0.3,
@@ -2251,11 +2251,11 @@
    "status": "ACTIVE",
    "espn": 14.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 16.4,
+   "usage": 16.2,
    "avg": 13.4,
    "targets": 10.6,
    "carries": 0.0,
-   "implied": 20.2
+   "implied": 19.8
   },
   {
    "id": 4360689,
@@ -2265,11 +2265,11 @@
    "status": "ACTIVE",
    "espn": 14.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 17.3,
+   "usage": 17.1,
    "avg": 14.4,
    "targets": 0.0,
    "carries": 5.3,
-   "implied": 20.2
+   "implied": 19.8
   },
   {
    "id": 4239996,
@@ -2279,11 +2279,11 @@
    "status": "ACTIVE",
    "espn": 12.0,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 8.6,
+   "usage": 8.5,
    "avg": 7.5,
    "targets": 2.5,
    "carries": 11.4,
-   "implied": 20.2
+   "implied": 19.8
   },
   {
    "id": 4880281,
@@ -2293,11 +2293,11 @@
    "status": "ACTIVE",
    "espn": 10.4,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 9.7,
+   "usage": 9.5,
    "avg": 8.7,
    "targets": 6.3,
    "carries": 0.4,
-   "implied": 20.2
+   "implied": 19.8
   },
   {
    "id": 4569559,
@@ -2307,11 +2307,11 @@
    "status": "ACTIVE",
    "espn": 8.3,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.7,
+   "usage": 7.6,
    "avg": 9.5,
    "targets": 4.7,
    "carries": 0.0,
-   "implied": 20.2
+   "implied": 19.8
   },
   {
    "id": 3929645,
@@ -2325,7 +2325,7 @@
    "avg": 4.5,
    "targets": 2.0,
    "carries": 0.0,
-   "implied": 20.2
+   "implied": 19.8
   },
   {
    "id": 3054850,
@@ -2335,11 +2335,11 @@
    "status": "ACTIVE",
    "espn": 4.9,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.1,
+   "usage": 7.0,
    "avg": 11.2,
    "targets": 3.5,
    "carries": 2.8,
-   "implied": 20.2
+   "implied": 19.8
   },
   {
    "id": 4569682,
@@ -2349,11 +2349,11 @@
    "status": "ACTIVE",
    "espn": 0.0,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.5,
+   "usage": 7.4,
    "avg": 8.4,
    "targets": 1.0,
    "carries": 10.4,
-   "implied": 20.2
+   "implied": 19.8
   },
   {
    "id": 4696981,
@@ -2367,7 +2367,7 @@
    "avg": 14.8,
    "targets": 4.5,
    "carries": 15.7,
-   "implied": 24.0
+   "implied": 23.8
   },
   {
    "id": 4595348,
@@ -2377,11 +2377,11 @@
    "status": "ACTIVE",
    "espn": 16.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 16.4,
+   "usage": 16.3,
    "avg": 13.3,
    "targets": 9.4,
    "carries": 0.0,
-   "implied": 24.0
+   "implied": 23.8
   },
   {
    "id": 4433970,
@@ -2395,21 +2395,21 @@
    "avg": 12.2,
    "targets": 0.0,
    "carries": 5.5,
-   "implied": 24.0
+   "implied": 23.8
   },
   {
    "id": 4361050,
    "name": "Isaiah Likely",
    "team": "NYG",
    "pos": "TE",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 12.2,
    "kickoff": "2026-11-29T18:00Z",
    "usage": 12.2,
    "avg": 12.9,
    "targets": 6.1,
    "carries": 0.0,
-   "implied": 24.0
+   "implied": 23.8
   },
   {
    "id": 4682648,
@@ -2419,11 +2419,11 @@
    "status": "ACTIVE",
    "espn": 6.9,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 8.0,
+   "usage": 7.9,
    "avg": 8.2,
    "targets": 4.7,
    "carries": 0.0,
-   "implied": 24.0
+   "implied": 23.8
   },
   {
    "id": 4040655,
@@ -2437,7 +2437,7 @@
    "avg": 3.1,
    "targets": 4.6,
    "carries": 0.3,
-   "implied": 24.0
+   "implied": 23.8
   },
   {
    "id": 4040761,
@@ -2451,7 +2451,7 @@
    "avg": 5.7,
    "targets": 1.3,
    "carries": 5.4,
-   "implied": 24.0
+   "implied": 23.8
   },
   {
    "id": 2969939,
@@ -2465,7 +2465,7 @@
    "avg": 5.2,
    "targets": 0.0,
    "carries": 2.6,
-   "implied": 24.0
+   "implied": 23.8
   },
   {
    "id": 4689114,
@@ -2479,7 +2479,7 @@
    "avg": 13.7,
    "targets": 0.0,
    "carries": 4.7,
-   "implied": 24.0
+   "implied": 23.8
   },
   {
    "id": 4360516,
@@ -2493,7 +2493,7 @@
    "avg": 8.0,
    "targets": 1.9,
    "carries": 4.9,
-   "implied": 24.0
+   "implied": 23.8
   },
   {
    "id": 15864,
@@ -2517,7 +2517,7 @@
    "status": "ACTIVE",
    "espn": 14.1,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 15.0,
+   "usage": 15.1,
    "avg": 10.3,
    "targets": 8.9,
    "carries": 0.0,
@@ -2545,7 +2545,7 @@
    "status": "ACTIVE",
    "espn": 10.2,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 8.8,
+   "usage": 8.9,
    "avg": 10.3,
    "targets": 5.9,
    "carries": 0.0,
@@ -2629,11 +2629,11 @@
    "status": "ACTIVE",
    "espn": 14.3,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 15.0,
+   "usage": 15.4,
    "avg": 25.0,
    "targets": 4.4,
    "carries": 17.8,
-   "implied": 17.0
+   "implied": 17.5
   },
   {
    "id": 4688380,
@@ -2643,11 +2643,11 @@
    "status": "ACTIVE",
    "espn": 12.0,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 12.5,
+   "usage": 12.8,
    "avg": 18.3,
    "targets": 0.0,
    "carries": 3.3,
-   "implied": 17.0
+   "implied": 17.5
   },
   {
    "id": 4871023,
@@ -2657,11 +2657,11 @@
    "status": "ACTIVE",
    "espn": 11.8,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 8.5,
+   "usage": 8.7,
    "avg": 11.1,
    "targets": 6.0,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 17.5
   },
   {
    "id": 4431268,
@@ -2671,11 +2671,11 @@
    "status": "ACTIVE",
    "espn": 7.3,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 8.0,
+   "usage": 8.2,
    "avg": 8.9,
    "targets": 4.9,
    "carries": 0.7,
-   "implied": 17.0
+   "implied": 17.5
   },
   {
    "id": 4883647,
@@ -2685,11 +2685,11 @@
    "status": "ACTIVE",
    "espn": 6.8,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.8,
+   "usage": 8.0,
    "avg": 8.1,
    "targets": 5.9,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 17.5
   },
   {
    "id": 4686728,
@@ -2699,11 +2699,11 @@
    "status": "ACTIVE",
    "espn": 5.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 5.8,
+   "usage": 5.9,
    "avg": 7.4,
    "targets": 4.6,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 17.5
   },
   {
    "id": 3925357,
@@ -2713,11 +2713,11 @@
    "status": "ACTIVE",
    "espn": 5.4,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 5.7,
+   "usage": 5.9,
    "avg": 6.3,
    "targets": 4.0,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 17.5
   },
   {
    "id": 4569587,
@@ -2731,7 +2731,7 @@
    "avg": 7.4,
    "targets": 5.6,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 17.5
   },
   {
    "id": 4428557,
@@ -2745,7 +2745,7 @@
    "avg": 4.2,
    "targets": 2.6,
    "carries": 2.5,
-   "implied": 17.0
+   "implied": 17.5
   },
   {
    "id": 4038941,
@@ -2755,11 +2755,11 @@
    "status": "QUESTIONABLE",
    "espn": 16.2,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 10.2,
+   "usage": 9.4,
    "avg": 14.2,
    "targets": 0.0,
    "carries": 5.9,
-   "implied": 18.5
+   "implied": 16.5
   },
   {
    "id": 4685382,
@@ -2769,11 +2769,11 @@
    "status": "ACTIVE",
    "espn": 13.6,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 9.8,
+   "usage": 9.1,
    "avg": 9.6,
    "targets": 1.3,
    "carries": 15.7,
-   "implied": 18.5
+   "implied": 16.5
   },
   {
    "id": 4612826,
@@ -2783,11 +2783,11 @@
    "status": "ACTIVE",
    "espn": 12.2,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 9.6,
+   "usage": 8.9,
    "avg": 9.0,
    "targets": 5.4,
    "carries": 0.0,
-   "implied": 18.5
+   "implied": 16.5
   },
   {
    "id": 4430968,
@@ -2797,11 +2797,11 @@
    "status": "ACTIVE",
    "espn": 7.2,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 5.8,
+   "usage": 5.3,
    "avg": 5.1,
    "targets": 2.2,
    "carries": 5.6,
-   "implied": 18.5
+   "implied": 16.5
   },
   {
    "id": 4686612,
@@ -2811,25 +2811,25 @@
    "status": "ACTIVE",
    "espn": 6.8,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 5.7,
+   "usage": 5.3,
    "avg": 7.0,
    "targets": 4.0,
    "carries": 0.0,
-   "implied": 18.5
+   "implied": 16.5
   },
   {
    "id": 3123076,
    "name": "David Njoku",
    "team": "LAC",
    "pos": "TE",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 6.2,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 5.7,
+   "usage": 5.3,
    "avg": 5.6,
    "targets": 3.9,
    "carries": 0.0,
-   "implied": 18.5
+   "implied": 16.5
   },
   {
    "id": 4429025,
@@ -2839,11 +2839,11 @@
    "status": "ACTIVE",
    "espn": 6.1,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 3.6,
+   "usage": 3.3,
    "avg": 6.2,
    "targets": 2.3,
    "carries": 0.6,
-   "implied": 18.5
+   "implied": 16.5
   },
   {
    "id": 4596334,
@@ -2853,11 +2853,11 @@
    "status": "QUESTIONABLE",
    "espn": 6.0,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 3.6,
+   "usage": 3.3,
    "avg": 3.8,
    "targets": 1.8,
    "carries": 2.7,
-   "implied": 18.5
+   "implied": 16.5
   },
   {
    "id": 4595342,
@@ -2867,11 +2867,25 @@
    "status": "ACTIVE",
    "espn": 2.5,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 4.0,
+   "usage": 3.7,
    "avg": 5.1,
    "targets": 2.8,
    "carries": 0.0,
-   "implied": 18.5
+   "implied": 16.5
+  },
+  {
+   "id": 4240391,
+   "name": "Tommy DeVito",
+   "team": "NE",
+   "pos": "QB",
+   "status": "ACTIVE",
+   "espn": 14.1,
+   "kickoff": "2026-11-29T21:05Z",
+   "usage": 5.3,
+   "avg": 3.1,
+   "targets": 0.0,
+   "carries": 2.0,
+   "implied": 19.0
   },
   {
    "id": 4569173,
@@ -2881,11 +2895,11 @@
    "status": "ACTIVE",
    "espn": 13.0,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 7.8,
+   "usage": 8.4,
    "avg": 12.7,
    "targets": 2.7,
    "carries": 8.6,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 4427095,
@@ -2895,11 +2909,11 @@
    "status": "ACTIVE",
    "espn": 9.0,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 7.9,
+   "usage": 8.5,
    "avg": 9.6,
    "targets": 4.9,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 2991662,
@@ -2909,11 +2923,11 @@
    "status": "ACTIVE",
    "espn": 8.4,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 8.7,
+   "usage": 9.4,
    "avg": 11.3,
    "targets": 5.9,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 3046439,
@@ -2923,11 +2937,11 @@
    "status": "ACTIVE",
    "espn": 7.2,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 5.6,
+   "usage": 6.1,
    "avg": 7.7,
    "targets": 3.4,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 4831959,
@@ -2937,11 +2951,11 @@
    "status": "ACTIVE",
    "espn": 7.0,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 5.3,
+   "usage": 5.7,
    "avg": 6.5,
    "targets": 3.4,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 4431431,
@@ -2951,11 +2965,11 @@
    "status": "ACTIVE",
    "espn": 6.2,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 3.9,
+   "usage": 4.2,
    "avg": 4.8,
    "targets": 0.0,
    "carries": 8.2,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 4695193,
@@ -2965,25 +2979,11 @@
    "status": "ACTIVE",
    "espn": 5.0,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 4.6,
+   "usage": 5.0,
    "avg": 6.3,
    "targets": 3.0,
    "carries": 0.0,
-   "implied": 17.0
-  },
-  {
-   "id": 4613202,
-   "name": "Kyle Williams",
-   "team": "NE",
-   "pos": "WR",
-   "status": "ACTIVE",
-   "espn": 4.9,
-   "kickoff": "2026-11-29T21:05Z",
-   "usage": 2.1,
-   "avg": 2.8,
-   "targets": 1.3,
-   "carries": 0.0,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 4047646,
@@ -2993,11 +2993,11 @@
    "status": "DOUBTFUL",
    "espn": 0.0,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 7.2,
+   "usage": 7.8,
    "avg": 6.0,
    "targets": 6.6,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 4431452,
@@ -3011,7 +3011,7 @@
    "avg": 17.8,
    "targets": 0.0,
    "carries": 2.7,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 4432710,
@@ -3025,7 +3025,7 @@
    "avg": 4.1,
    "targets": 1.5,
    "carries": 5.5,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 4361432,
@@ -3039,7 +3039,7 @@
    "avg": 11.4,
    "targets": 3.5,
    "carries": 0.0,
-   "implied": 17.0
+   "implied": 19.0
   },
   {
    "id": 4361307,
@@ -3049,11 +3049,11 @@
    "status": "ACTIVE",
    "espn": 14.6,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 13.7,
+   "usage": 13.9,
    "avg": 14.0,
    "targets": 9.5,
    "carries": 0.4,
-   "implied": 17.2
+   "implied": 17.5
   },
   {
    "id": 4430841,
@@ -3063,11 +3063,11 @@
    "status": "QUESTIONABLE",
    "espn": 11.9,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 5.6,
+   "usage": 5.7,
    "avg": 0.4,
    "targets": 0.0,
    "carries": 1.0,
-   "implied": 17.2
+   "implied": 17.5
   },
   {
    "id": 4373626,
@@ -3077,11 +3077,11 @@
    "status": "ACTIVE",
    "espn": 8.5,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 5.9,
+   "usage": 6.0,
    "avg": 11.6,
    "targets": 1.4,
    "carries": 8.8,
-   "implied": 17.2
+   "implied": 17.5
   },
   {
    "id": 4427728,
@@ -3091,25 +3091,11 @@
    "status": "ACTIVE",
    "espn": 8.3,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 4.9,
+   "usage": 5.0,
    "avg": 4.4,
    "targets": 1.9,
    "carries": 5.6,
-   "implied": 17.2
-  },
-  {
-   "id": 4039050,
-   "name": "Devin Duvernay",
-   "team": "ARI",
-   "pos": "WR",
-   "status": "ACTIVE",
-   "espn": 0.6,
-   "kickoff": "2026-11-29T21:25Z",
-   "usage": 2.1,
-   "avg": 2.9,
-   "targets": 1.5,
-   "carries": 0.0,
-   "implied": 17.2
+   "implied": 17.5
   },
   {
    "id": 4870808,
@@ -3123,7 +3109,7 @@
    "avg": 8.2,
    "targets": 1.0,
    "carries": 12.1,
-   "implied": 17.2
+   "implied": 17.5
   },
   {
    "id": 4360761,
@@ -3137,7 +3123,7 @@
    "avg": 14.2,
    "targets": 9.6,
    "carries": 0.7,
-   "implied": 17.2
+   "implied": 17.5
   },
   {
    "id": 3045147,
@@ -3151,7 +3137,7 @@
    "avg": null,
    "targets": null,
    "carries": null,
-   "implied": 17.2
+   "implied": 17.5
   },
   {
    "id": 3045523,
@@ -3165,49 +3151,35 @@
    "avg": 7.4,
    "targets": 5.0,
    "carries": 0.0,
-   "implied": 17.2
-  },
-  {
-   "id": 11394,
-   "name": "Josh Johnson",
-   "team": "ARI",
-   "pos": "QB",
-   "status": "ACTIVE",
-   "espn": 0.0,
-   "kickoff": "2026-11-29T21:25Z",
-   "usage": 11.4,
-   "avg": 10.7,
-   "targets": 0.0,
-   "carries": 2.0,
-   "implied": 17.2
+   "implied": 17.5
   },
   {
    "id": 4430878,
    "name": "Jaxon Smith-Njigba",
    "team": "SEA",
    "pos": "WR",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 21.6,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 22.8,
+   "usage": 22.3,
    "avg": 24.6,
    "targets": 10.4,
    "carries": 0.2,
-   "implied": 21.0
+   "implied": 20.2
   },
   {
    "id": 3912547,
    "name": "Sam Darnold",
    "team": "SEA",
    "pos": "QB",
-   "status": "QUESTIONABLE",
+   "status": "ACTIVE",
    "espn": 12.5,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 14.6,
+   "usage": 14.2,
    "avg": 12.7,
    "targets": 0.0,
    "carries": 1.9,
-   "implied": 21.0
+   "implied": 20.2
   },
   {
    "id": 4426385,
@@ -3217,11 +3189,11 @@
    "status": "ACTIVE",
    "espn": 11.7,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 10.2,
+   "usage": 9.9,
    "avg": 8.3,
    "targets": 1.6,
    "carries": 15.6,
-   "implied": 21.0
+   "implied": 20.2
   },
   {
    "id": 4685512,
@@ -3231,11 +3203,11 @@
    "status": "ACTIVE",
    "espn": 8.0,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 8.3,
+   "usage": 8.1,
    "avg": 7.5,
    "targets": 2.7,
    "carries": 8.8,
-   "implied": 21.0
+   "implied": 20.2
   },
   {
    "id": 4576297,
@@ -3245,11 +3217,11 @@
    "status": "ACTIVE",
    "espn": 7.7,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 7.1,
+   "usage": 6.9,
    "avg": 8.2,
    "targets": 3.9,
    "carries": 1.2,
-   "implied": 21.0
+   "implied": 20.2
   },
   {
    "id": 4032473,
@@ -3259,11 +3231,11 @@
    "status": "ACTIVE",
    "espn": 6.3,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 5.0,
+   "usage": 4.9,
    "avg": 5.0,
    "targets": 3.7,
    "carries": 0.2,
-   "implied": 21.0
+   "implied": 20.2
   },
   {
    "id": 2977187,
@@ -3273,11 +3245,11 @@
    "status": "ACTIVE",
    "espn": 5.2,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 4.3,
+   "usage": 4.2,
    "avg": 7.1,
    "targets": 2.4,
    "carries": 0.0,
-   "implied": 21.0
+   "implied": 20.2
   },
   {
    "id": 4887558,
@@ -3287,25 +3259,25 @@
    "status": "ACTIVE",
    "espn": 0.0,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 12.9,
+   "usage": 12.6,
    "avg": 16.0,
    "targets": 1.5,
    "carries": 19.9,
-   "implied": 21.0
+   "implied": 20.2
   },
   {
    "id": 3924327,
    "name": "Drew Lock",
    "team": "SEA",
    "pos": "QB",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 0.0,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 14.9,
+   "usage": 14.5,
    "avg": 15.6,
    "targets": 0.0,
    "carries": 4.1,
-   "implied": 21.0
+   "implied": 20.2
   },
   {
    "id": 4429835,
@@ -3319,21 +3291,21 @@
    "avg": 3.0,
    "targets": 0.7,
    "carries": 1.8,
-   "implied": 21.0
+   "implied": 20.2
   },
   {
    "id": 4361741,
    "name": "Brock Purdy",
    "team": "SF",
    "pos": "QB",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 18.8,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 20.0,
+   "usage": 19.3,
    "avg": 22.8,
    "targets": 0.0,
    "carries": 2.2,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 3117251,
@@ -3343,25 +3315,25 @@
    "status": "ACTIVE",
    "espn": 18.1,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 19.7,
+   "usage": 19.0,
    "avg": 26.3,
    "targets": 3.7,
    "carries": 13.0,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 16737,
    "name": "Mike Evans",
    "team": "SF",
    "pos": "WR",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 14.9,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 16.4,
+   "usage": 15.8,
    "avg": 18.6,
    "targets": 7.1,
    "carries": 0.0,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 3040151,
@@ -3371,11 +3343,11 @@
    "status": "ACTIVE",
    "espn": 13.0,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 14.5,
+   "usage": 14.0,
    "avg": 14.1,
    "targets": 6.3,
    "carries": 0.0,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 3126486,
@@ -3385,11 +3357,11 @@
    "status": "ACTIVE",
    "espn": 10.9,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 11.5,
+   "usage": 11.1,
    "avg": 13.5,
    "targets": 3.7,
    "carries": 2.4,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 15818,
@@ -3399,11 +3371,11 @@
    "status": "ACTIVE",
    "espn": 6.9,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 9.6,
+   "usage": 9.3,
    "avg": 8.9,
    "targets": 5.3,
    "carries": 0.0,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 4696044,
@@ -3413,25 +3385,25 @@
    "status": "ACTIVE",
    "espn": 6.2,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 7.6,
+   "usage": 7.4,
    "avg": 8.8,
    "targets": 1.3,
    "carries": 9.1,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 4431466,
    "name": "Jordan Watkins",
    "team": "SF",
    "pos": "WR",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 1.1,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 6.3,
+   "usage": 6.1,
    "avg": 9.2,
    "targets": 2.7,
    "carries": 0.0,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 4710714,
@@ -3445,7 +3417,7 @@
    "avg": null,
    "targets": null,
    "carries": null,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 3043116,
@@ -3455,11 +3427,11 @@
    "status": "ACTIVE",
    "espn": 0.0,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 7.1,
+   "usage": 6.9,
    "avg": 8.2,
    "targets": 3.4,
    "carries": 0.0,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 4428209,
@@ -3473,7 +3445,7 @@
    "avg": null,
    "targets": null,
    "carries": null,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
    "id": 3895856,
@@ -3487,21 +3459,21 @@
    "avg": null,
    "targets": null,
    "carries": null,
-   "implied": 24.5
+   "implied": 23.2
   },
   {
-   "id": 4685397,
-   "name": "Jordan James",
+   "id": 4241464,
+   "name": "Mac Jones",
    "team": "SF",
-   "pos": "RB",
+   "pos": "QB",
    "status": "ACTIVE",
    "espn": 0.0,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 1.1,
-   "avg": 1.1,
-   "targets": 0.1,
-   "carries": 1.5,
-   "implied": 24.5
+   "usage": 1.8,
+   "avg": -0.1,
+   "targets": 0.0,
+   "carries": 2.8,
+   "implied": 23.2
   },
   {
    "id": 4426348,
@@ -3515,7 +3487,7 @@
    "avg": 16.8,
    "targets": 0.0,
    "carries": 6.7,
-   "implied": 24.2
+   "implied": 24.0
   },
   {
    "id": 2976212,
@@ -3529,7 +3501,7 @@
    "avg": 12.4,
    "targets": 7.0,
    "carries": 0.0,
-   "implied": 24.2
+   "implied": 24.0
   },
   {
    "id": 5081432,
@@ -3539,11 +3511,11 @@
    "status": "ACTIVE",
    "espn": 11.5,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 13.1,
+   "usage": 13.0,
    "avg": 12.3,
    "targets": 6.9,
    "carries": 0.0,
-   "implied": 24.2
+   "implied": 24.0
   },
   {
    "id": 4575131,
@@ -3553,11 +3525,11 @@
    "status": "ACTIVE",
    "espn": 11.4,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 11.1,
+   "usage": 11.0,
    "avg": 10.5,
    "targets": 2.1,
    "carries": 12.2,
-   "implied": 24.2
+   "implied": 24.0
   },
   {
    "id": 4360635,
@@ -3571,7 +3543,7 @@
    "avg": 8.0,
    "targets": 6.2,
    "carries": 0.0,
-   "implied": 24.2
+   "implied": 24.0
   },
   {
    "id": 3068267,
@@ -3585,21 +3557,21 @@
    "avg": 6.7,
    "targets": 3.0,
    "carries": 7.9,
-   "implied": 24.2
+   "implied": 24.0
   },
   {
    "id": 4567156,
    "name": "Treylon Burks",
    "team": "WSH",
    "pos": "WR",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 7.5,
    "kickoff": "2026-11-29T21:25Z",
    "usage": 7.4,
    "avg": 7.8,
    "targets": 3.7,
    "carries": 0.0,
-   "implied": 24.2
+   "implied": 24.0
   },
   {
    "id": 4697815,
@@ -3613,7 +3585,7 @@
    "avg": 7.3,
    "targets": 1.5,
    "carries": 5.8,
-   "implied": 24.2
+   "implied": 24.0
   },
   {
    "id": 3121422,
@@ -3627,7 +3599,7 @@
    "avg": 10.7,
    "targets": 4.3,
    "carries": 0.0,
-   "implied": 24.2
+   "implied": 24.0
   },
   {
    "id": 2576980,
@@ -3641,7 +3613,7 @@
    "avg": 11.5,
    "targets": 0.0,
    "carries": 2.3,
-   "implied": 24.2
+   "implied": 24.0
   },
   {
    "id": 3122840,
@@ -3651,7 +3623,7 @@
    "status": "ACTIVE",
    "espn": 19.9,
    "kickoff": "2026-11-30T01:20Z",
-   "usage": 17.9,
+   "usage": 18.0,
    "avg": 15.1,
    "targets": 0.0,
    "carries": 5.5,
@@ -3679,7 +3651,7 @@
    "status": "QUESTIONABLE",
    "espn": 13.0,
    "kickoff": "2026-11-30T01:20Z",
-   "usage": 10.0,
+   "usage": 10.1,
    "avg": 8.4,
    "targets": 5.9,
    "carries": 0.0,
@@ -3707,7 +3679,7 @@
    "status": "ACTIVE",
    "espn": 11.4,
    "kickoff": "2026-11-30T01:20Z",
-   "usage": 11.6,
+   "usage": 11.7,
    "avg": 9.8,
    "targets": 6.1,
    "carries": 4.8,
@@ -3721,7 +3693,7 @@
    "status": "ACTIVE",
    "espn": 11.1,
    "kickoff": "2026-11-30T01:20Z",
-   "usage": 14.6,
+   "usage": 14.7,
    "avg": 16.2,
    "targets": 7.5,
    "carries": 0.0,
@@ -3756,20 +3728,6 @@
    "implied": 22.5
   },
   {
-   "id": 4722893,
-   "name": "Jaleel McLaughlin",
-   "team": "CLE",
-   "pos": "RB",
-   "status": "ACTIVE",
-   "espn": 0.0,
-   "kickoff": "2026-11-30T01:20Z",
-   "usage": 4.1,
-   "avg": 4.6,
-   "targets": 1.4,
-   "carries": 2.8,
-   "implied": 22.5
-  },
-  {
    "id": 4837248,
    "name": "Fernando Mendoza",
    "team": "LV",
@@ -3777,7 +3735,7 @@
    "status": "ACTIVE",
    "espn": 16.1,
    "kickoff": "2026-11-30T01:20Z",
-   "usage": 12.3,
+   "usage": 12.4,
    "avg": 13.0,
    "targets": 0.0,
    "carries": 4.0,
@@ -3805,7 +3763,7 @@
    "status": "QUESTIONABLE",
    "espn": 15.1,
    "kickoff": "2026-11-30T01:20Z",
-   "usage": 11.0,
+   "usage": 11.1,
    "avg": 16.9,
    "targets": 6.0,
    "carries": 0.3,
@@ -3868,6 +3826,20 @@
    "implied": 18.0
   },
   {
+   "id": 4603186,
+   "name": "Jack Bech",
+   "team": "LV",
+   "pos": "WR",
+   "status": "ACTIVE",
+   "espn": 4.5,
+   "kickoff": "2026-11-30T01:20Z",
+   "usage": 9.6,
+   "avg": 8.1,
+   "targets": 6.3,
+   "carries": 0.0,
+   "implied": 18.0
+  },
+  {
    "id": 4241416,
    "name": "Chuba Hubbard",
    "team": "CAR",
@@ -3900,7 +3872,7 @@
    "name": "Tetairoa McMillan",
    "team": "CAR",
    "pos": "WR",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 13.4,
    "kickoff": "2026-12-01T01:15Z",
    "usage": 13.1,
@@ -3928,7 +3900,7 @@
    "name": "Darren Waller",
    "team": "CAR",
    "pos": "TE",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 7.2,
    "kickoff": "2026-12-01T01:15Z",
    "usage": 8.6,
@@ -3942,10 +3914,10 @@
    "name": "Tommy Tremble",
    "team": "CAR",
    "pos": "TE",
-   "status": "ACTIVE",
+   "status": "QUESTIONABLE",
    "espn": 5.8,
    "kickoff": "2026-12-01T01:15Z",
-   "usage": 5.9,
+   "usage": 6.0,
    "avg": 6.7,
    "targets": 3.4,
    "carries": 0.0,
@@ -3987,7 +3959,7 @@
    "status": "ACTIVE",
    "espn": 21.0,
    "kickoff": "2026-12-01T01:15Z",
-   "usage": 20.6,
+   "usage": 20.7,
    "avg": 23.1,
    "targets": 3.3,
    "carries": 21.0,
@@ -4001,7 +3973,7 @@
    "status": "ACTIVE",
    "espn": 14.3,
    "kickoff": "2026-12-01T01:15Z",
-   "usage": 11.5,
+   "usage": 11.6,
    "avg": 8.7,
    "targets": 0.0,
    "carries": 3.6,
@@ -4057,7 +4029,7 @@
    "status": "ACTIVE",
    "espn": 6.4,
    "kickoff": "2026-12-01T01:15Z",
-   "usage": 5.6,
+   "usage": 5.7,
    "avg": 6.5,
    "targets": 2.9,
    "carries": 0.1,

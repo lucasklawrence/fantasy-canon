@@ -1,0 +1,336 @@
+{
+ "season": 2026,
+ "week": 12,
+ "backtest": false,
+ "summary": {
+  "n": 28,
+  "espn": 6.38,
+  "usage": 6.21,
+  "blend": 6.29,
+  "lean": 6.32,
+  "avg": 6.95,
+  "disagreements": 5,
+  "usage_closer": 4,
+  "below_rate": 0.571,
+  "fade": 1,
+  "fade_hit": 0,
+  "boost": 4,
+  "boost_hit": 4
+ },
+ "by_pos": {
+  "QB": {
+   "n": 4,
+   "espn": 6.72,
+   "usage": 6.57,
+   "blend": 6.65,
+   "lean": 6.68,
+   "avg": 8.72,
+   "disagreements": 1,
+   "usage_closer": 1,
+   "below_rate": 0.75,
+   "fade": 0,
+   "fade_hit": 0,
+   "boost": 1,
+   "boost_hit": 1
+  },
+  "RB": {
+   "n": 9,
+   "espn": 7.47,
+   "usage": 6.0,
+   "blend": 6.7,
+   "lean": 6.98,
+   "avg": 7.24,
+   "disagreements": 3,
+   "usage_closer": 3,
+   "below_rate": 0.444,
+   "fade": 0,
+   "fade_hit": 0,
+   "boost": 3,
+   "boost_hit": 3
+  },
+  "WR": {
+   "n": 10,
+   "espn": 5.39,
+   "usage": 6.38,
+   "blend": 5.88,
+   "lean": 5.69,
+   "avg": 5.85,
+   "disagreements": 1,
+   "usage_closer": 0,
+   "below_rate": 0.5,
+   "fade": 1,
+   "fade_hit": 0,
+   "boost": 0,
+   "boost_hit": 0
+  },
+  "TE": {
+   "n": 5,
+   "espn": 6.14,
+   "usage": 5.98,
+   "blend": 6.06,
+   "lean": 6.09,
+   "avg": 7.2,
+   "disagreements": 0,
+   "usage_closer": 0,
+   "below_rate": 0.8,
+   "fade": 0,
+   "fade_hit": 0,
+   "boost": 0,
+   "boost_hit": 0
+  }
+ },
+ "players": [
+  {
+   "id": 4701936,
+   "name": "Matthew Golden",
+   "pos": "WR",
+   "espn": 16.7,
+   "usage": 16.9,
+   "avg": 18.8,
+   "actual": 4.9
+  },
+  {
+   "id": 4248528,
+   "name": "Christian Watson",
+   "pos": "WR",
+   "espn": 14.1,
+   "usage": 15.0,
+   "avg": 16.2,
+   "actual": 16.5
+  },
+  {
+   "id": 4036378,
+   "name": "Jordan Love",
+   "pos": "QB",
+   "espn": 13.4,
+   "usage": 15.2,
+   "avg": 21.4,
+   "actual": 8.6
+  },
+  {
+   "id": 4572680,
+   "name": "Tucker Kraft",
+   "pos": "TE",
+   "espn": 9.2,
+   "usage": 7.5,
+   "avg": 9.2,
+   "actual": 3.4
+  },
+  {
+   "id": 4431487,
+   "name": "Savion Williams",
+   "pos": "WR",
+   "espn": 6.7,
+   "usage": 5.8,
+   "avg": 7.2,
+   "actual": 3.1
+  },
+  {
+   "id": 4819231,
+   "name": "Kaleb Johnson",
+   "pos": "RB",
+   "espn": 5.4,
+   "usage": 4.9,
+   "avg": 4.9,
+   "actual": 4.2
+  },
+  {
+   "id": 4429023,
+   "name": "MarShawn Lloyd",
+   "pos": "RB",
+   "espn": 5.3,
+   "usage": 5.2,
+   "avg": 4.0,
+   "actual": 2.6
+  },
+  {
+   "id": 3149687,
+   "name": "Chris Brooks",
+   "pos": "RB",
+   "espn": 4.8,
+   "usage": 2.8,
+   "avg": 2.7,
+   "actual": 6.6
+  },
+  {
+   "id": 4430737,
+   "name": "Kyren Williams",
+   "pos": "RB",
+   "espn": 16.8,
+   "usage": 15.2,
+   "avg": 11.3,
+   "actual": 16.5
+  },
+  {
+   "id": 12483,
+   "name": "Matthew Stafford",
+   "pos": "QB",
+   "espn": 15.3,
+   "usage": 14.6,
+   "avg": 14.2,
+   "actual": 3.6
+  },
+  {
+   "id": 4429096,
+   "name": "Blake Corum",
+   "pos": "RB",
+   "espn": 13.8,
+   "usage": 14.9,
+   "avg": 15.8,
+   "actual": 28.5
+  },
+  {
+   "id": 4710855,
+   "name": "Konata Mumpfield",
+   "pos": "WR",
+   "espn": 8.5,
+   "usage": 4.8,
+   "avg": 4.4,
+   "actual": 10.9
+  },
+  {
+   "id": 2573401,
+   "name": "Tyler Higbee",
+   "pos": "TE",
+   "espn": 7.6,
+   "usage": 6.8,
+   "avg": 4.7,
+   "actual": 2.4
+  },
+  {
+   "id": 4242557,
+   "name": "Colby Parkinson",
+   "pos": "TE",
+   "espn": 7.0,
+   "usage": 6.6,
+   "avg": 8.1,
+   "actual": 1.9
+  },
+  {
+   "id": 4431611,
+   "name": "Caleb Williams",
+   "pos": "QB",
+   "espn": 16.0,
+   "usage": 19.8,
+   "avg": 15.8,
+   "actual": 25.3
+  },
+  {
+   "id": 4259545,
+   "name": "D'Andre Swift",
+   "pos": "RB",
+   "espn": 14.0,
+   "usage": 18.0,
+   "avg": 15.5,
+   "actual": 29.2
+  },
+  {
+   "id": 4685278,
+   "name": "Luther Burden III",
+   "pos": "WR",
+   "espn": 13.0,
+   "usage": 15.5,
+   "avg": 16.6,
+   "actual": 7.5
+  },
+  {
+   "id": 4431299,
+   "name": "Rome Odunze",
+   "pos": "WR",
+   "espn": 10.9,
+   "usage": 11.6,
+   "avg": 12.0,
+   "actual": 26.7
+  },
+  {
+   "id": 4723086,
+   "name": "Colston Loveland",
+   "pos": "TE",
+   "espn": 10.5,
+   "usage": 12.2,
+   "avg": 13.2,
+   "actual": -0.5
+  },
+  {
+   "id": 4608686,
+   "name": "Kyle Monangai",
+   "pos": "RB",
+   "espn": 7.8,
+   "usage": 14.7,
+   "avg": 10.2,
+   "actual": 15.9
+  },
+  {
+   "id": 2973405,
+   "name": "Kalif Raymond",
+   "pos": "WR",
+   "espn": 7.2,
+   "usage": 8.9,
+   "avg": 4.2,
+   "actual": 5.0
+  },
+  {
+   "id": 4429795,
+   "name": "Jahmyr Gibbs",
+   "pos": "RB",
+   "espn": 25.6,
+   "usage": 29.6,
+   "avg": 27.6,
+   "actual": 48.2
+  },
+  {
+   "id": 4374302,
+   "name": "Amon-Ra St. Brown",
+   "pos": "WR",
+   "espn": 17.8,
+   "usage": 15.1,
+   "avg": 17.4,
+   "actual": 21.6
+  },
+  {
+   "id": 3046779,
+   "name": "Jared Goff",
+   "pos": "QB",
+   "espn": 16.9,
+   "usage": 19.0,
+   "avg": 13.8,
+   "actual": 15.8
+  },
+  {
+   "id": 4426388,
+   "name": "Jameson Williams",
+   "pos": "WR",
+   "espn": 12.3,
+   "usage": 11.6,
+   "avg": 12.6,
+   "actual": 14.0
+  },
+  {
+   "id": 4430027,
+   "name": "Sam LaPorta",
+   "pos": "TE",
+   "espn": 10.8,
+   "usage": 10.4,
+   "avg": 6.4,
+   "actual": 14.4
+  },
+  {
+   "id": 5123663,
+   "name": "Isaac TeSlaa",
+   "pos": "WR",
+   "espn": 4.7,
+   "usage": 5.6,
+   "avg": 3.5,
+   "actual": 0.0
+  },
+  {
+   "id": 4912274,
+   "name": "Sione Vaki",
+   "pos": "RB",
+   "espn": 4.1,
+   "usage": 4.5,
+   "avg": 4.8,
+   "actual": 3.5
+  }
+ ]
+}
