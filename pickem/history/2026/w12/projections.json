@@ -1,7 +1,7 @@
 {
  "season": 2026,
  "week": 12,
- "generated": "2026-11-26T22:55+00:00",
+ "generated": "2026-11-27T04:24+00:00",
  "players": [
   {
    "id": 4701936,
@@ -1257,7 +1257,7 @@
    "status": "ACTIVE",
    "espn": 6.0,
    "kickoff": "2026-11-27T20:00Z",
-   "usage": 5.0,
+   "usage": 4.9,
    "avg": 6.6,
    "targets": 3.2,
    "carries": 0.0,
@@ -1278,6 +1278,20 @@
    "implied": 16.0
   },
   {
+   "id": 4694237,
+   "name": "Max Hurleman",
+   "team": "PIT",
+   "pos": "WR",
+   "status": "ACTIVE",
+   "espn": 1.1,
+   "kickoff": "2026-11-27T20:00Z",
+   "usage": 10.7,
+   "avg": 18.1,
+   "targets": 7.0,
+   "carries": 0.0,
+   "implied": 16.0
+  },
+  {
    "id": 4430807,
    "name": "Bijan Robinson",
    "team": "ATL",
@@ -1285,7 +1299,7 @@
    "status": "ACTIVE",
    "espn": 17.7,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 16.5,
+   "usage": 16.4,
    "avg": 17.3,
    "targets": 4.8,
    "carries": 17.9,
@@ -1327,7 +1341,7 @@
    "status": "ACTIVE",
    "espn": 8.3,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.9,
+   "usage": 7.8,
    "avg": 7.0,
    "targets": 5.0,
    "carries": 0.0,
@@ -1383,7 +1397,7 @@
    "status": "ACTIVE",
    "espn": 14.6,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 15.1,
+   "usage": 15.0,
    "avg": 8.3,
    "targets": 8.2,
    "carries": 1.0,
@@ -1425,7 +1439,7 @@
    "status": "ACTIVE",
    "espn": 9.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 11.1,
+   "usage": 11.0,
    "avg": 13.0,
    "targets": 5.5,
    "carries": 5.4,
@@ -1453,7 +1467,7 @@
    "status": "ACTIVE",
    "espn": 5.7,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 7.9,
+   "usage": 7.8,
    "avg": 6.7,
    "targets": 4.6,
    "carries": 0.0,
@@ -1509,7 +1523,7 @@
    "status": "ACTIVE",
    "espn": 24.3,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 30.4,
+   "usage": 30.3,
    "avg": 30.5,
    "targets": 0.0,
    "carries": 2.0,
@@ -1607,7 +1621,7 @@
    "status": "ACTIVE",
    "espn": 15.2,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 19.0,
+   "usage": 18.9,
    "avg": 14.3,
    "targets": 8.1,
    "carries": 0.0,
@@ -1621,7 +1635,7 @@
    "status": "ACTIVE",
    "espn": 11.3,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 12.6,
+   "usage": 12.5,
    "avg": 6.9,
    "targets": 1.8,
    "carries": 15.0,
@@ -1957,11 +1971,11 @@
    "status": "ACTIVE",
    "espn": 14.0,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 11.5,
+   "usage": 11.3,
    "avg": 9.6,
    "targets": 3.0,
    "carries": 15.5,
-   "implied": 17.5
+   "implied": 17.0
   },
   {
    "id": 4433971,
@@ -1971,11 +1985,11 @@
    "status": "ACTIVE",
    "espn": 13.6,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 9.4,
+   "usage": 9.2,
    "avg": 7.9,
    "targets": 0.0,
    "carries": 2.0,
-   "implied": 17.5
+   "implied": 17.0
   },
   {
    "id": 4869645,
@@ -1985,11 +1999,11 @@
    "status": "ACTIVE",
    "espn": 10.6,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 12.4,
+   "usage": 12.1,
    "avg": 9.1,
    "targets": 8.6,
    "carries": 0.0,
-   "implied": 17.5
+   "implied": 17.0
   },
   {
    "id": 4569603,
@@ -1999,11 +2013,11 @@
    "status": "ACTIVE",
    "espn": 8.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 6.7,
+   "usage": 6.6,
    "avg": 9.9,
    "targets": 4.5,
    "carries": 1.0,
-   "implied": 17.5
+   "implied": 17.0
   },
   {
    "id": 4367209,
@@ -2013,11 +2027,11 @@
    "status": "ACTIVE",
    "espn": 7.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 6.1,
+   "usage": 6.0,
    "avg": 3.7,
    "targets": 4.8,
    "carries": 0.0,
-   "implied": 17.5
+   "implied": 17.0
   },
   {
    "id": 4682745,
@@ -2031,7 +2045,7 @@
    "avg": 1.4,
    "targets": 0.9,
    "carries": 3.9,
-   "implied": 17.5
+   "implied": 17.0
   },
   {
    "id": 4869961,
@@ -2041,11 +2055,11 @@
    "status": "ACTIVE",
    "espn": 5.4,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 3.9,
+   "usage": 3.8,
    "avg": 3.6,
    "targets": 3.3,
    "carries": 0.2,
-   "implied": 17.5
+   "implied": 17.0
   },
   {
    "id": 4429160,
@@ -2059,7 +2073,7 @@
    "avg": 8.2,
    "targets": 3.6,
    "carries": 10.4,
-   "implied": 17.5
+   "implied": 17.0
   },
   {
    "id": 4242512,
@@ -2073,7 +2087,7 @@
    "avg": 15.8,
    "targets": 0.0,
    "carries": 3.5,
-   "implied": 17.5
+   "implied": 17.0
   },
   {
    "id": 4262921,
@@ -2083,7 +2097,7 @@
    "status": "ACTIVE",
    "espn": 20.1,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 19.9,
+   "usage": 19.8,
    "avg": 13.3,
    "targets": 10.6,
    "carries": 0.4,
@@ -2363,7 +2377,7 @@
    "status": "ACTIVE",
    "espn": 17.4,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 16.6,
+   "usage": 16.5,
    "avg": 14.8,
    "targets": 4.5,
    "carries": 15.7,
@@ -2391,7 +2405,7 @@
    "status": "ACTIVE",
    "espn": 16.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 16.9,
+   "usage": 16.8,
    "avg": 12.2,
    "targets": 0.0,
    "carries": 5.5,
@@ -2503,11 +2517,11 @@
    "status": "ACTIVE",
    "espn": 15.5,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 11.8,
+   "usage": 12.0,
    "avg": 12.7,
    "targets": 0.0,
    "carries": 0.7,
-   "implied": 22.0
+   "implied": 22.5
   },
   {
    "id": 4569618,
@@ -2517,11 +2531,11 @@
    "status": "ACTIVE",
    "espn": 14.1,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 15.1,
+   "usage": 15.3,
    "avg": 10.3,
    "targets": 8.9,
    "carries": 0.0,
-   "implied": 22.0
+   "implied": 22.5
   },
   {
    "id": 4427366,
@@ -2531,11 +2545,11 @@
    "status": "ACTIVE",
    "espn": 13.8,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 13.9,
+   "usage": 14.2,
    "avg": 13.5,
    "targets": 3.5,
    "carries": 15.6,
-   "implied": 22.0
+   "implied": 22.5
   },
   {
    "id": 4597500,
@@ -2545,11 +2559,11 @@
    "status": "ACTIVE",
    "espn": 10.2,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 8.9,
+   "usage": 9.0,
    "avg": 10.3,
    "targets": 5.9,
    "carries": 0.0,
-   "implied": 22.0
+   "implied": 22.5
   },
   {
    "id": 4723820,
@@ -2559,11 +2573,11 @@
    "status": "QUESTIONABLE",
    "espn": 9.0,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 15.9,
+   "usage": 16.2,
    "avg": 15.7,
    "targets": 7.4,
    "carries": 0.0,
-   "implied": 22.0
+   "implied": 22.5
   },
   {
    "id": 4685247,
@@ -2573,11 +2587,11 @@
    "status": "ACTIVE",
    "espn": 8.2,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 9.5,
+   "usage": 9.7,
    "avg": 10.9,
    "targets": 1.3,
    "carries": 12.5,
-   "implied": 22.0
+   "implied": 22.5
   },
   {
    "id": 4808766,
@@ -2587,11 +2601,11 @@
    "status": "ACTIVE",
    "espn": 6.1,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 5.2,
+   "usage": 5.3,
    "avg": 4.4,
    "targets": 2.9,
    "carries": 0.0,
-   "implied": 22.0
+   "implied": 22.5
   },
   {
    "id": 5083315,
@@ -2601,11 +2615,11 @@
    "status": "ACTIVE",
    "espn": 5.1,
    "kickoff": "2026-11-29T18:00Z",
-   "usage": 4.7,
+   "usage": 4.8,
    "avg": 4.9,
    "targets": 2.8,
    "carries": 0.0,
-   "implied": 22.0
+   "implied": 22.5
   },
   {
    "id": 4695404,
@@ -2619,7 +2633,7 @@
    "avg": 0.4,
    "targets": 0.0,
    "carries": 0.5,
-   "implied": 22.0
+   "implied": 22.5
   },
   {
    "id": 3916148,
@@ -2769,7 +2783,7 @@
    "status": "ACTIVE",
    "espn": 13.6,
    "kickoff": "2026-11-29T21:05Z",
-   "usage": 9.1,
+   "usage": 9.0,
    "avg": 9.6,
    "targets": 1.3,
    "carries": 15.7,
@@ -3161,7 +3175,7 @@
    "status": "QUESTIONABLE",
    "espn": 21.6,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 22.3,
+   "usage": 22.2,
    "avg": 24.6,
    "targets": 10.4,
    "carries": 0.2,
@@ -3203,7 +3217,7 @@
    "status": "ACTIVE",
    "espn": 8.0,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 8.1,
+   "usage": 8.0,
    "avg": 7.5,
    "targets": 2.7,
    "carries": 8.8,
@@ -3301,7 +3315,7 @@
    "status": "QUESTIONABLE",
    "espn": 18.8,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 19.3,
+   "usage": 19.2,
    "avg": 22.8,
    "targets": 0.0,
    "carries": 2.2,
@@ -3483,7 +3497,7 @@
    "status": "ACTIVE",
    "espn": 22.0,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 21.5,
+   "usage": 21.4,
    "avg": 16.8,
    "targets": 0.0,
    "carries": 6.7,
@@ -3581,7 +3595,7 @@
    "status": "ACTIVE",
    "espn": 1.7,
    "kickoff": "2026-11-29T21:25Z",
-   "usage": 6.2,
+   "usage": 6.1,
    "avg": 7.3,
    "targets": 1.5,
    "carries": 5.8,
@@ -3623,7 +3637,7 @@
    "status": "ACTIVE",
    "espn": 19.9,
    "kickoff": "2026-11-30T01:20Z",
-   "usage": 18.0,
+   "usage": 17.9,
    "avg": 15.1,
    "targets": 0.0,
    "carries": 5.5,
@@ -3679,7 +3693,7 @@
    "status": "ACTIVE",
    "espn": 11.4,
    "kickoff": "2026-11-30T01:20Z",
-   "usage": 11.7,
+   "usage": 11.6,
    "avg": 9.8,
    "targets": 6.1,
    "carries": 4.8,
@@ -3693,7 +3707,7 @@
    "status": "ACTIVE",
    "espn": 11.1,
    "kickoff": "2026-11-30T01:20Z",
-   "usage": 14.7,
+   "usage": 14.6,
    "avg": 16.2,
    "targets": 7.5,
    "carries": 0.0,
@@ -3763,7 +3777,7 @@
    "status": "QUESTIONABLE",
    "espn": 15.1,
    "kickoff": "2026-11-30T01:20Z",
-   "usage": 11.1,
+   "usage": 11.0,
    "avg": 16.9,
    "targets": 6.0,
    "carries": 0.3,
@@ -3938,20 +3952,6 @@
    "implied": 20.2
   },
   {
-   "id": 4430034,
-   "name": "Xavier Legette",
-   "team": "CAR",
-   "pos": "WR",
-   "status": "ACTIVE",
-   "espn": 0.0,
-   "kickoff": "2026-12-01T01:15Z",
-   "usage": 4.9,
-   "avg": 4.2,
-   "targets": 3.1,
-   "carries": 0.0,
-   "implied": 20.2
-  },
-  {
    "id": 4596448,
    "name": "Bucky Irving",
    "team": "TB",
@@ -3959,7 +3959,7 @@
    "status": "ACTIVE",
    "espn": 21.0,
    "kickoff": "2026-12-01T01:15Z",
-   "usage": 20.7,
+   "usage": 20.6,
    "avg": 23.1,
    "targets": 3.3,
    "carries": 21.0,
@@ -3973,7 +3973,7 @@
    "status": "ACTIVE",
    "espn": 14.3,
    "kickoff": "2026-12-01T01:15Z",
-   "usage": 11.6,
+   "usage": 11.5,
    "avg": 8.7,
    "targets": 0.0,
    "carries": 3.6,

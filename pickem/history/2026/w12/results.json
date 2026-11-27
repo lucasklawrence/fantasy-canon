@@ -4,33 +4,27 @@
  "complete": false,
  "games": [
   {
-   "id": "401873080",
-   "kickoff": "2026-11-26T21:30Z",
-   "away": "PHI",
-   "home": "DAL",
+   "id": "401873082",
+   "kickoff": "2026-11-27T01:20Z",
+   "away": "KC",
+   "home": "BUF",
    "winner": null,
    "score": {
-    "away": "3",
-    "home": "14"
+    "away": "10",
+    "home": "10"
    },
    "fav": "home",
-   "fav_p": 0.792,
+   "fav_p": 0.582,
    "fpi_fav": "home",
    "flags": [
     {
-     "kind": "qb",
-     "side": "away",
-     "sev": "high",
-     "vs_fav": false
-    },
-    {
-     "kind": "move",
-     "side": "home",
-     "sev": "med",
+     "kind": "weather",
+     "side": "both",
+     "sev": "low",
      "vs_fav": false
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873081",
@@ -68,23 +62,29 @@
    "snapshot": "2026-11-24T23:23+00:00"
   },
   {
-   "id": "401873082",
-   "kickoff": "2026-11-27T01:20Z",
-   "away": "KC",
-   "home": "BUF",
-   "winner": null,
+   "id": "401873080",
+   "kickoff": "2026-11-26T21:30Z",
+   "away": "PHI",
+   "home": "DAL",
+   "winner": "away",
    "score": {
-    "away": "0",
-    "home": "0"
+    "away": "39",
+    "home": "38"
    },
    "fav": "home",
-   "fav_p": 0.575,
+   "fav_p": 0.792,
    "fpi_fav": "home",
    "flags": [
     {
-     "kind": "weather",
-     "side": "both",
-     "sev": "low",
+     "kind": "qb",
+     "side": "away",
+     "sev": "high",
+     "vs_fav": false
+    },
+    {
+     "kind": "move",
+     "side": "home",
+     "sev": "med",
      "vs_fav": false
     }
    ],
@@ -130,8 +130,8 @@
     "home": "0"
    },
    "fav": "away",
-   "fav_p": 0.586,
-   "fpi_fav": "away",
+   "fav_p": 0.689,
+   "fpi_fav": "home",
    "flags": [
     {
      "kind": "move",
@@ -140,13 +140,19 @@
      "vs_fav": false
     },
     {
+     "kind": "fpi",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": true
+    },
+    {
      "kind": "weather",
      "side": "both",
      "sev": "low",
      "vs_fav": false
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873087",
@@ -159,23 +165,23 @@
     "home": "0"
    },
    "fav": "home",
-   "fav_p": 0.825,
+   "fav_p": 0.816,
    "fpi_fav": "home",
    "flags": [
-    {
-     "kind": "ol",
-     "side": "away",
-     "sev": "med",
-     "vs_fav": false
-    },
     {
      "kind": "move",
      "side": "home",
      "sev": "med",
      "vs_fav": false
+    },
+    {
+     "kind": "weather",
+     "side": "both",
+     "sev": "low",
+     "vs_fav": false
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873088",
@@ -188,7 +194,7 @@
     "home": "0"
    },
    "fav": "away",
-   "fav_p": 0.727,
+   "fav_p": 0.713,
    "fpi_fav": "home",
    "flags": [
     {
@@ -216,7 +222,7 @@
      "vs_fav": true
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873089",
@@ -229,7 +235,7 @@
     "home": "0"
    },
    "fav": "away",
-   "fav_p": 0.64,
+   "fav_p": 0.68,
    "fpi_fav": "away",
    "flags": [
     {
@@ -245,7 +251,7 @@
      "vs_fav": false
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873084",
@@ -258,7 +264,7 @@
     "home": "0"
    },
    "fav": "home",
-   "fav_p": 0.74,
+   "fav_p": 0.727,
    "fpi_fav": "home",
    "flags": [
     {
@@ -274,13 +280,19 @@
      "vs_fav": false
     },
     {
+     "kind": "fpi",
+     "side": "home",
+     "sev": "med",
+     "vs_fav": false
+    },
+    {
      "kind": "rest",
      "side": "away",
      "sev": "low",
      "vs_fav": true
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873090",
@@ -303,7 +315,7 @@
      "vs_fav": false
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873085",
@@ -316,15 +328,9 @@
     "home": "0"
    },
    "fav": "home",
-   "fav_p": 0.734,
+   "fav_p": 0.738,
    "fpi_fav": "home",
    "flags": [
-    {
-     "kind": "qb",
-     "side": "away",
-     "sev": "med",
-     "vs_fav": false
-    },
     {
      "kind": "move",
      "side": "home",
@@ -336,9 +342,15 @@
      "side": "home",
      "sev": "med",
      "vs_fav": false
+    },
+    {
+     "kind": "weather",
+     "side": "both",
+     "sev": "low",
+     "vs_fav": false
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873093",
@@ -350,30 +362,48 @@
     "away": "0",
     "home": "0"
    },
-   "fav": "home",
-   "fav_p": 0.51,
+   "fav": "away",
+   "fav_p": 0.555,
    "fpi_fav": "home",
    "flags": [
     {
      "kind": "qb",
      "side": "home",
      "sev": "high",
+     "vs_fav": false
+    },
+    {
+     "kind": "flip",
+     "side": "away",
+     "sev": "high",
+     "vs_fav": false
+    },
+    {
+     "kind": "unit",
+     "side": "away",
+     "sev": "med",
      "vs_fav": true
+    },
+    {
+     "kind": "move",
+     "side": "away",
+     "sev": "med",
+     "vs_fav": false
     },
     {
      "kind": "fpi",
      "side": "home",
      "sev": "med",
-     "vs_fav": false
+     "vs_fav": true
     },
     {
      "kind": "rest",
      "side": "away",
      "sev": "low",
-     "vs_fav": true
+     "vs_fav": false
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873092",
@@ -386,7 +416,7 @@
     "home": "0"
    },
    "fav": "away",
-   "fav_p": 0.747,
+   "fav_p": 0.748,
    "fpi_fav": "away",
    "flags": [
     {
@@ -408,7 +438,7 @@
      "vs_fav": true
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873091",
@@ -421,7 +451,7 @@
     "home": "0"
    },
    "fav": "home",
-   "fav_p": 0.617,
+   "fav_p": 0.58,
    "fpi_fav": "home",
    "flags": [
     {
@@ -431,13 +461,19 @@
      "vs_fav": false
     },
     {
-     "kind": "ol",
-     "side": "away",
+     "kind": "qb",
+     "side": "home",
+     "sev": "high",
+     "vs_fav": true
+    },
+    {
+     "kind": "move",
+     "side": "home",
      "sev": "med",
      "vs_fav": false
     },
     {
-     "kind": "move",
+     "kind": "fpi",
      "side": "home",
      "sev": "med",
      "vs_fav": false
@@ -449,7 +485,7 @@
      "vs_fav": true
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873086",
@@ -462,7 +498,7 @@
     "home": "0"
    },
    "fav": "home",
-   "fav_p": 0.658,
+   "fav_p": 0.681,
    "fpi_fav": "home",
    "flags": [
     {
@@ -484,7 +520,7 @@
      "vs_fav": false
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   },
   {
    "id": "401873094",
@@ -497,7 +533,7 @@
     "home": "0"
    },
    "fav": "home",
-   "fav_p": 0.582,
+   "fav_p": 0.586,
    "fpi_fav": "home",
    "flags": [
     {
@@ -505,15 +541,9 @@
      "side": "home",
      "sev": "med",
      "vs_fav": false
-    },
-    {
-     "kind": "weather",
-     "side": "both",
-     "sev": "low",
-     "vs_fav": false
     }
    ],
-   "snapshot": "2026-11-24T23:23+00:00"
+   "snapshot": "2026-11-26T22:55+00:00"
   }
  ]
 }
